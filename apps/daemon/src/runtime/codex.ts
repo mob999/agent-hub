@@ -311,8 +311,7 @@ export class CodexAdapter implements AgentAdapter {
       "--cd",
       input.workspacePath,
       "--skip-git-repo-check",
-      "--sandbox",
-      "workspace-write",
+      "--dangerously-bypass-approvals-and-sandbox",
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {

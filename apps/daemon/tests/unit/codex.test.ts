@@ -103,8 +103,7 @@ describe("CodexAdapter", () => {
       "--cd",
       "/tmp/agent-workspace",
       "--skip-git-repo-check",
-      "--sandbox",
-      "workspace-write",
+      "--dangerously-bypass-approvals-and-sandbox",
       "-",
     ]);
     expect(call.options).toMatchObject({

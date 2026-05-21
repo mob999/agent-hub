@@ -150,6 +150,27 @@ function mapCodexJsonEvent(
   }
 
   const createdAt = nowIsoDateTime();
+  const item = readRecordProperty(record, ["item"]);
+  const itemType =
+    item === undefined ? undefined : readStringProperty(item, ["type"]);
+  const itemText =
+    item === undefined
+      ? undefined
+      : toText(item.text) ?? toText(item.content) ?? toText(item.delta);
+
+  if (
+    itemText !== undefined &&
+    type === "item.completed" &&
+    itemType === "agent_message"
+  ) {
+    return {
+      type: "message.delta",
+      runId,
+      content: itemText,
+      createdAt,
+    };
+  }
+
   const content = toText(record.delta) ?? toText(record.content) ?? toText(record.text);
 
   if (
@@ -292,8 +313,6 @@ export class CodexAdapter implements AgentAdapter {
       "--skip-git-repo-check",
       "--sandbox",
       "workspace-write",
-      "--ask-for-approval",
-      "never",
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {
@@ -411,4 +430,3 @@ export function createCodexAdapter(
 ): CodexAdapter {
   return new CodexAdapter(options);
 }
-

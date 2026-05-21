@@ -105,8 +105,6 @@ describe("CodexAdapter", () => {
       "--skip-git-repo-check",
       "--sandbox",
       "workspace-write",
-      "--ask-for-approval",
-      "never",
       "-",
     ]);
     expect(call.options).toMatchObject({
@@ -177,6 +175,34 @@ describe("CodexAdapter", () => {
         expect.objectContaining({
           type: "run.completed",
           status: "succeeded",
+        }),
+      ]),
+    );
+  });
+
+  it("maps real Codex agent message item events", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new CodexAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(adapter.run(createRunInput()));
+
+    calls[0].process.stdout.write(
+      `${JSON.stringify({
+        type: "item.completed",
+        item: {
+          id: "item_0",
+          type: "agent_message",
+          text: "hello-agenthub",
+        },
+      })}\n`,
+    );
+    calls[0].process.close(0);
+
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "message.delta",
+          runId: "run_1",
+          content: "hello-agenthub",
         }),
       ]),
     );
@@ -259,4 +285,3 @@ describe("CodexAdapter", () => {
     expect(calls[0].process.killedWith).toBe("SIGTERM");
   });
 });
-

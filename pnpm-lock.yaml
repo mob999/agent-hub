@@ -46,7 +46,11 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  apps/daemon: {}
+  apps/daemon:
+    dependencies:
+      '@agent-hub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
 
   apps/web:
     dependencies:
@@ -96,50 +100,15 @@ importers:
 
   apps/worker: {}
 
-  packages/agent-adapters:
-    dependencies:
-      '@agent-hub/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/artifacts:
-    dependencies:
-      '@agent-hub/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/config: {}
+  packages/core: {}
 
   packages/db: {}
 
-  packages/logger:
+  packages/server:
     dependencies:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
-
-  packages/orchestrator:
-    dependencies:
-      '@agent-hub/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/protocol: {}
-
-  packages/sdk:
-    dependencies:
-      '@agent-hub/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/ui:
-    dependencies:
-      react:
-        specifier: ^19.0.0
-        version: 19.2.6
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.6(react@19.2.6)
 
 packages:
 

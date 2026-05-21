@@ -1,0 +1,25 @@
+{
+  "name": "@agent-hub/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node-only AgentHub server utilities",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "dependencies": {
+    "pino": "^10.3.1"
+  }
+}
+

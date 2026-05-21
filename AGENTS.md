@@ -90,6 +90,7 @@ daemon 不负责聊天历史主存储、用户系统、计费、全局权限或�
 - pnpm，用于依赖管理和 workspace 管理。
 - pnpm workspace，用于组织 `apps/*` 和 `packages/*`。
 - Turborepo，用于 monorepo 任务编排和缓存。
+- Vitest，用于单元测试。
 - TypeScript project references，可在需要时用于跨包类型检查。
 - 根目录 `package.json` 必须声明 `packageManager`，例如 `pnpm@10.x`。
 - 内部包之间优先使用 `workspace:*` 依赖。
@@ -183,7 +184,36 @@ agent-hub/
   pnpm-workspace.yaml
   turbo.json
   tsconfig.base.json
+  vitest.config.ts
 ```
+
+## 测试约定
+
+项目统一使用 Vitest。根目录提供以下测试命令：
+
+```bash
+pnpm test
+pnpm test:coverage
+pnpm check
+```
+
+各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。测试文件放在对应 app 或 package 的 `src` 目录下，命名为 `*.test.ts`、`*.spec.ts`、`*.test.tsx` 或 `*.spec.tsx`。
+
+优先为这些代码补单测：
+
+- 有明确业务规则的代码，例如 Run 状态流转、权限判断、Workflow 编排和 Orchestrator 分工。
+- 有分支和边界条件的纯函数，例如协议转换、Artifact 类型判断、配置解析和路径处理。
+- 外部系统适配层，例如 Agent adapter 的入参/出参映射、错误归一化和重试策略。
+- 安全相关逻辑，例如 token 脱敏、授权 workspace 判断、命令参数拼接。
+- 曾经出过 bug 或后续会频繁变动的代码。
+
+以下代码不要求一开始就补单测：
+
+- 简单 re-export。
+- 没有逻辑的类型定义。
+- 脚手架样板代码。
+- 纯静态 UI 展示。
+- 很薄的框架 glue code。
 
 ## 初始实现顺序
 

@@ -1,5 +1,6 @@
 import pino, {
   type Bindings,
+  type DestinationStream,
   type Logger,
   type LoggerOptions,
 } from "pino";
@@ -19,6 +20,7 @@ export type LogLevel =
 export interface CreateLoggerOptions
   extends Omit<LoggerOptions, "level" | "redact"> {
   bindings?: LogBindings;
+  destination?: DestinationStream;
   level?: LogLevel;
   redact?: LoggerOptions["redact"];
   useDefaultRedaction?: boolean;
@@ -74,6 +76,7 @@ function resolveRedaction(
 export function createLogger(options: CreateLoggerOptions = {}): AgentHubLogger {
   const {
     bindings,
+    destination,
     level,
     name = defaultLoggerName,
     redact,
@@ -82,17 +85,20 @@ export function createLogger(options: CreateLoggerOptions = {}): AgentHubLogger 
     ...pinoOptions
   } = options;
 
-  const baseLogger = pino({
-    ...pinoOptions,
-    name,
-    level: resolveLevel(level),
-    redact: resolveRedaction(redact, useDefaultRedaction),
-    serializers: {
-      err: pino.stdSerializers.err,
-      error: pino.stdSerializers.err,
-      ...serializers,
+  const baseLogger = pino(
+    {
+      ...pinoOptions,
+      name,
+      level: resolveLevel(level),
+      redact: resolveRedaction(redact, useDefaultRedaction),
+      serializers: {
+        err: pino.stdSerializers.err,
+        error: pino.stdSerializers.err,
+        ...serializers,
+      },
     },
-  });
+    destination,
+  );
 
   return bindings === undefined ? baseLogger : baseLogger.child(bindings);
 }

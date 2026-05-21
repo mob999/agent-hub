@@ -7,15 +7,19 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
+    "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
     "typecheck": "turbo typecheck",
-    "check": "pnpm lint && pnpm typecheck"
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "packageManager": "pnpm@10.15.0",
   "type": "module",
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.7",
     "tsx": "^4.22.3",
     "turbo": "^2.9.14",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

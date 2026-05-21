@@ -18,9 +18,9 @@ export default defineConfig({
     },
     globals: false,
     include: [
-      "test/**/*.{test,spec}.{ts,tsx}",
-      "apps/**/test/**/*.{test,spec}.{ts,tsx}",
-      "packages/**/test/**/*.{test,spec}.{ts,tsx}",
+      "tests/**/*.{test,spec}.{ts,tsx}",
+      "apps/**/tests/**/*.{test,spec}.{ts,tsx}",
+      "packages/**/tests/**/*.{test,spec}.{ts,tsx}",
     ],
     passWithNoTests: true,
   },

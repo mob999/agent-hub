@@ -101,7 +101,7 @@ pnpm check         # 运行 lint、typecheck 和 test
 
 ## 测试说明
 
-项目使用 Vitest 作为单元测试框架。测试文件放在对应 app 或 package 的 `test` 目录下，文件名使用：
+项目使用 Vitest 作为单元测试框架。测试文件放在对应 app 或 package 的 `tests` 目录下，文件名使用：
 
 ```txt
 *.test.ts

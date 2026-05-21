@@ -59,11 +59,45 @@ pnpm@10.15.0
 pnpm install
 ```
 
+## 本地基础设施
+
+开发环境使用 Docker Compose 启动 PostgreSQL 和 Redis。数据库和队列服务只作为本地依赖，不包含应用进程。
+
+```bash
+pnpm infra:up
+```
+
+默认连接信息在 [.env.example](.env.example) 中：
+
+```txt
+DATABASE_URL=postgres://agent_hub:agent_hub@localhost:5432/agent_hub
+REDIS_URL=redis://localhost:6379
+```
+
+常用基础设施命令：
+
+```bash
+pnpm infra:up     # 启动 PostgreSQL 和 Redis
+pnpm infra:down   # 停止服务，保留数据卷
+pnpm infra:logs   # 查看服务日志
+pnpm infra:reset  # 停止服务并删除数据卷
+```
+
+如果只是第一次启动开发环境，推荐流程是：
+
+```bash
+pnpm install
+pnpm infra:up
+pnpm dev
+```
+
 ## 常用命令
 
 ```bash
 pnpm dev           # 启动所有带 dev 脚本的 workspace
 pnpm build         # 构建所有 workspace
+pnpm infra:up      # 启动本地 PostgreSQL 和 Redis
+pnpm infra:down    # 停止本地基础设施
 pnpm lint          # 运行 lint
 pnpm test          # 运行单元测试
 pnpm test:coverage # 运行单元测试并输出覆盖率

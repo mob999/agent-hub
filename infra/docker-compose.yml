@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: agent-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agent_hub
+      POSTGRES_USER: agent_hub
+      POSTGRES_PASSWORD: agent_hub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_hub -d agent_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8
+    container_name: agent-hub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
+

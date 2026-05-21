@@ -117,6 +117,14 @@ daemon 不负责聊天历史主存储、用户系统、计费、全局权限或�
 - SSE 和 WebSocket，用于实时更新
 - S3 兼容对象存储，用于保存生成产物
 
+### 本地基础设施
+
+- 开发环境使用 Docker Compose 启动 PostgreSQL 和 Redis。
+- PostgreSQL 默认数据库、用户和密码均为 `agent_hub`。
+- 本地默认 `DATABASE_URL` 为 `postgres://agent_hub:agent_hub@localhost:5432/agent_hub`。
+- 本地默认 `REDIS_URL` 为 `redis://localhost:6379`。
+- `pnpm infra:down` 只停止服务并保留数据卷；`pnpm infra:reset` 会删除数据卷。
+
 ### Daemon
 
 - TypeScript
@@ -176,6 +184,7 @@ agent-hub/
   scripts/                # 开发、检查、构建、发布脚本
   docs/                   # 架构、协议、daemon、适配器和部署文档
 
+  .env.example
   .gitignore
   AGENTS.md
   README.md
@@ -185,6 +194,30 @@ agent-hub/
   turbo.json
   tsconfig.base.json
   vitest.config.ts
+```
+
+## 本地开发基础设施
+
+本地开发依赖由 `infra/docker-compose.yml` 管理，目前包含：
+
+- PostgreSQL，用于业务数据。
+- Redis，用于队列、缓存和实时任务协调。
+
+根目录提供以下命令：
+
+```bash
+pnpm infra:up
+pnpm infra:down
+pnpm infra:logs
+pnpm infra:reset
+```
+
+默认开发流程：
+
+```bash
+pnpm install
+pnpm infra:up
+pnpm dev
 ```
 
 ## 测试约定

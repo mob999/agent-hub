@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
     "lint": "turbo lint",
     "test": "turbo test",
     "test:coverage": "turbo test:coverage",

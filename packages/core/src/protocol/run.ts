@@ -10,6 +10,9 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
+export type RunLogStream = "stdout" | "stderr";
+export type ToolCallStatus = "succeeded" | "failed";
+
 export interface AgentRun {
   id: RunId;
   agentId: AgentId;
@@ -37,6 +40,30 @@ export type RunEvent =
       type: "message.delta";
       runId: RunId;
       content: string;
+      createdAt: IsoDateTime;
+    }
+  | {
+      type: "log.line";
+      runId: RunId;
+      stream: RunLogStream;
+      line: string;
+      createdAt: IsoDateTime;
+    }
+  | {
+      type: "tool.call.started";
+      runId: RunId;
+      toolCallId: string;
+      name: string;
+      input?: unknown;
+      createdAt: IsoDateTime;
+    }
+  | {
+      type: "tool.call.completed";
+      runId: RunId;
+      toolCallId: string;
+      status: ToolCallStatus;
+      output?: unknown;
+      error?: string;
       createdAt: IsoDateTime;
     }
   | {

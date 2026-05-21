@@ -224,7 +224,7 @@ pnpm test:coverage
 pnpm check
 ```
 
-各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。测试文件放在对应 app 或 package 的 `tests` 目录下，命名为 `*.test.ts`、`*.spec.ts`、`*.test.tsx` 或 `*.spec.tsx`。
+各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。单元测试文件放在对应 app 或 package 的 `tests/unit` 目录下，命名为 `<subject>.test.ts`、`<subject>.spec.ts`、`<subject>.test.tsx` 或 `<subject>.spec.tsx`，例如 `tests/unit/agent.test.ts`。
 
 优先为这些代码补单测：
 

@@ -144,42 +144,45 @@ Web / Desktop / Mobile
   -> UI 渲染消息和内联产物
 ```
 
-## 初始项目结构
+## 当前项目结构
 
-项目采用 TypeScript monorepo。这里的目录结构只约束运行边界和包边界，不提前规定各应用内部的 `src` 组织方式。具体页面、模块、hooks、routes、components 等目录应在实现阶段根据实际代码演进。
+项目采用 TypeScript monorepo。这里记录当前仓库真实存在的包边界和运行边界，不把各应用内部目录写死。具体页面、模块、hooks、routes、components 等目录应在实现阶段根据实际代码演进。
 
 依赖管理统一使用 pnpm。根目录保留 `pnpm-workspace.yaml`，workspace 范围默认覆盖 `apps/*` 和 `packages/*`。
 
 ```txt
 agent-hub/
   apps/
-    web/                  # Vite React 静态 SPA
     api/                  # Hono API 服务
-    worker/               # 后台长任务执行器
     daemon/               # 用户本地轻量服务
-    desktop/              # 预留：桌面客户端壳和 daemon 管理
+    desktop/              # 预留：桌面客户端壳和 daemon 管理，目前为占位目录
     mobile/               # 预留：移动端客户端
+    web/                  # Vite React 静态 SPA
+    worker/               # 后台长任务执行器
 
   packages/
+    agent-adapters/       # Claude Code、Codex、OpenCode、自建 Agent 适配器
+    artifacts/            # Diff、预览、文件、部署等产物模型
+    config/               # 共享配置和环境变量解析
+    db/                   # 数据库 schema、迁移和数据访问
+    logger/               # 统一日志能力
+    orchestrator/         # 多 Agent 协作和任务编排
     protocol/             # 共享协议和核心类型
     sdk/                  # 前端、桌面端、移动端共用 API SDK
-    db/                   # 数据库 schema、迁移和数据访问
-    agent-adapters/       # Claude Code、Codex、OpenCode、自建 Agent 适配器
-    orchestrator/         # 多 Agent 协作和任务编排
-    artifacts/            # Diff、预览、文件、部署等产物模型
     ui/                   # 可选：跨端共享 UI 封装
-    config/               # 共享配置和环境变量解析
-    logger/               # 统一日志能力
 
   infra/                  # 本地开发和部署基础设施
   scripts/                # 开发、检查、构建、发布脚本
   docs/                   # 架构、协议、daemon、适配器和部署文档
 
+  .gitignore
+  AGENTS.md
+  README.md
   package.json
+  pnpm-lock.yaml
   pnpm-workspace.yaml
   turbo.json
   tsconfig.base.json
-  eslint.config.js
 ```
 
 ## 初始实现顺序

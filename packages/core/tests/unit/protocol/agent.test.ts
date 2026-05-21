@@ -5,7 +5,7 @@ import {
   agentWorkspaceManifestFileName,
   agentWorkspaceMetadataDirectory,
   agentWorkspaceRuntimeFileName,
-} from "../../src/agent";
+} from "../../../src/protocol/agent";
 
 describe("agent workspace protocol", () => {
   it("defines the required local workspace layout", () => {

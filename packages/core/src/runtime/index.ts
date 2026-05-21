@@ -1,8 +1,8 @@
 import type {
   AgentRuntimeBinding,
   AgentRuntimeConfig,
-} from "../agent";
-import type { AgentRun, RunEvent } from "../run";
+} from "../protocol";
+import type { AgentRun, RunEvent } from "../protocol";
 
 export interface AgentRunInput {
   run: AgentRun;

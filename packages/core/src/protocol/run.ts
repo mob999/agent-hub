@@ -1,5 +1,5 @@
-import type { AgentId, DaemonDeviceId, IsoDateTime } from "../agent";
-import type { Artifact } from "../artifact";
+import type { AgentId, DaemonDeviceId, IsoDateTime } from "./agent";
+import type { Artifact } from "./artifact";
 
 export type RunId = string;
 
@@ -52,4 +52,3 @@ export type RunEvent =
       error?: string;
       createdAt: IsoDateTime;
     };
-

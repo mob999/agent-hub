@@ -1,5 +1,5 @@
-import type { AgentId, IsoDateTime } from "../agent";
-import type { RunId } from "../run";
+import type { AgentId, IsoDateTime } from "./agent";
+import type { RunId } from "./run";
 
 export type ArtifactId = string;
 
@@ -26,4 +26,3 @@ export interface Artifact {
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
-

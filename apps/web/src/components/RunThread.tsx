@@ -54,7 +54,7 @@ export function RunThread({ localRun, events, selected, selectRun }: RunThreadPr
         </span>
         <span className="grid min-w-0 gap-1.5">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
-            <strong>Agent</strong>
+            <strong>{localRun.agentName ?? 'Agent'}</strong>
             <Tag type={runTagType(localRun.run.status)} size="sm">
               {runStatusLabel(localRun.run.status)}
             </Tag>

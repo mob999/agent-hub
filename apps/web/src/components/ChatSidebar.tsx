@@ -1,13 +1,15 @@
 import { Activity, Add, Bookmark, ChatBot, Search } from '@carbon/react/icons'
 import { Tag } from '@carbon/react'
 import type { AgentDetails, LocalRun } from '../lib/api'
+import { getChatTargetId, groupChatId, type ChatTarget } from '../lib/chat'
 
 interface ChatSidebarProps {
   runs: LocalRun[]
   activeRunCount: number
   agents: AgentDetails[]
-  selectedAgentId: string | null
+  activeChatTarget: ChatTarget | null
   onCreateAgent: () => void
+  selectGroup: () => void
   selectAgent: (agentId: string) => void
 }
 
@@ -44,10 +46,19 @@ export function ChatSidebar({
   runs,
   activeRunCount,
   agents,
-  selectedAgentId,
+  activeChatTarget,
   onCreateAgent,
+  selectGroup,
   selectAgent,
 }: ChatSidebarProps) {
+  const groupChatSelected = activeChatTarget?.type === 'group' && activeChatTarget.id === groupChatId
+  const groupRunCount = runs.filter((run) => run.channelId === groupChatId).length
+  const groupActiveRunCount = runs.filter(
+    (run) =>
+      run.channelId === groupChatId &&
+      (run.run.status === 'queued' || run.run.status === 'running'),
+  ).length
+
   return (
     <aside
       className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
@@ -80,7 +91,7 @@ export function ChatSidebar({
       <section className="grid gap-1 p-3" aria-labelledby="groups-heading">
         <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
           <h3 id="groups-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
-            Groups<span className={inlineCount}>({runs.length})</span>
+            Groups<span className={inlineCount}>(1)</span>
           </h3>
           <button
             className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -91,16 +102,21 @@ export function ChatSidebar({
           </button>
         </div>
         <button
-          className={`${sidebarButton} ${selectedListItem} min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
+          className={`${sidebarButton} ${
+            groupChatSelected ? selectedListItem : transparentListItem
+          } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
           type="button"
-          aria-current="page"
+          aria-current={groupChatSelected ? 'page' : undefined}
+          onClick={selectGroup}
         >
           <span className="text-base text-[var(--cds-text-primary)]">#</span>
           <span>all</span>
-          {activeRunCount > 0 && (
+          {groupActiveRunCount > 0 ? (
             <Tag type="blue" size="sm">
-              {activeRunCount}
+              {groupActiveRunCount}
             </Tag>
+          ) : (
+            <span className="text-sm text-[var(--cds-text-secondary)]">{groupRunCount}</span>
           )}
         </button>
       </section>
@@ -121,28 +137,41 @@ export function ChatSidebar({
         </div>
         {agents.length === 0 ? (
           <p className="px-3 pb-3 pt-1 text-[var(--cds-text-secondary)]">
-            No agents yet. Create one from a runtime.
+            No agents yet.
           </p>
         ) : (
           <div className="grid gap-1">
             {agents.map((agent) => {
               const status = agentStatusTag(agent)
+              const agentChatId = getChatTargetId({ type: 'agent', id: agent.agent.id })
+              const agentSelected = activeChatTarget?.type === 'agent' && activeChatTarget.id === agent.agent.id
+              const activeAgentRunCount = runs.filter(
+                (run) =>
+                  run.channelId === agentChatId &&
+                  (run.run.status === 'queued' || run.run.status === 'running'),
+              ).length
 
               return (
                 <button
                   className={`${sidebarButton} ${
-                    selectedAgentId === agent.agent.id ? selectedListItem : transparentListItem
+                    agentSelected ? selectedListItem : transparentListItem
                   } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-2 px-3`}
                   type="button"
                   key={agent.agent.id}
-                  aria-current={selectedAgentId === agent.agent.id ? 'page' : undefined}
+                  aria-current={agentSelected ? 'page' : undefined}
                   onClick={() => selectAgent(agent.agent.id)}
                 >
                   <ChatBot size={16} />
                   <span className="truncate">{agent.agent.name}</span>
-                  <Tag type={status.type} size="sm">
-                    {status.label}
-                  </Tag>
+                  {activeAgentRunCount > 0 ? (
+                    <Tag type="blue" size="sm">
+                      {activeAgentRunCount}
+                    </Tag>
+                  ) : (
+                    <Tag type={status.type} size="sm">
+                      {status.label}
+                    </Tag>
+                  )}
                 </button>
               )
             })}

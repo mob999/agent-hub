@@ -113,6 +113,7 @@ export interface RunEvent {
 
 export interface LocalRun {
   channelId: string
+  agentName?: string
   prompt: string
   run: AgentRun
 }

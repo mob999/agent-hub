@@ -18,11 +18,11 @@ import {
   type User,
   type WorkspaceView,
 } from '../lib/api'
+import { getChatTargetId, groupChatId, type ChatTarget } from '../lib/chat'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
-const activeChannelId = 'all'
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
   chat: '/chat',
   runs: '/runs',
@@ -50,12 +50,12 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [devices, setDevices] = useState<DaemonDevice[]>([])
   const [deviceError, setDeviceError] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDetails[]>([])
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
+  const [activeChatTarget, setActiveChatTarget] = useState<ChatTarget | null>(null)
   const [runs, setRuns] = useState<LocalRun[]>([])
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
@@ -73,14 +73,29 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   )
   const orderedRuns = useMemo(() => [...runs].reverse(), [runs])
   const readyAgentCount = useMemo(() => agents.filter(isAgentReady).length, [agents])
+  const activeChatId = useMemo(
+    () => (activeChatTarget === null ? null : getChatTargetId(activeChatTarget)),
+    [activeChatTarget],
+  )
+  const visibleRuns = useMemo(
+    () => (activeChatId === null ? [] : orderedRuns.filter((localRun) => localRun.channelId === activeChatId)),
+    [activeChatId, orderedRuns],
+  )
   const selectedAgent = useMemo(
     () =>
-      agents.find((agent) => agent.agent.id === selectedAgentId) ??
-      agents.find(isAgentReady) ??
-      agents[0] ??
-      null,
-    [agents, selectedAgentId],
+      activeChatTarget?.type === 'agent'
+        ? agents.find((agent) => agent.agent.id === activeChatTarget.id) ?? null
+        : null,
+    [activeChatTarget, agents],
   )
+  const defaultReadyAgent = useMemo(() => agents.find(isAgentReady) ?? null, [agents])
+  const runAgent =
+    activeChatTarget?.type === 'agent'
+      ? selectedAgent
+      : activeChatTarget?.type === 'group'
+        ? defaultReadyAgent
+        : null
+  const selectedRunVisible = visibleRuns.some((localRun) => localRun.run.id === selectedRunId)
 
   const loadDevices = useCallback(async () => {
     try {
@@ -100,6 +115,16 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     try {
       const response = await apiRequest<{ agents: AgentDetails[] }>('/agents')
       setAgents(response.agents)
+      setActiveChatTarget((current) => {
+        if (
+          current?.type === 'agent' &&
+          !response.agents.some((agent) => agent.agent.id === current.id)
+        ) {
+          return null
+        }
+
+        return current
+      })
       setAgentError(null)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -245,8 +270,17 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       return
     }
 
-    if (!selectedAgent || !isAgentReady(selectedAgent)) {
-      setRunError('Create or select a ready agent before sending a message.')
+    if (activeChatTarget === null || activeChatId === null) {
+      setRunError('Select a conversation before sending a message.')
+      return
+    }
+
+    if (!runAgent || !isAgentReady(runAgent)) {
+      setRunError(
+        activeChatTarget.type === 'agent'
+          ? 'Selected agent is not ready to receive messages.'
+          : 'Create a ready agent before sending a group message.',
+      )
       return
     }
 
@@ -258,13 +292,14 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         method: 'POST',
         body: JSON.stringify({
           prompt: trimmedPrompt,
-          agentId: selectedAgent.agent.id,
+          agentId: runAgent.agent.id,
         }),
       })
 
       setRuns((current) => [
         {
-          channelId: activeChannelId,
+          channelId: activeChatId,
+          agentName: runAgent.agent.name,
           prompt: trimmedPrompt,
           run: response.run,
         },
@@ -299,6 +334,14 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
+  const selectChatTarget = (target: ChatTarget) => {
+    if (activeChatId !== getChatTargetId(target)) {
+      setPrompt('')
+      setSelectedRunId(null)
+    }
+    setRunError(null)
+    setActiveChatTarget(target)
+  }
   const openCreateAgent = (daemonDeviceId?: string) => {
     setDefaultAgentDaemonId(daemonDeviceId ?? null)
     setAgentCreateError(null)
@@ -320,7 +363,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       })
 
       setAgents((current) => [response.agent, ...current])
-      setSelectedAgentId(response.agent.agent.id)
+      setPrompt('')
+      setSelectedRunId(null)
+      setActiveChatTarget({ type: 'agent', id: response.agent.agent.id })
       setAgentModalOpen(false)
       void loadAgents()
     } catch (error) {
@@ -381,18 +426,21 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             runs={runs}
             activeRunCount={activeRunCount}
             agents={agents}
-            selectedAgentId={selectedAgent?.agent.id ?? null}
+            activeChatTarget={activeChatTarget}
             onCreateAgent={() => openCreateAgent()}
-            selectAgent={setSelectedAgentId}
+            selectGroup={() => selectChatTarget({ type: 'group', id: groupChatId })}
+            selectAgent={(agentId) => selectChatTarget({ type: 'agent', id: agentId })}
           />
           <ChannelWorkspace
-            runs={orderedRuns}
+            runs={visibleRuns}
             eventsByRun={eventsByRun}
             prompt={prompt}
             isCreatingRun={isCreatingRun}
             runError={runError ?? agentError}
-            selectedRunId={selectedRunId}
+            selectedRunId={selectedRunVisible ? selectedRunId : null}
+            activeChatTarget={activeChatTarget}
             selectedAgent={selectedAgent}
+            runAgent={runAgent}
             readyAgentCount={readyAgentCount}
             setPrompt={setPrompt}
             submitRun={submitRun}

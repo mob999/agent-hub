@@ -1,8 +1,12 @@
-import { Button, Form, IconButton, InlineLoading, InlineNotification, TextArea } from '@carbon/react'
+import { Form, IconButton, InlineLoading, InlineNotification, TextArea } from '@carbon/react'
 import { Add, ChatBot, Folder, JobRun, Send, Task } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
 import type { AgentDetails, LocalRun, RunEvent } from '../lib/api'
+import type { ChatTarget } from '../lib/chat'
 import { RunThread } from './RunThread'
+
+const inlineLink =
+  'cursor-pointer border-0 bg-transparent p-0 font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 
 interface ChannelWorkspaceProps {
   runs: LocalRun[]
@@ -11,7 +15,9 @@ interface ChannelWorkspaceProps {
   isCreatingRun: boolean
   runError: string | null
   selectedRunId: string | null
+  activeChatTarget: ChatTarget | null
   selectedAgent: AgentDetails | null
+  runAgent: AgentDetails | null
   readyAgentCount: number
   setPrompt: (value: string) => void
   submitRun: (event: FormEvent<HTMLFormElement>) => void
@@ -26,22 +32,86 @@ export function ChannelWorkspace({
   isCreatingRun,
   runError,
   selectedRunId,
+  activeChatTarget,
   selectedAgent,
+  runAgent,
   readyAgentCount,
   setPrompt,
   submitRun,
   selectRun,
   openCreateAgent,
 }: ChannelWorkspaceProps) {
+  const hasSelectedConversation = activeChatTarget !== null
+  const isAgentDirectMessage = activeChatTarget?.type === 'agent'
+  const createAgentLink = (
+    <button className={inlineLink} type="button" onClick={openCreateAgent}>
+      create an agent
+    </button>
+  )
   const selectedAgentReady =
-    selectedAgent?.runtimeBinding.status === 'ready' &&
-    selectedAgent.workspace.status === 'ready'
+    hasSelectedConversation &&
+    runAgent?.runtimeBinding.status === 'ready' &&
+    runAgent.workspace.status === 'ready'
+  const chatTitle = !hasSelectedConversation
+    ? 'Chat'
+    : isAgentDirectMessage
+      ? selectedAgent?.agent.name ?? 'Agent'
+      : 'all'
+  const chatDescription = !hasSelectedConversation
+    ? 'No conversation selected'
+    : isAgentDirectMessage
+      ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
+      : 'General channel for members and agent runs'
+  const emptyTitle = !hasSelectedConversation
+    ? 'No conversation selected'
+    : isAgentDirectMessage
+      ? 'No private messages yet'
+      : 'No messages yet'
+  const emptyMessage = !hasSelectedConversation
+    ? readyAgentCount > 0
+      ? 'Choose #all or an agent from the sidebar.'
+      : (
+          <>
+            Choose #all after you{' '}
+            {createAgentLink}
+            .
+          </>
+        )
+    : isAgentDirectMessage
+      ? selectedAgentReady && selectedAgent
+        ? `Message ${selectedAgent.agent.name} to start a private run.`
+        : 'This agent is not ready to receive messages yet.'
+      : readyAgentCount > 0
+        ? 'Message #all to start a group run.'
+        : (
+            <>
+              First, {createAgentLink}; then message #all to start a run.
+            </>
+          )
+  const warningTitle = isAgentDirectMessage ? 'Agent is not ready' : 'No ready agent available'
+  const warningSubtitle = isAgentDirectMessage
+    ? 'Wait for provisioning to finish, or choose another ready agent.'
+    : 'Create a ready agent before sending a group message.'
+  const composerPlaceholder = !hasSelectedConversation
+    ? 'Select a conversation first'
+    : selectedAgentReady && runAgent
+      ? isAgentDirectMessage
+        ? `Message ${runAgent.agent.name}`
+        : `Message #all via ${runAgent.agent.name}`
+      : isAgentDirectMessage
+        ? 'Agent is not ready yet'
+        : 'Create a ready agent first'
+  const chatAriaLabel = !hasSelectedConversation
+    ? 'Chat'
+    : isAgentDirectMessage
+      ? `Private chat ${chatTitle}`
+      : 'Channel all'
 
   return (
     <section
       id="main-content"
       className="grid h-screen min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--cds-background)]"
-      aria-label="Channel all"
+      aria-label={chatAriaLabel}
     >
       <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-start gap-3">
@@ -49,12 +119,12 @@ export function ChannelWorkspace({
             className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] font-semibold"
             aria-hidden="true"
           >
-            #
+            {!hasSelectedConversation || isAgentDirectMessage ? <ChatBot size={20} /> : '#'}
           </span>
           <div className="grid min-w-0 gap-0.5">
-            <h1 className="truncate text-xl font-semibold leading-tight">all</h1>
+            <h1 className="truncate text-xl font-semibold leading-tight">{chatTitle}</h1>
             <p className="truncate text-sm leading-snug text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
-              General channel for members and agent runs
+              {chatDescription}
             </p>
           </div>
         </div>
@@ -92,17 +162,10 @@ export function ChannelWorkspace({
         {runs.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
-            <h2 className="cds--type-heading-compact-02">No messages yet</h2>
+            <h2 className="cds--type-heading-compact-02">{emptyTitle}</h2>
             <p className="text-[var(--cds-text-secondary)]">
-              {readyAgentCount > 0
-                ? 'Message the selected agent to start a run.'
-                : 'Create an agent, then message #all to start a run.'}
+              {emptyMessage}
             </p>
-            {readyAgentCount === 0 && (
-              <Button kind="secondary" size="sm" onClick={openCreateAgent}>
-                Create agent
-              </Button>
-            )}
           </div>
         ) : (
           <div className="mx-auto grid w-full max-w-[68rem] gap-5">
@@ -124,22 +187,22 @@ export function ChannelWorkspace({
         aria-label="Create run"
         onSubmit={submitRun}
       >
-        {!selectedAgentReady && (
+        {hasSelectedConversation && !selectedAgentReady && (
           <InlineNotification
             kind="warning"
-            title="No ready agent selected"
-            subtitle="Create or select a ready agent before sending a message."
+            title={warningTitle}
+            subtitle={warningSubtitle}
             lowContrast
             hideCloseButton
           />
         )}
         <TextArea
           id="run-prompt"
-          labelText="Message #all"
+          labelText={isAgentDirectMessage ? `Message ${chatTitle}` : 'Message #all'}
           hideLabel
           rows={3}
           value={prompt}
-          placeholder={selectedAgentReady ? `Message ${selectedAgent.agent.name}` : 'Create an agent first'}
+          placeholder={composerPlaceholder}
           disabled={isCreatingRun || !selectedAgentReady}
           onChange={(event) => setPrompt(event.target.value)}
         />

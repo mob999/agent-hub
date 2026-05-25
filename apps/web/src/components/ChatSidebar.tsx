@@ -1,4 +1,4 @@
-import { Add, Chat, ChatBot, JobRun } from '@carbon/react/icons'
+import { Activity, Add, Bookmark, Search } from '@carbon/react/icons'
 import { Tag } from '@carbon/react'
 import type { LocalRun } from '../lib/api'
 
@@ -31,17 +31,17 @@ export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
 
       <section className="grid gap-0.5 p-3" aria-label="Quick actions">
         <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
-          <Chat size={16} />
+          <Search size={16} />
           <span>Search</span>
           <kbd className="text-[var(--cds-text-secondary)]">Ctrl K</kbd>
         </button>
         <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
-          <JobRun size={16} />
+          <Activity size={16} />
           <span>Activity</span>
           <span className="font-semibold text-[var(--cds-text-primary)]">{activeRunCount}</span>
         </button>
         <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)] gap-3 px-3 py-2`} type="button">
-          <ChatBot size={16} />
+          <Bookmark size={16} />
           <span>Saved</span>
         </button>
       </section>

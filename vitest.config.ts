@@ -1,6 +1,16 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@agent-hub/core": new URL("./packages/core/src/index.ts", import.meta.url)
+        .pathname,
+      "@agent-hub/server": new URL(
+        "./packages/server/src/index.ts",
+        import.meta.url,
+      ).pathname,
+    },
+  },
   test: {
     coverage: {
       provider: "v8",
@@ -8,9 +18,9 @@ export default defineConfig({
     },
     globals: false,
     include: [
-      "src/**/*.{test,spec}.{ts,tsx}",
-      "apps/**/src/**/*.{test,spec}.{ts,tsx}",
-      "packages/**/src/**/*.{test,spec}.{ts,tsx}",
+      "tests/**/*.{test,spec}.{ts,tsx}",
+      "apps/**/tests/**/*.{test,spec}.{ts,tsx}",
+      "packages/**/tests/**/*.{test,spec}.{ts,tsx}",
     ],
     passWithNoTests: true,
   },

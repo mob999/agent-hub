@@ -1,8 +1,8 @@
 {
-  "name": "@agent-hub/config",
+  "name": "@agent-hub/server",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared configuration helpers",
+  "description": "Node-only AgentHub server utilities",
   "main": "dist/index.js",
   "types": "src/index.ts",
   "exports": {
@@ -14,13 +14,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
   "dependencies": {
-    "zod": "^4.1.11"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.17"
+    "pino": "^10.3.1"
   }
 }
+

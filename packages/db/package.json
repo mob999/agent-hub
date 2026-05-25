@@ -4,16 +4,26 @@
   "private": true,
   "description": "AgentHub database schema and data access",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "drizzle-orm": "^0.44.7",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.7"
+  }
 }

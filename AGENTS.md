@@ -24,8 +24,8 @@ AgentHub 应该像一个面向 AI Agent 的 IM 工作台：
 - API 服务负责用户态数据、权限、会话历史、运行状态和产物元数据。
 - 长时间运行的 Agent 任务必须脱离 HTTP 请求生命周期。
 - daemon 是本地执行器，不是第二套后端。
-- Agent 适配器负责屏蔽 Claude Code、Codex、OpenCode 和自建 Agent 的接口差异。
-- 客户端通过共享 SDK 和协议包访问后端。
+- Runtime adapter 负责屏蔽 Claude Code、Codex、OpenCode 和自建 runtime 的接口差异；共享类型和契约统一放在 `packages/core`。
+- 客户端通过 `packages/core` 中的共享协议类型与后端保持一致。
 - 桌面客户端可以安装和管理 daemon，但业务行为应与 Web 端保持一致。
 - 移动端一般不运行本地 daemon，而是远程控制云端 worker 或用户已连接的桌面 daemon。
 
@@ -170,15 +170,9 @@ agent-hub/
     worker/               # 后台长任务执行器
 
   packages/
-    agent-adapters/       # Claude Code、Codex、OpenCode、自建 Agent 适配器
-    artifacts/            # Diff、预览、文件、部署等产物模型
-    config/               # 共享配置和环境变量解析
+    core/                 # browser-safe，共享协议、Agent/runtime/artifact 契约和纯逻辑
     db/                   # 数据库 schema、迁移和数据访问
-    logger/               # 统一日志能力
-    orchestrator/         # 多 Agent 协作和任务编排
-    protocol/             # 共享协议和核心类型
-    sdk/                  # 前端、桌面端、移动端共用 API SDK
-    ui/                   # 可选：跨端共享 UI 封装
+    server/               # Node-only，统一日志和后端工具
 
   infra/                  # 本地开发和部署基础设施
   scripts/                # 开发、检查、构建、发布脚本
@@ -230,13 +224,13 @@ pnpm test:coverage
 pnpm check
 ```
 
-各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。测试文件放在对应 app 或 package 的 `src` 目录下，命名为 `*.test.ts`、`*.spec.ts`、`*.test.tsx` 或 `*.spec.tsx`。
+各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。单元测试文件放在对应 app 或 package 的 `tests/unit` 目录下，命名为 `<subject>.test.ts`、`<subject>.spec.ts`、`<subject>.test.tsx` 或 `<subject>.spec.tsx`，例如 `tests/unit/agent.test.ts`。
 
 优先为这些代码补单测：
 
 - 有明确业务规则的代码，例如 Run 状态流转、权限判断、Workflow 编排和 Orchestrator 分工。
 - 有分支和边界条件的纯函数，例如协议转换、Artifact 类型判断、配置解析和路径处理。
-- 外部系统适配层，例如 Agent adapter 的入参/出参映射、错误归一化和重试策略。
+- 外部系统适配层，例如 runtime adapter 的入参/出参映射、错误归一化和重试策略。
 - 安全相关逻辑，例如 token 脱敏、授权 workspace 判断、命令参数拼接。
 - 曾经出过 bug 或后续会频繁变动的代码。
 
@@ -252,14 +246,13 @@ pnpm check
 
 建议按以下顺序实现：
 
-1. `packages/protocol`
+1. `packages/core`
 2. `apps/api`
 3. `apps/web`
 4. `apps/worker`
 5. `apps/daemon`
-6. `packages/agent-adapters`
-7. `packages/artifacts`
-8. `packages/orchestrator`
+6. `packages/db`
+7. `packages/server`
 
 第一个可用里程碑应支持：
 

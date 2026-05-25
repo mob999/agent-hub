@@ -1,0 +1,31 @@
+{
+  "name": "@agent-hub/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AgentHub shared protocol and runtime contracts",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./src/protocol/index.ts",
+      "development": "./src/protocol/index.ts",
+      "import": "./dist/protocol/index.js"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "development": "./src/runtime/index.ts",
+      "import": "./dist/runtime/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module"
+}

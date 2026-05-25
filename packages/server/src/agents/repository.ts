@@ -329,6 +329,53 @@ export async function getRunnableAgentForUser(
   };
 }
 
+export async function getFirstRunnableAgentForUser(
+  db: Db,
+  input: { ownerUserId: string },
+): Promise<RunnableAgent | null> {
+  const [row] = await db
+    .select({
+      agent: agents,
+      binding: agentRuntimeBindings,
+      workspace: agentWorkspaces,
+    })
+    .from(agents)
+    .innerJoin(
+      agentRuntimeBindings,
+      eq(agentRuntimeBindings.agentId, agents.id),
+    )
+    .innerJoin(agentWorkspaces, eq(agentWorkspaces.agentId, agents.id))
+    .where(
+      and(
+        eq(agents.ownerUserId, input.ownerUserId),
+        eq(agents.status, "active"),
+        eq(agentRuntimeBindings.status, "ready"),
+        eq(agentWorkspaces.status, "ready"),
+      ),
+    )
+    .orderBy(asc(agents.createdAt))
+    .limit(1);
+
+  if (row === undefined || row.workspace.workspacePath === null) {
+    return null;
+  }
+
+  const agent = toAgentDetails(row.agent, row.binding, row.workspace);
+
+  return {
+    agent: agent.agent,
+    daemonDeviceId: agent.runtimeBinding.daemonDeviceId,
+    workspacePath: row.workspace.workspacePath,
+    runtime: {
+      runtimeKind: agent.runtimeBinding.runtimeKind,
+      runtimeVersion: agent.runtimeBinding.runtimeVersion,
+      executablePath: agent.runtimeBinding.executablePath,
+      capabilities: agent.runtimeBinding.capabilities,
+      updatedAt: agent.workspace.updatedAt,
+    },
+  };
+}
+
 export async function markAgentProvisioningReady(
   db: Db,
   input: {

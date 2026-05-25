@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { users } from "./auth.js";
+import { conversations } from "./conversations.js";
 
 export const daemonDevices = pgTable("daemon_devices", {
   id: varchar("id", { length: 120 }).primaryKey(),
@@ -29,6 +30,9 @@ export const runs = pgTable(
     ownerUserId: uuid("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
     agentId: varchar("agent_id", { length: 120 }).notNull(),
     daemonDeviceId: varchar("daemon_device_id", { length: 120 }).notNull(),
     status: varchar("status", { length: 32 }).notNull(),
@@ -40,6 +44,9 @@ export const runs = pgTable(
   },
   (table) => ({
     runsOwnerUserIdIdx: index("runs_owner_user_id_idx").on(table.ownerUserId),
+    runsConversationIdIdx: index("runs_conversation_id_idx").on(
+      table.conversationId,
+    ),
     runsDaemonDeviceIdIdx: index("runs_daemon_device_id_idx").on(
       table.daemonDeviceId,
     ),

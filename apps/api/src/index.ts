@@ -12,11 +12,19 @@ import {
   createAgentHubRedisClient,
   createLogger,
   createRunRecord,
+  buildConversationRunPrompt,
+  createUserMessageAndRun,
   enqueueAgentProvisioningJob,
   enqueueRunJob,
+  ensureDefaultGroupConversation,
+  ensureDirectConversation,
   getAgentForUser,
+  getConversationForUser,
+  getFirstRunnableAgentForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
+  listConversationMessagesForUser,
+  listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
   listAgentsForUser,
@@ -326,6 +334,317 @@ app.get("/agents/:agentId", async (c) => {
   }
 
   return c.json({ agent });
+});
+
+app.use("/conversations", requireAuth);
+app.use("/conversations/*", requireAuth);
+app.get("/conversations", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  return c.json({
+    conversations: await listConversationsForUser(db, { ownerUserId: user.id }),
+  });
+});
+
+app.post("/conversations/default-group", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const conversation = await ensureDefaultGroupConversation(db, {
+    ownerUserId: user.id,
+  });
+
+  return c.json({ conversation }, 200);
+});
+
+app.post("/conversations/direct", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentId?: unknown;
+  };
+
+  if (typeof body.agentId !== "string" || body.agentId.length === 0) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_CONVERSATION_REQUEST",
+          message: "agentId is required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const conversation = await ensureDirectConversation(db, {
+    agentId: body.agentId,
+    ownerUserId: user.id,
+  });
+
+  if (conversation === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ conversation }, 200);
+});
+
+app.get("/conversations/:conversationId/messages", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const rawLimit = Number(c.req.query("limit") ?? 50);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100)
+    : 50;
+  const beforeQuery = c.req.query("before");
+  const before =
+    beforeQuery === undefined || beforeQuery.length === 0
+      ? undefined
+      : new Date(beforeQuery);
+
+  if (before !== undefined && Number.isNaN(before.getTime())) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_MESSAGES_REQUEST",
+          message: "before must be an ISO date string.",
+        },
+      },
+      400,
+    );
+  }
+
+  const messages = await listConversationMessagesForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    limit,
+    before,
+  });
+
+  if (messages === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ messages });
+});
+
+app.post("/conversations/:conversationId/messages", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentId?: unknown;
+    content?: unknown;
+  };
+  const content = typeof body.content === "string" ? body.content.trim() : "";
+
+  if (content.length === 0) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_MESSAGE_REQUEST",
+          message: "content is required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const conversation = await getConversationForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (conversation === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const requestedAgentId =
+    typeof body.agentId === "string" && body.agentId.length > 0
+      ? body.agentId
+      : undefined;
+  const runAgent =
+    conversation.type === "direct"
+      ? conversation.directAgentId === undefined
+        ? null
+        : await getRunnableAgentForUser(db, {
+            agentId: conversation.directAgentId,
+            ownerUserId: user.id,
+          })
+      : requestedAgentId === undefined
+        ? await getFirstRunnableAgentForUser(db, { ownerUserId: user.id })
+        : await getRunnableAgentForUser(db, {
+            agentId: requestedAgentId,
+            ownerUserId: user.id,
+          });
+
+  if (runAgent === null) {
+    return c.json(
+      {
+        error: {
+          code:
+            conversation.type === "direct"
+              ? "AGENT_NOT_READY"
+              : "NO_READY_AGENT",
+          message:
+            conversation.type === "direct"
+              ? "Agent is not ready to run yet."
+              : "Create a ready agent before sending a group message.",
+        },
+      },
+      400,
+    );
+  }
+
+  const now = new Date().toISOString();
+  const priorMessages = await listConversationMessagesForUser(db, {
+    conversationId: conversation.id,
+    ownerUserId: user.id,
+    limit: 30,
+  });
+
+  if (priorMessages === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const job: RunQueueJob = {
+    conversationId: conversation.id,
+    daemonDeviceId: runAgent.daemonDeviceId,
+    prompt: buildConversationRunPrompt({
+      currentUserMessage: content,
+      messages: priorMessages,
+    }),
+    agentInstructions: buildAgentInstructions(runAgent.agent.description),
+    workspacePath: runAgent.workspacePath,
+    run: {
+      id: randomUUID(),
+      agentId: runAgent.agent.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      status: "queued",
+      createdAt: now,
+      updatedAt: now,
+    },
+    runtime: runAgent.runtime,
+  };
+  const result = await createUserMessageAndRun(db, {
+    ownerUserId: user.id,
+    conversationId: conversation.id,
+    job,
+    userMessageContent: content,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const queueMessageId = await enqueueRunJob(redis, job);
+
+  return c.json(
+    {
+      conversation: result.conversation,
+      messages: result.messages,
+      run: job.run,
+      queueMessageId,
+    },
+    202,
+  );
 });
 
 app.use("/runs", requireAuth);

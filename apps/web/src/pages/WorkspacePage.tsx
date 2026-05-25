@@ -11,14 +11,16 @@ import {
   type AgentDetails,
   type AgentRun,
   type AuthResponse,
+  type Conversation,
+  type ConversationMessage,
   type DaemonDevice,
   type LocalRun,
   type RuntimeKind,
   type RunEvent,
+  type SendConversationMessageResponse,
   type User,
   type WorkspaceView,
 } from '../lib/api'
-import { getChatTargetId, groupChatId, type ChatTarget } from '../lib/chat'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
@@ -55,7 +57,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
-  const [activeChatTarget, setActiveChatTarget] = useState<ChatTarget | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [runs, setRuns] = useState<LocalRun[]>([])
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
@@ -73,29 +77,14 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   )
   const orderedRuns = useMemo(() => [...runs].reverse(), [runs])
   const readyAgentCount = useMemo(() => agents.filter(isAgentReady).length, [agents])
-  const activeChatId = useMemo(
-    () => (activeChatTarget === null ? null : getChatTargetId(activeChatTarget)),
-    [activeChatTarget],
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
+    [activeConversationId, conversations],
   )
-  const visibleRuns = useMemo(
-    () => (activeChatId === null ? [] : orderedRuns.filter((localRun) => localRun.channelId === activeChatId)),
-    [activeChatId, orderedRuns],
+  const activeConversationMessages = useMemo(
+    () => (activeConversationId === null ? [] : messagesByConversation[activeConversationId] ?? []),
+    [activeConversationId, messagesByConversation],
   )
-  const selectedAgent = useMemo(
-    () =>
-      activeChatTarget?.type === 'agent'
-        ? agents.find((agent) => agent.agent.id === activeChatTarget.id) ?? null
-        : null,
-    [activeChatTarget, agents],
-  )
-  const defaultReadyAgent = useMemo(() => agents.find(isAgentReady) ?? null, [agents])
-  const runAgent =
-    activeChatTarget?.type === 'agent'
-      ? selectedAgent
-      : activeChatTarget?.type === 'group'
-        ? defaultReadyAgent
-        : null
-  const selectedRunVisible = visibleRuns.some((localRun) => localRun.run.id === selectedRunId)
 
   const loadDevices = useCallback(async () => {
     try {
@@ -115,22 +104,57 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     try {
       const response = await apiRequest<{ agents: AgentDetails[] }>('/agents')
       setAgents(response.agents)
-      setActiveChatTarget((current) => {
-        if (
-          current?.type === 'agent' &&
-          !response.agents.some((agent) => agent.agent.id === current.id)
-        ) {
-          return null
-        }
-
-        return current
-      })
       setAgentError(null)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setAgentError(error.message)
       } else {
         setAgentError('Unable to load agents.')
+      }
+    }
+  }, [])
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const defaultResponse = await apiRequest<{ conversation: Conversation }>('/conversations/default-group', {
+        method: 'POST',
+      })
+      const response = await apiRequest<{ conversations: Conversation[] }>('/conversations')
+      const conversations = response.conversations.some(
+        (conversation) => conversation.id === defaultResponse.conversation.id,
+      )
+        ? response.conversations
+        : [defaultResponse.conversation, ...response.conversations]
+
+      setConversations(conversations)
+      setActiveConversationId((current) => {
+        if (current !== null && !conversations.some((conversation) => conversation.id === current)) {
+          return null
+        }
+
+        return current
+      })
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to load conversations.')
+      }
+    }
+  }, [])
+
+  const loadMessages = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ messages: ConversationMessage[] }>(
+        `/conversations/${conversationId}/messages`,
+      )
+      setMessagesByConversation((current) => ({
+        ...current,
+        [conversationId]: response.messages,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
       }
     }
   }, [])
@@ -234,6 +258,36 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   }, [loadAgents, user])
 
   useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    const initialTimer = window.setTimeout(() => {
+      void loadConversations()
+    }, 0)
+    const timer = window.setInterval(() => {
+      void loadConversations()
+    }, 10000)
+
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [loadConversations, user])
+
+  useEffect(() => {
+    if (activeConversationId === null) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadMessages(activeConversationId)
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [activeConversationId, loadMessages])
+
+  useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
       return
     }
@@ -263,6 +317,21 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     return () => window.clearInterval(timer)
   }, [refreshRun, runs])
 
+  useEffect(() => {
+    if (
+      activeConversationId === null ||
+      !activeConversationMessages.some((message) => message.status === 'streaming')
+    ) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      void loadMessages(activeConversationId)
+    }, 2000)
+
+    return () => window.clearInterval(timer)
+  }, [activeConversationId, activeConversationMessages, loadMessages])
+
   const submitRun = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
@@ -270,16 +339,22 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       return
     }
 
-    if (activeChatTarget === null || activeChatId === null) {
+    if (activeConversation === null) {
       setRunError('Select a conversation before sending a message.')
       return
     }
 
-    if (!runAgent || !isAgentReady(runAgent)) {
+    const selectedAgent =
+      activeConversation.type === 'direct'
+        ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
+        : null
+
+    if (
+      activeConversation.type === 'direct' &&
+      (selectedAgent === null || !isAgentReady(selectedAgent))
+    ) {
       setRunError(
-        activeChatTarget.type === 'agent'
-          ? 'Selected agent is not ready to receive messages.'
-          : 'Create a ready agent before sending a group message.',
+        'Selected agent is not ready to receive messages.',
       )
       return
     }
@@ -288,18 +363,42 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setIsCreatingRun(true)
 
     try {
-      const response = await apiRequest<{ run: AgentRun; queueMessageId: string }>('/runs', {
-        method: 'POST',
-        body: JSON.stringify({
-          prompt: trimmedPrompt,
-          agentId: runAgent.agent.id,
-        }),
-      })
+      const response = await apiRequest<SendConversationMessageResponse>(
+        `/conversations/${activeConversation.id}/messages`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            content: trimmedPrompt,
+          }),
+        },
+      )
+      const runAgent = agents.find((agent) => agent.agent.id === response.run.agentId)
 
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setMessagesByConversation((current) => {
+        const currentMessages = current[activeConversation.id] ?? []
+        const nextMessages = [
+          ...currentMessages.filter(
+            (message) =>
+              message.id !== response.messages.user.id &&
+              message.id !== response.messages.assistant.id,
+          ),
+          response.messages.user,
+          response.messages.assistant,
+        ]
+
+        return {
+          ...current,
+          [activeConversation.id]: nextMessages,
+        }
+      })
       setRuns((current) => [
         {
-          channelId: activeChatId,
-          agentName: runAgent.agent.name,
+          channelId: activeConversation.id,
+          agentName: runAgent?.agent.name,
           prompt: trimmedPrompt,
           run: response.run,
         },
@@ -308,6 +407,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setSelectedRunId(response.run.id)
       setPrompt('')
       void refreshRun(response.run.id)
+      void loadMessages(activeConversation.id)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
@@ -327,6 +427,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const refreshWorkspace = () => {
     void loadDevices()
     void loadAgents()
+    void loadConversations()
+    if (activeConversationId !== null) {
+      void loadMessages(activeConversationId)
+    }
     runs.forEach((localRun) => {
       void refreshRun(localRun.run.id)
     })
@@ -334,13 +438,34 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
-  const selectChatTarget = (target: ChatTarget) => {
-    if (activeChatId !== getChatTargetId(target)) {
+  const selectConversation = (conversationId: string) => {
+    if (activeConversationId !== conversationId) {
       setPrompt('')
       setSelectedRunId(null)
     }
     setRunError(null)
-    setActiveChatTarget(target)
+    setActiveConversationId(conversationId)
+    void loadMessages(conversationId)
+  }
+  const selectAgentConversation = async (agentId: string) => {
+    try {
+      const response = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
+        method: 'POST',
+        body: JSON.stringify({ agentId }),
+      })
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      selectConversation(response.conversation.id)
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to open the conversation.')
+      }
+    }
   }
   const openCreateAgent = (daemonDeviceId?: string) => {
     setDefaultAgentDaemonId(daemonDeviceId ?? null)
@@ -365,9 +490,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setAgents((current) => [response.agent, ...current])
       setPrompt('')
       setSelectedRunId(null)
-      setActiveChatTarget({ type: 'agent', id: response.agent.agent.id })
+      const conversationResponse = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
+        method: 'POST',
+        body: JSON.stringify({ agentId: response.agent.agent.id }),
+      })
+      setConversations((current) => [
+        conversationResponse.conversation,
+        ...current.filter((conversation) => conversation.id !== conversationResponse.conversation.id),
+      ])
+      setActiveConversationId(conversationResponse.conversation.id)
       setAgentModalOpen(false)
       void loadAgents()
+      void loadConversations()
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setAgentCreateError(error.message)
@@ -423,28 +557,26 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       {activeView === 'chat' ? (
         <>
           <ChatSidebar
-            runs={runs}
+            conversations={conversations}
             activeRunCount={activeRunCount}
             agents={agents}
-            activeChatTarget={activeChatTarget}
+            activeConversationId={activeConversationId}
             onCreateAgent={() => openCreateAgent()}
-            selectGroup={() => selectChatTarget({ type: 'group', id: groupChatId })}
-            selectAgent={(agentId) => selectChatTarget({ type: 'agent', id: agentId })}
+            selectGroup={selectConversation}
+            selectAgent={(agentId) => {
+              void selectAgentConversation(agentId)
+            }}
           />
           <ChannelWorkspace
-            runs={visibleRuns}
-            eventsByRun={eventsByRun}
+            activeConversation={activeConversation}
+            messages={activeConversationMessages}
+            agents={agents}
             prompt={prompt}
             isCreatingRun={isCreatingRun}
             runError={runError ?? agentError}
-            selectedRunId={selectedRunVisible ? selectedRunId : null}
-            activeChatTarget={activeChatTarget}
-            selectedAgent={selectedAgent}
-            runAgent={runAgent}
             readyAgentCount={readyAgentCount}
             setPrompt={setPrompt}
             submitRun={submitRun}
-            selectRun={setSelectedRunId}
             openCreateAgent={() => openCreateAgent()}
           />
         </>

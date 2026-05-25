@@ -1,6 +1,7 @@
 import { createClient, type RedisClientType } from "redis";
 
 import type {
+  ConversationId,
   DaemonDeviceId,
   DaemonRunAssignment,
 } from "@agent-hub/core";
@@ -9,6 +10,7 @@ export const runQueueStream = "agenthub:run:queue";
 export const runQueueGroup = "agenthub-workers";
 
 export interface RunQueueJob extends DaemonRunAssignment {
+  conversationId?: ConversationId;
   daemonDeviceId: DaemonDeviceId;
 }
 

@@ -1,62 +1,76 @@
-import { Form, IconButton, InlineLoading, InlineNotification, TextArea } from '@carbon/react'
+import { Form, IconButton, InlineLoading, InlineNotification, Tag, TextArea } from '@carbon/react'
 import { Add, ChatBot, Folder, JobRun, Send, Task } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
-import type { AgentDetails, LocalRun, RunEvent } from '../lib/api'
-import type { ChatTarget } from '../lib/chat'
-import { RunThread } from './RunThread'
+import type { AgentDetails, Conversation, ConversationMessage } from '../lib/api'
+import { formatTime } from '../lib/format'
 
 const inlineLink =
   'cursor-pointer border-0 bg-transparent p-0 font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leading-5'
 
 interface ChannelWorkspaceProps {
-  runs: LocalRun[]
-  eventsByRun: Record<string, RunEvent[]>
+  activeConversation: Conversation | null
+  messages: ConversationMessage[]
+  agents: AgentDetails[]
   prompt: string
   isCreatingRun: boolean
   runError: string | null
-  selectedRunId: string | null
-  activeChatTarget: ChatTarget | null
-  selectedAgent: AgentDetails | null
-  runAgent: AgentDetails | null
   readyAgentCount: number
   setPrompt: (value: string) => void
   submitRun: (event: FormEvent<HTMLFormElement>) => void
-  selectRun: (runId: string) => void
   openCreateAgent: () => void
 }
 
+function isAgentReady(agent: AgentDetails): boolean {
+  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
+}
+
+function messageStatusTagType(status: ConversationMessage['status']): 'green' | 'blue' | 'red' | 'gray' {
+  if (status === 'completed') {
+    return 'green'
+  }
+
+  if (status === 'streaming') {
+    return 'blue'
+  }
+
+  if (status === 'failed') {
+    return 'red'
+  }
+
+  return 'gray'
+}
+
 export function ChannelWorkspace({
-  runs,
-  eventsByRun,
+  activeConversation,
+  messages,
+  agents,
   prompt,
   isCreatingRun,
   runError,
-  selectedRunId,
-  activeChatTarget,
-  selectedAgent,
-  runAgent,
   readyAgentCount,
   setPrompt,
   submitRun,
-  selectRun,
   openCreateAgent,
 }: ChannelWorkspaceProps) {
-  const hasSelectedConversation = activeChatTarget !== null
-  const isAgentDirectMessage = activeChatTarget?.type === 'agent'
+  const hasSelectedConversation = activeConversation !== null
+  const isAgentDirectMessage = activeConversation?.type === 'direct'
+  const selectedAgent = isAgentDirectMessage
+    ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
+    : null
+  const selectedAgentReady = isAgentDirectMessage
+    ? selectedAgent !== null && isAgentReady(selectedAgent)
+    : hasSelectedConversation && readyAgentCount > 0
   const createAgentLink = (
     <button className={inlineLink} type="button" onClick={openCreateAgent}>
       create an agent
     </button>
   )
-  const selectedAgentReady =
-    hasSelectedConversation &&
-    runAgent?.runtimeBinding.status === 'ready' &&
-    runAgent.workspace.status === 'ready'
   const chatTitle = !hasSelectedConversation
     ? 'Chat'
     : isAgentDirectMessage
-      ? selectedAgent?.agent.name ?? 'Agent'
-      : 'all'
+      ? selectedAgent?.agent.name ?? activeConversation.title
+      : `#${activeConversation.title}`
   const chatDescription = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
@@ -94,10 +108,10 @@ export function ChannelWorkspace({
     : 'Create a ready agent before sending a group message.'
   const composerPlaceholder = !hasSelectedConversation
     ? 'Select a conversation first'
-    : selectedAgentReady && runAgent
+    : selectedAgentReady
       ? isAgentDirectMessage
-        ? `Message ${runAgent.agent.name}`
-        : `Message #all via ${runAgent.agent.name}`
+        ? `Message ${selectedAgent?.agent.name ?? activeConversation.title}`
+        : 'Message #all'
       : isAgentDirectMessage
         ? 'Agent is not ready yet'
         : 'Create a ready agent first'
@@ -150,7 +164,7 @@ export function ChannelWorkspace({
         {runError && (
           <InlineNotification
             kind="error"
-            title="Run was not created"
+            title="Message was not sent"
             subtitle={runError}
             lowContrast
             aria-label="Close notification"
@@ -159,7 +173,7 @@ export function ChannelWorkspace({
       </div>
 
       <div className="min-h-0 overflow-y-auto px-6 py-4 max-[1055px]:px-4" aria-live="polite">
-        {runs.length === 0 ? (
+        {messages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
             <h2 className="cds--type-heading-compact-02">{emptyTitle}</h2>
@@ -168,16 +182,59 @@ export function ChannelWorkspace({
             </p>
           </div>
         ) : (
-          <div className="mx-auto grid w-full max-w-[68rem] gap-5">
-            {runs.map((localRun) => (
-              <RunThread
-                key={localRun.run.id}
-                localRun={localRun}
-                events={eventsByRun[localRun.run.id] ?? []}
-                selected={selectedRunId === localRun.run.id}
-                selectRun={selectRun}
-              />
-            ))}
+          <div className="mx-auto grid w-full max-w-[68rem] gap-4">
+            {messages.map((message) => {
+              const senderAgent =
+                message.senderAgentId === undefined
+                  ? null
+                  : agents.find((agent) => agent.agent.id === message.senderAgentId) ?? null
+              const senderName =
+                message.senderType === 'user'
+                  ? 'You'
+                  : message.senderType === 'agent'
+                    ? senderAgent?.agent.name ?? 'Agent'
+                    : 'System'
+
+              return (
+                <article
+                  className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] max-[671px]:grid-cols-[1.75rem_minmax(0,1fr)] max-[671px]:px-1"
+                  key={message.id}
+                >
+                  <span
+                    className="grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm font-semibold max-[671px]:h-7 max-[671px]:w-7"
+                    aria-hidden="true"
+                  >
+                    {message.senderType === 'user' ? 'Y' : message.senderType === 'agent' ? 'A' : 'S'}
+                  </span>
+                  <span className="grid min-w-0 gap-1.5">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <strong>{senderName}</strong>
+                      {message.senderType !== 'user' && (
+                        <Tag type={messageStatusTagType(message.status)} size="sm">
+                          {message.status}
+                        </Tag>
+                      )}
+                      <time className="text-xs text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
+                        {formatTime(message.updatedAt)}
+                      </time>
+                    </span>
+                    <span className={messageBodyClass}>
+                      {message.content || (message.status === 'streaming' ? 'Thinking...' : '')}
+                    </span>
+                    {message.error && (
+                      <span className="text-xs text-[var(--cds-text-error)]">
+                        {message.error}
+                      </span>
+                    )}
+                    {message.runId && (
+                      <span className="text-xs text-[var(--cds-text-secondary)]">
+                        Run {message.runId.slice(0, 8)}
+                      </span>
+                    )}
+                  </span>
+                </article>
+              )
+            })}
           </div>
         )}
       </div>

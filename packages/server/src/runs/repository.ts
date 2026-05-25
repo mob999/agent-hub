@@ -8,6 +8,7 @@ import {
 import { and, asc, eq } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
+import { appendRunEventToConversationMessage } from "../conversations/index.js";
 
 export async function createRunRecord(
   db: Db,
@@ -16,6 +17,7 @@ export async function createRunRecord(
   await db.insert(runs).values({
     id: input.job.run.id,
     ownerUserId: input.ownerUserId,
+    conversationId: input.job.conversationId,
     agentId: input.job.run.agentId,
     daemonDeviceId: input.job.daemonDeviceId,
     status: input.job.run.status,
@@ -81,6 +83,8 @@ export async function appendRunEvent(db: Db, event: RunEvent): Promise<void> {
       updatedAt: new Date(event.createdAt),
     })
     .where(eq(runs.id, event.runId));
+
+  await appendRunEventToConversationMessage(db, event);
 }
 
 export async function upsertDaemonDevice(

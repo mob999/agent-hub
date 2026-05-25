@@ -99,6 +99,47 @@ export interface AgentRun {
   updatedAt: string
 }
 
+export type ConversationType = 'group' | 'direct'
+export type ConversationStatus = 'active' | 'archived'
+export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
+export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
+
+export interface Conversation {
+  id: string
+  ownerUserId: string
+  type: ConversationType
+  key?: string
+  title: string
+  directAgentId?: string
+  status: ConversationStatus
+  createdAt: string
+  updatedAt: string
+  lastMessageAt?: string
+}
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  senderType: ConversationMessageSenderType
+  senderAgentId?: string
+  runId?: string
+  content: string
+  status: ConversationMessageStatus
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SendConversationMessageResponse {
+  conversation: Conversation
+  messages: {
+    user: ConversationMessage
+    assistant: ConversationMessage
+  }
+  run: AgentRun
+  queueMessageId: string
+}
+
 export interface RunEvent {
   type: string
   runId: string

@@ -7,8 +7,8 @@ import type {
   AgentRunInput,
 } from "@agent-hub/core/runtime";
 import type {
-  AgentRuntimeBinding,
   AgentRuntimeConfig,
+  DaemonRuntime,
   RunEvent,
   RunId,
 } from "@agent-hub/core/protocol";
@@ -264,7 +264,7 @@ export class CodexAdapter implements AgentAdapter {
     this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
   }
 
-  async detect(): Promise<AgentRuntimeBinding> {
+  async detect(): Promise<DaemonRuntime> {
     const process = this.#spawnProcess(this.#executablePath, ["--version"], {
       ...createCodexSpawnOptions({
         stdio: "pipe",
@@ -301,7 +301,6 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     return {
-      agentId: "",
       daemonDeviceId: "",
       runtimeKind: "codex",
       runtimeVersion: output.join("\n").trim() || undefined,

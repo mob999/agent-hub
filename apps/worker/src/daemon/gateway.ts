@@ -2,19 +2,28 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 
 import type {
+  AgentId,
   DaemonClientMessage,
   DaemonDeviceId,
   DaemonServerMessage,
+  DaemonRuntime,
   RunEvent,
   RunId,
 } from "@agent-hub/core";
-import type { AgentHubLogger, RunQueueJob } from "@agent-hub/server";
+import type {
+  AgentHubLogger,
+  AgentProvisioningJob,
+  RunQueueJob,
+} from "@agent-hub/server";
 import { WebSocket, WebSocketServer } from "ws";
 
 export interface DaemonGatewayOptions {
   daemonToken: string;
   logger?: AgentHubLogger;
-  onDaemonConnected?(deviceId: DaemonDeviceId): void | Promise<void>;
+  onDaemonConnected?(
+    deviceId: DaemonDeviceId,
+    runtimes: DaemonRuntime[],
+  ): void | Promise<void>;
   onDaemonDisconnected?(deviceId: DaemonDeviceId): void | Promise<void>;
   onRunEvent(event: RunEvent): void | Promise<void>;
 }
@@ -24,6 +33,13 @@ interface DaemonConnection {
   ws: WebSocket;
   runningRunIds: Set<RunId>;
   lastSeenAt: string;
+}
+
+interface PendingAgentProvisioning {
+  daemonDeviceId: DaemonDeviceId;
+  resolve(message: Extract<DaemonClientMessage, { type: "agent.created" }>): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function nowIsoDateTime(): string {
@@ -52,6 +68,7 @@ export class DaemonGateway {
   readonly webSocketServer = new WebSocketServer({ noServer: true });
 
   #connections = new Map<DaemonDeviceId, DaemonConnection>();
+  #pendingAgentProvisioning = new Map<AgentId, PendingAgentProvisioning>();
   #options: DaemonGatewayOptions;
 
   constructor(options: DaemonGatewayOptions) {
@@ -82,7 +99,7 @@ export class DaemonGateway {
           };
           this.#connections.set(message.deviceId, connection);
           void Promise.resolve(
-            this.#options.onDaemonConnected?.(message.deviceId),
+            this.#options.onDaemonConnected?.(message.deviceId, message.runtimes),
           ).catch((error) => {
             this.#options.logger?.error(
               { err: toError(error), deviceId: message.deviceId },
@@ -153,12 +170,41 @@ export class DaemonGateway {
               );
             },
           );
+          return;
+        }
+
+        if (message.type === "agent.created") {
+          const pending = this.#pendingAgentProvisioning.get(message.agentId);
+
+          if (pending !== undefined) {
+            clearTimeout(pending.timer);
+            this.#pendingAgentProvisioning.delete(message.agentId);
+            pending.resolve(message);
+          }
+          return;
+        }
+
+        if (message.type === "agent.create_failed") {
+          const pending = this.#pendingAgentProvisioning.get(message.agentId);
+
+          if (pending !== undefined) {
+            clearTimeout(pending.timer);
+            this.#pendingAgentProvisioning.delete(message.agentId);
+            pending.reject(new Error(message.reason));
+          }
         }
       });
 
       ws.on("close", () => {
         if (connection !== undefined) {
           this.#connections.delete(connection.deviceId);
+          for (const [agentId, pending] of this.#pendingAgentProvisioning) {
+            if (pending.daemonDeviceId === connection.deviceId) {
+              clearTimeout(pending.timer);
+              this.#pendingAgentProvisioning.delete(agentId);
+              pending.reject(new Error("Daemon disconnected while creating agent."));
+            }
+          }
           void Promise.resolve(
             this.#options.onDaemonDisconnected?.(connection.deviceId),
           ).catch((error) => {
@@ -189,6 +235,62 @@ export class DaemonGateway {
       this.webSocketServer.emit("connection", ws, request);
     });
     return true;
+  }
+
+  provisionAgent(
+    job: AgentProvisioningJob,
+    options: { timeoutMs?: number } = {},
+  ): Promise<Extract<DaemonClientMessage, { type: "agent.created" }>> {
+    const connection = this.#connections.get(job.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          agentId: job.agent.id,
+          daemonDeviceId: job.daemonDeviceId,
+        },
+        "Cannot create agent because daemon is not connected",
+      );
+      return Promise.reject(
+        new Error(`Daemon ${job.daemonDeviceId} is not connected.`),
+      );
+    }
+
+    if (this.#pendingAgentProvisioning.has(job.agent.id)) {
+      return Promise.reject(
+        new Error(`Agent ${job.agent.id} is already being created.`),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutMs = options.timeoutMs ?? 30_000;
+      const timer = setTimeout(() => {
+        this.#pendingAgentProvisioning.delete(job.agent.id);
+        reject(new Error("Agent provisioning timed out."));
+      }, timeoutMs);
+
+      this.#pendingAgentProvisioning.set(job.agent.id, {
+        daemonDeviceId: job.daemonDeviceId,
+        resolve,
+        reject,
+        timer,
+      });
+
+      send(connection.ws, {
+        type: "agent.create",
+        agent: job.agent,
+        daemonDeviceId: job.daemonDeviceId,
+        runtime: job.runtime,
+        sentAt: nowIsoDateTime(),
+      });
+      this.#options.logger?.info(
+        {
+          agentId: job.agent.id,
+          daemonDeviceId: job.daemonDeviceId,
+        },
+        "Requested daemon agent provisioning",
+      );
+    });
   }
 
   assign(message: DaemonServerMessage): boolean {

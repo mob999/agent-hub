@@ -3,12 +3,19 @@ import { createServer } from "node:http";
 import { loadWorkerEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
 import {
+  ackAgentProvisioningQueueMessage,
   ackRunQueueMessage,
   appendRunEvent,
   createLogger,
   createAgentHubRedisClient,
+  ensureAgentProvisioningQueueGroup,
   ensureRunQueueGroup,
+  markAgentProvisioningFailed,
+  markAgentProvisioningReady,
+  readAgentProvisioningQueueMessages,
   readRunQueueMessages,
+  setDaemonRuntimesStatus,
+  upsertDaemonRuntime,
   upsertDaemonDevice,
 } from "@agent-hub/server";
 
@@ -26,16 +33,29 @@ const logger = createLogger({
 const gateway = new DaemonGateway({
   daemonToken: env.AGENTHUB_DAEMON_TOKEN,
   logger,
-  onDaemonConnected: async (deviceId) => {
+  onDaemonConnected: async (deviceId, runtimes) => {
     await upsertDaemonDevice(db, {
       id: deviceId,
       status: "online",
     });
+    await Promise.all(
+      runtimes.map((runtime) =>
+        upsertDaemonRuntime(db, {
+          ...runtime,
+          daemonDeviceId: deviceId,
+          status: "ready",
+        }),
+      ),
+    );
   },
   onDaemonDisconnected: async (deviceId) => {
     await upsertDaemonDevice(db, {
       id: deviceId,
       status: "offline",
+    });
+    await setDaemonRuntimesStatus(db, {
+      daemonDeviceId: deviceId,
+      status: "unavailable",
     });
   },
   onRunEvent: async (event) => {
@@ -61,6 +81,7 @@ server.on("upgrade", (request, socket, head) => {
 
 await redis.connect();
 await ensureRunQueueGroup(redis);
+await ensureAgentProvisioningQueueGroup(redis);
 await new Promise<void>((resolve) => {
   server.listen(env.WORKER_PORT, resolve);
 });
@@ -81,12 +102,61 @@ process.once("SIGINT", requestShutdown);
 process.once("SIGTERM", requestShutdown);
 
 while (!shuttingDown) {
+  const agentMessages = await readAgentProvisioningQueueMessages(
+    redis,
+    env.AGENTHUB_WORKER_CONSUMER_NAME,
+    {
+      count: 5,
+      blockMs: 500,
+    },
+  );
+
+  for (const message of agentMessages) {
+    try {
+      const result = await gateway.provisionAgent(message.job);
+      if (result.workspace.workspacePath === undefined) {
+        throw new Error("Daemon did not return an agent workspace path.");
+      }
+
+      await markAgentProvisioningReady(db, {
+        agentId: message.job.agent.id,
+        daemonDeviceId: message.job.daemonDeviceId,
+        workspacePath: result.workspace.workspacePath,
+        runtime: result.runtime,
+        updatedAt: new Date(result.sentAt),
+      });
+      logger.info(
+        {
+          agentId: message.job.agent.id,
+          messageId: message.id,
+        },
+        "Provisioned agent workspace",
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await markAgentProvisioningFailed(db, {
+        agentId: message.job.agent.id,
+        error: errorMessage,
+      });
+      logger.error(
+        {
+          err: error,
+          agentId: message.job.agent.id,
+          messageId: message.id,
+        },
+        "Failed to provision agent workspace",
+      );
+    }
+
+    await ackAgentProvisioningQueueMessage(redis, message.id);
+  }
+
   const messages = await readRunQueueMessages(
     redis,
     env.AGENTHUB_WORKER_CONSUMER_NAME,
     {
       count: 5,
-      blockMs: 5000,
+      blockMs: 500,
     },
   );
 
@@ -119,4 +189,3 @@ while (!shuttingDown) {
 
 server.close();
 await redis.quit();
-

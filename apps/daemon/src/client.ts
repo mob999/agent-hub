@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { loadDaemonEnv } from "@agent-hub/config";
 import type {
-  AgentRuntimeBinding,
+  DaemonRuntime,
   DaemonClientMessage,
   DaemonServerMessage,
   RunId,
@@ -11,7 +11,11 @@ import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
 import { CodexAdapter } from "./runtime/codex";
-import { assertPathInsideWorkspace } from "./workspace";
+import {
+  assertPathInsideWorkspace,
+  getAgentWorkspacePath,
+  initializeAgentWorkspace,
+} from "./workspace";
 
 function nowIsoDateTime(): string {
   return new Date().toISOString();
@@ -71,6 +75,58 @@ export async function startDaemon(): Promise<void> {
     if (message.type === "run.cancel") {
       abortControllers.get(message.runId)?.abort();
       logger.info({ runId: message.runId }, "Run cancellation requested");
+      return;
+    }
+
+    if (message.type === "agent.create") {
+      void (async () => {
+        try {
+          if (message.daemonDeviceId !== env.AGENTHUB_DEVICE_ID) {
+            throw new Error(
+              `Agent create target ${message.daemonDeviceId} does not match daemon ${env.AGENTHUB_DEVICE_ID}`,
+            );
+          }
+
+          const initialized = await initializeAgentWorkspace({
+            agentId: message.agent.id,
+            daemonDeviceId: message.daemonDeviceId,
+            workspacePath: getAgentWorkspacePath(env.AGENTHUB_WORKSPACE_ROOT, {
+              agentId: message.agent.id,
+              daemonDeviceId: message.daemonDeviceId,
+            }),
+            runtime: message.runtime,
+          });
+
+          send(ws, {
+            type: "agent.created",
+            agentId: message.agent.id,
+            daemonDeviceId: message.daemonDeviceId,
+            workspace: initialized.workspace,
+            runtime: initialized.runtime,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.info(
+            {
+              agentId: message.agent.id,
+              workspacePath: initialized.workspace.workspacePath,
+            },
+            "Agent workspace initialized",
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          send(ws, {
+            type: "agent.create_failed",
+            agentId: message.agent.id,
+            daemonDeviceId: message.daemonDeviceId,
+            reason,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, agentId: message.agent.id },
+            "Agent workspace initialization failed",
+          );
+        }
+      })();
       return;
     }
 
@@ -157,13 +213,12 @@ export async function startDaemon(): Promise<void> {
 
     ws.on("open", async () => {
       reconnectDelayMs = initialReconnectDelayMs;
-      let capabilities: AgentRuntimeBinding[] = [];
+      let runtimes: DaemonRuntime[] = [];
 
       try {
-        capabilities = [
+        runtimes = [
           {
             ...(await adapter.detect()),
-            agentId: "codex",
             daemonDeviceId: env.AGENTHUB_DEVICE_ID,
           },
         ];
@@ -178,7 +233,7 @@ export async function startDaemon(): Promise<void> {
         type: "daemon.hello",
         deviceId: env.AGENTHUB_DEVICE_ID,
         token: env.AGENTHUB_DAEMON_TOKEN,
-        capabilities,
+        runtimes,
         sentAt: nowIsoDateTime(),
       });
     });

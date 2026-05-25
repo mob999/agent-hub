@@ -1,18 +1,23 @@
 import { Button, InlineNotification } from '@carbon/react'
 import { Add, ChatBot, Devices, Renew } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
-import type { DaemonDevice, DeviceStatus } from '../lib/api'
+import type { AgentDetails, DaemonDevice, DeviceStatus } from '../lib/api'
 import { formatTime } from '../lib/format'
 
 interface DaemonPageProps {
   devices: DaemonDevice[]
+  agents: AgentDetails[]
   deviceError: string | null
+  openCreateAgent: (daemonDeviceId?: string) => void
 }
 
-export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
+export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: DaemonPageProps) {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
+  const selectedDeviceAgents = selectedDevice
+    ? agents.filter((agent) => agent.runtimeBinding.daemonDeviceId === selectedDevice.id)
+    : []
 
   return (
     <section
@@ -133,7 +138,27 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
             </DetailSection>
 
             <DetailSection title="Detected runtimes">
-              <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
+              {selectedDevice.runtimes.length === 0 ? (
+                <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
+              ) : (
+                <div className="grid border border-[var(--cds-border-subtle-01)]">
+                  {selectedDevice.runtimes.map((runtime) => (
+                    <div
+                      className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] p-3 last:border-b-0"
+                      key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
+                    >
+                      <span className="min-w-0 truncate">
+                        {runtime.runtimeVersion
+                          ? `${runtime.runtimeKind} (${runtime.runtimeVersion})`
+                          : runtime.runtimeKind}
+                      </span>
+                      <span className="text-[var(--cds-text-secondary)]">
+                        {runtime.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </DetailSection>
 
             <DetailSection title="Connection">
@@ -149,16 +174,38 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                   <Button kind="ghost" size="sm">
                     Select
                   </Button>
-                  <Button kind="secondary" size="sm" renderIcon={Add}>
+                  <Button
+                    kind="secondary"
+                    size="sm"
+                    renderIcon={Add}
+                    onClick={() => openCreateAgent(selectedDevice.id)}
+                  >
                     Create
                   </Button>
                 </div>
               }
             >
-              <div className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 border border-[var(--cds-border-subtle-01)] p-3 text-[var(--cds-text-secondary)]">
-                <ChatBot size={20} />
-                <span>No agents created on this daemon yet.</span>
-              </div>
+              {selectedDeviceAgents.length === 0 ? (
+                <div className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 border border-[var(--cds-border-subtle-01)] p-3 text-[var(--cds-text-secondary)]">
+                  <ChatBot size={20} />
+                  <span>No agents created on this daemon yet.</span>
+                </div>
+              ) : (
+                <div className="grid border border-[var(--cds-border-subtle-01)]">
+                  {selectedDeviceAgents.map((agent) => (
+                    <div
+                      className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] p-3 last:border-b-0"
+                      key={agent.agent.id}
+                    >
+                      <ChatBot size={20} />
+                      <span className="min-w-0 truncate">{agent.agent.name}</span>
+                      <span className="text-[var(--cds-text-secondary)]">
+                        {agent.workspace.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </DetailSection>
           </>
         ) : (

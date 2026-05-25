@@ -7,6 +7,8 @@ export type RuntimeKind = "claude-code" | "codex" | "opencode" | "custom";
 
 export type AgentStatus = "active" | "disabled" | "archived";
 
+export type DaemonRuntimeStatus = "ready" | "unavailable" | "disabled";
+
 export type RuntimeBindingStatus =
   | "pending"
   | "ready"
@@ -48,6 +50,16 @@ export interface DaemonDevice {
   lastSeenAt?: IsoDateTime;
 }
 
+export interface DaemonRuntime {
+  daemonDeviceId: DaemonDeviceId;
+  runtimeKind: RuntimeKind;
+  runtimeVersion?: string;
+  executablePath?: string;
+  capabilities: RuntimeCapability[];
+  status: DaemonRuntimeStatus;
+  lastSeenAt?: IsoDateTime;
+}
+
 export interface AgentRuntimeBinding {
   agentId: AgentId;
   daemonDeviceId: DaemonDeviceId;
@@ -57,16 +69,18 @@ export interface AgentRuntimeBinding {
   capabilities: RuntimeCapability[];
   status: RuntimeBindingStatus;
   lastSeenAt?: IsoDateTime;
+  error?: string;
 }
 
 export interface AgentWorkspace {
   agentId: AgentId;
   daemonDeviceId: DaemonDeviceId;
-  workspacePath: string;
+  workspacePath?: string;
   status: AgentWorkspaceStatus;
   syncMode: AgentWorkspaceSyncMode;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+  error?: string;
 }
 
 export interface AgentWorkspaceManifest {
@@ -83,6 +97,23 @@ export interface AgentRuntimeConfig {
   executablePath?: string;
   capabilities: RuntimeCapability[];
   updatedAt: IsoDateTime;
+}
+
+export interface AgentDetails {
+  agent: Agent;
+  runtimeBinding: AgentRuntimeBinding;
+  workspace: AgentWorkspace;
+}
+
+export interface CreateAgentRequest {
+  name: string;
+  description?: string;
+  daemonDeviceId: DaemonDeviceId;
+  runtimeKind: RuntimeKind;
+}
+
+export interface CreateAgentResponse {
+  agent: AgentDetails;
 }
 
 export const agentWorkspaceDirectoryNames = [

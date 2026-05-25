@@ -1,7 +1,7 @@
-import { Form, IconButton, InlineLoading, InlineNotification, TextArea } from '@carbon/react'
+import { Button, Form, IconButton, InlineLoading, InlineNotification, TextArea } from '@carbon/react'
 import { Add, ChatBot, Folder, JobRun, Send, Task } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
-import type { LocalRun, RunEvent } from '../lib/api'
+import type { AgentDetails, LocalRun, RunEvent } from '../lib/api'
 import { RunThread } from './RunThread'
 
 interface ChannelWorkspaceProps {
@@ -11,9 +11,12 @@ interface ChannelWorkspaceProps {
   isCreatingRun: boolean
   runError: string | null
   selectedRunId: string | null
+  selectedAgent: AgentDetails | null
+  readyAgentCount: number
   setPrompt: (value: string) => void
   submitRun: (event: FormEvent<HTMLFormElement>) => void
   selectRun: (runId: string) => void
+  openCreateAgent: () => void
 }
 
 export function ChannelWorkspace({
@@ -23,10 +26,17 @@ export function ChannelWorkspace({
   isCreatingRun,
   runError,
   selectedRunId,
+  selectedAgent,
+  readyAgentCount,
   setPrompt,
   submitRun,
   selectRun,
+  openCreateAgent,
 }: ChannelWorkspaceProps) {
+  const selectedAgentReady =
+    selectedAgent?.runtimeBinding.status === 'ready' &&
+    selectedAgent.workspace.status === 'ready'
+
   return (
     <section
       id="main-content"
@@ -84,8 +94,15 @@ export function ChannelWorkspace({
             <ChatBot size={32} />
             <h2 className="cds--type-heading-compact-02">No messages yet</h2>
             <p className="text-[var(--cds-text-secondary)]">
-              Create an agent, then message #all to start a run.
+              {readyAgentCount > 0
+                ? 'Message the selected agent to start a run.'
+                : 'Create an agent, then message #all to start a run.'}
             </p>
+            {readyAgentCount === 0 && (
+              <Button kind="secondary" size="sm" onClick={openCreateAgent}>
+                Create agent
+              </Button>
+            )}
           </div>
         ) : (
           <div className="mx-auto grid w-full max-w-[68rem] gap-5">
@@ -107,14 +124,23 @@ export function ChannelWorkspace({
         aria-label="Create run"
         onSubmit={submitRun}
       >
+        {!selectedAgentReady && (
+          <InlineNotification
+            kind="warning"
+            title="No ready agent selected"
+            subtitle="Create or select a ready agent before sending a message."
+            lowContrast
+            hideCloseButton
+          />
+        )}
         <TextArea
           id="run-prompt"
           labelText="Message #all"
           hideLabel
           rows={3}
           value={prompt}
-          placeholder="Message #all"
-          disabled={isCreatingRun}
+          placeholder={selectedAgentReady ? `Message ${selectedAgent.agent.name}` : 'Create an agent first'}
+          disabled={isCreatingRun || !selectedAgentReady}
           onChange={(event) => setPrompt(event.target.value)}
         />
         <div className="flex items-center justify-between gap-4 max-[671px]:flex-wrap max-[671px]:items-start">
@@ -147,7 +173,7 @@ export function ChannelWorkspace({
               kind="primary"
               size="md"
               align="top-end"
-              disabled={prompt.trim().length === 0}
+              disabled={prompt.trim().length === 0 || !selectedAgentReady}
             >
               <Send size={20} />
             </IconButton>

@@ -1,4 +1,9 @@
+import { homedir } from "node:os";
+import path from "node:path";
+
 import { z } from "zod";
+
+export const defaultAgentHubWorkspaceRoot = path.join(homedir(), ".agent-hub");
 
 const nodeEnvSchema = z
   .enum(["development", "test", "production"])
@@ -7,6 +12,26 @@ const nodeEnvSchema = z
 const portSchema = z.coerce.number().int().min(1).max(65535).default(3000);
 
 const sessionTtlDaysSchema = z.coerce.number().int().positive().default(30);
+
+function normalizeWorkspaceRoot(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return defaultAgentHubWorkspaceRoot;
+  }
+
+  const trimmed = value.trim();
+  const looksLikeWindowsAbsolutePath = /^[A-Za-z]:[\\/]/.test(trimmed);
+
+  if (process.platform !== "win32" && looksLikeWindowsAbsolutePath) {
+    return defaultAgentHubWorkspaceRoot;
+  }
+
+  return trimmed;
+}
+
+const workspaceRootSchema = z.preprocess(
+  normalizeWorkspaceRoot,
+  z.string().min(1),
+);
 
 const cookieSecureSchema = z
   .preprocess((value) => {
@@ -39,7 +64,7 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
-  AGENTHUB_DEFAULT_WORKSPACE_PATH: z.string().min(1).optional(),
+  AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -70,7 +95,7 @@ export const daemonEnvSchema = z.object({
   AGENTHUB_DAEMON_GATEWAY_URL: z.string().url(),
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DEVICE_ID: z.string().min(1),
-  AGENTHUB_WORKSPACE_ROOT: z.string().min(1),
+  AGENTHUB_WORKSPACE_ROOT: workspaceRootSchema,
   CODEX_EXECUTABLE_PATH: z.string().min(1).optional(),
 });
 
@@ -81,4 +106,3 @@ export function loadDaemonEnv(
 ): DaemonEnv {
   return daemonEnvSchema.parse(env);
 }
-

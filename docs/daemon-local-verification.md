@@ -24,11 +24,10 @@ REDIS_URL=redis://localhost:6379
 AGENTHUB_DAEMON_TOKEN=dev-daemon-token
 AGENTHUB_DEFAULT_DAEMON_DEVICE_ID=local-dev
 AGENTHUB_DEFAULT_AGENT_ID=codex
-AGENTHUB_DEFAULT_WORKSPACE_PATH=/path/to/agent-hub
 WORKER_PORT=3001
 AGENTHUB_DAEMON_GATEWAY_URL=http://localhost:3001
 AGENTHUB_DEVICE_ID=local-dev
-AGENTHUB_WORKSPACE_ROOT=/path/to/agent-hub
+# Agent workspaces default to the current user's ~/.agent-hub directory.
 ```
 
 Windows PowerShell example:
@@ -39,11 +38,10 @@ REDIS_URL=redis://localhost:6379
 AGENTHUB_DAEMON_TOKEN=dev-daemon-token
 AGENTHUB_DEFAULT_DAEMON_DEVICE_ID=local-dev
 AGENTHUB_DEFAULT_AGENT_ID=codex
-AGENTHUB_DEFAULT_WORKSPACE_PATH=E:\agent-hub
 WORKER_PORT=3001
 AGENTHUB_DAEMON_GATEWAY_URL=http://localhost:3001
 AGENTHUB_DEVICE_ID=local-dev
-AGENTHUB_WORKSPACE_ROOT=E:\agent-hub
+# Agent workspaces default to the current user's ~/.agent-hub directory.
 ```
 
 ## 2. Start the three services

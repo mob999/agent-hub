@@ -72,7 +72,15 @@ function sendHello(ws: WebSocket): void {
       type: "daemon.hello",
       deviceId: "local-dev",
       token,
-      capabilities: [],
+      runtimes: [
+        {
+          daemonDeviceId: "local-dev",
+          runtimeKind: "codex",
+          capabilities: [],
+          status: "ready",
+          lastSeenAt: "2026-05-25T00:00:00.000Z",
+        },
+      ],
       sentAt: "2026-05-25T00:00:00.000Z",
     }),
   );
@@ -93,7 +101,9 @@ describe("DaemonGateway", () => {
     const connectedDevices: string[] = [];
     const gateway = new DaemonGateway({
       daemonToken: token,
-      onDaemonConnected: (deviceId) => connectedDevices.push(deviceId),
+      onDaemonConnected: (deviceId, runtimes) => {
+        connectedDevices.push(`${deviceId}:${runtimes[0]?.runtimeKind}`);
+      },
       onRunEvent: () => undefined,
     });
     const listening = await createGatewayServer(gateway);
@@ -107,7 +117,7 @@ describe("DaemonGateway", () => {
       type: "daemon.hello.ack",
       deviceId: "local-dev",
     });
-    expect(connectedDevices).toEqual(["local-dev"]);
+    expect(connectedDevices).toEqual(["local-dev:codex"]);
     expect(gateway.listDevices()).toEqual([
       expect.objectContaining({
         deviceId: "local-dev",
@@ -175,5 +185,70 @@ describe("DaemonGateway", () => {
       .poll(() => events.length)
       .toBe(1);
     expect(events).toEqual([event]);
+  });
+
+  it("provisions agents through a connected daemon", async () => {
+    const gateway = new DaemonGateway({
+      daemonToken: token,
+      onRunEvent: () => undefined,
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+    ws = new WebSocket(listening.url);
+
+    await waitForOpen(ws);
+    sendHello(ws);
+    await waitForJsonMessage(ws);
+
+    const job = {
+      agent: {
+        id: "00000000-0000-4000-8000-000000000002",
+        ownerUserId: "00000000-0000-4000-8000-000000000003",
+        name: "Codex",
+        defaultRuntimeKind: "codex" as const,
+        status: "active" as const,
+        createdAt: "2026-05-25T00:00:00.000Z",
+        updatedAt: "2026-05-25T00:00:00.000Z",
+      },
+      daemonDeviceId: "local-dev",
+      runtime: {
+        runtimeKind: "codex" as const,
+        capabilities: [],
+        updatedAt: "2026-05-25T00:00:00.000Z",
+      },
+    };
+    const createMessage = waitForJsonMessage<{
+      type: string;
+      agent: { id: string };
+    }>(ws);
+    const provisioned = gateway.provisionAgent(job);
+
+    await expect(createMessage).resolves.toMatchObject({
+      type: "agent.create",
+      agent: { id: job.agent.id },
+    });
+    ws.send(
+      JSON.stringify({
+        type: "agent.created",
+        agentId: job.agent.id,
+        daemonDeviceId: "local-dev",
+        workspace: {
+          agentId: job.agent.id,
+          daemonDeviceId: "local-dev",
+          workspacePath: "/workspace/local-dev/agent",
+          status: "ready",
+          syncMode: "local-only",
+          createdAt: "2026-05-25T00:00:00.000Z",
+          updatedAt: "2026-05-25T00:00:00.000Z",
+        },
+        runtime: job.runtime,
+        sentAt: "2026-05-25T00:00:01.000Z",
+      }),
+    );
+
+    await expect(provisioned).resolves.toMatchObject({
+      type: "agent.created",
+      agentId: job.agent.id,
+    });
   });
 });

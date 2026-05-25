@@ -15,6 +15,13 @@
       "when": 1779680129398,
       "tag": "0001_brave_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779721635958,
+      "tag": "0002_far_spectrum",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,9 @@
 import type {
+  AgentDetails,
   AgentId,
-  AgentRuntimeBinding,
   AgentRuntimeConfig,
+  AgentWorkspace,
+  DaemonRuntime,
   DaemonDeviceId,
   IsoDateTime,
 } from "./agent.js";
@@ -19,7 +21,7 @@ export type DaemonClientMessage =
       type: "daemon.hello";
       deviceId: DaemonDeviceId;
       token: string;
-      capabilities: AgentRuntimeBinding[];
+      runtimes: DaemonRuntime[];
       sentAt: IsoDateTime;
     }
   | {
@@ -44,6 +46,21 @@ export type DaemonClientMessage =
       runId: RunId;
       event: RunEvent;
       sentAt: IsoDateTime;
+    }
+  | {
+      type: "agent.created";
+      agentId: AgentId;
+      daemonDeviceId: DaemonDeviceId;
+      workspace: AgentWorkspace;
+      runtime: AgentRuntimeConfig;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agent.create_failed";
+      agentId: AgentId;
+      daemonDeviceId: DaemonDeviceId;
+      reason: string;
+      sentAt: IsoDateTime;
     };
 
 export type DaemonServerMessage =
@@ -57,6 +74,13 @@ export type DaemonServerMessage =
       agentId: AgentId;
       daemonDeviceId: DaemonDeviceId;
     } & DaemonRunAssignment)
+  | {
+      type: "agent.create";
+      agent: AgentDetails["agent"];
+      daemonDeviceId: DaemonDeviceId;
+      runtime: AgentRuntimeConfig;
+      sentAt: IsoDateTime;
+    }
   | {
       type: "run.cancel";
       runId: RunId;

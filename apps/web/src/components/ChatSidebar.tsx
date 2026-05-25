@@ -1,10 +1,14 @@
-import { Activity, Add, Bookmark, Search } from '@carbon/react/icons'
+import { Activity, Add, Bookmark, ChatBot, Search } from '@carbon/react/icons'
 import { Tag } from '@carbon/react'
-import type { LocalRun } from '../lib/api'
+import type { AgentDetails, LocalRun } from '../lib/api'
 
 interface ChatSidebarProps {
   runs: LocalRun[]
   activeRunCount: number
+  agents: AgentDetails[]
+  selectedAgentId: string | null
+  onCreateAgent: () => void
+  selectAgent: (agentId: string) => void
 }
 
 const sidebarButton =
@@ -16,7 +20,34 @@ const selectedListItem =
 const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 
-export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
+function isAgentReady(agent: AgentDetails): boolean {
+  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
+}
+
+function agentStatusTag(agent: AgentDetails): { type: 'green' | 'blue' | 'red' | 'gray'; label: string } {
+  if (isAgentReady(agent)) {
+    return { type: 'green', label: 'ready' }
+  }
+
+  if (agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending') {
+    return { type: 'blue', label: 'pending' }
+  }
+
+  if (agent.runtimeBinding.status === 'unavailable' || agent.workspace.status === 'unavailable') {
+    return { type: 'red', label: 'error' }
+  }
+
+  return { type: 'gray', label: agent.runtimeBinding.status }
+}
+
+export function ChatSidebar({
+  runs,
+  activeRunCount,
+  agents,
+  selectedAgentId,
+  onCreateAgent,
+  selectAgent,
+}: ChatSidebarProps) {
   return (
     <aside
       className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
@@ -77,19 +108,46 @@ export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
       <section className="grid gap-1 p-3" aria-labelledby="agents-heading">
         <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
           <h3 id="agents-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
-            Agents<span className={inlineCount}>(0)</span>
+            Agents<span className={inlineCount}>({agents.length})</span>
           </h3>
           <button
             className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Create agent"
+            onClick={onCreateAgent}
           >
             <Add className="block h-4 w-4" size={16} />
           </button>
         </div>
-        <p className="px-3 pb-3 pt-1 text-[var(--cds-text-secondary)]">
-          No agents yet. Create one from a runtime.
-        </p>
+        {agents.length === 0 ? (
+          <p className="px-3 pb-3 pt-1 text-[var(--cds-text-secondary)]">
+            No agents yet. Create one from a runtime.
+          </p>
+        ) : (
+          <div className="grid gap-1">
+            {agents.map((agent) => {
+              const status = agentStatusTag(agent)
+
+              return (
+                <button
+                  className={`${sidebarButton} ${
+                    selectedAgentId === agent.agent.id ? selectedListItem : transparentListItem
+                  } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-2 px-3`}
+                  type="button"
+                  key={agent.agent.id}
+                  aria-current={selectedAgentId === agent.agent.id ? 'page' : undefined}
+                  onClick={() => selectAgent(agent.agent.id)}
+                >
+                  <ChatBot size={16} />
+                  <span className="truncate">{agent.agent.name}</span>
+                  <Tag type={status.type} size="sm">
+                    {status.label}
+                  </Tag>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </section>
     </aside>
   )

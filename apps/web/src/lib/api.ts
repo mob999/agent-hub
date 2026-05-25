@@ -3,6 +3,26 @@ const apiBaseUrl = import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://localhost:30
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type DeviceStatus = 'online' | 'offline' | string
 export type WorkspaceView = 'chat' | 'runs' | 'daemon'
+export type RuntimeKind = 'claude-code' | 'codex' | 'opencode' | 'custom'
+export type AgentStatus = 'active' | 'disabled' | 'archived'
+export type RuntimeBindingStatus = 'pending' | 'ready' | 'unavailable' | 'disabled'
+export type AgentWorkspaceStatus = 'pending' | 'ready' | 'missing' | 'unavailable'
+
+export interface RuntimeCapability {
+  name: string
+  enabled: boolean
+  description?: string
+}
+
+export interface DaemonRuntime {
+  daemonDeviceId: string
+  runtimeKind: RuntimeKind
+  runtimeVersion?: string
+  executablePath?: string
+  capabilities: RuntimeCapability[]
+  status: 'ready' | 'unavailable' | 'disabled'
+  lastSeenAt?: string
+}
 
 export interface User {
   id: string
@@ -26,6 +46,48 @@ export interface DaemonDevice {
   status: DeviceStatus
   lastSeenAt: string | null
   runningRunIds: string[]
+  runtimes: DaemonRuntime[]
+}
+
+export interface Agent {
+  id: string
+  ownerUserId: string
+  name: string
+  description?: string
+  avatar?: string
+  defaultRuntimeKind: RuntimeKind
+  status: AgentStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentRuntimeBinding {
+  agentId: string
+  daemonDeviceId: string
+  runtimeKind: RuntimeKind
+  runtimeVersion?: string
+  executablePath?: string
+  capabilities: RuntimeCapability[]
+  status: RuntimeBindingStatus
+  lastSeenAt?: string
+  error?: string
+}
+
+export interface AgentWorkspace {
+  agentId: string
+  daemonDeviceId: string
+  workspacePath?: string
+  status: AgentWorkspaceStatus
+  syncMode: 'local-only'
+  createdAt: string
+  updatedAt: string
+  error?: string
+}
+
+export interface AgentDetails {
+  agent: Agent
+  runtimeBinding: AgentRuntimeBinding
+  workspace: AgentWorkspace
 }
 
 export interface AgentRun {

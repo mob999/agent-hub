@@ -5,15 +5,22 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
+import type { RuntimeKind } from "@agent-hub/core";
 import {
   appendRunEvent,
+  createAgentProvisioningRecords,
   createAgentHubRedisClient,
   createLogger,
   createRunRecord,
+  enqueueAgentProvisioningJob,
   enqueueRunJob,
+  getAgentForUser,
+  getReadyDaemonRuntime,
+  getRunnableAgentForUser,
   getRunEventsForUser,
   getRunForUser,
-  listDaemonDevices,
+  listAgentsForUser,
+  listDaemonDevicesWithRuntimes,
   listRunningRunIdsByDaemonDevice,
   toAgentRun,
   type RunQueueJob,
@@ -33,8 +40,18 @@ const env = loadApiEnv();
 const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({ bindings: { service: "api" } });
+const runtimeKinds = new Set<RuntimeKind>([
+  "claude-code",
+  "codex",
+  "opencode",
+  "custom",
+]);
 
 await redis.connect();
+
+function isRuntimeKind(value: unknown): value is RuntimeKind {
+  return typeof value === "string" && runtimeKinds.has(value as RuntimeKind);
+}
 
 const healthRoute = createRoute({
   method: "get",
@@ -138,7 +155,7 @@ app.openapi(healthRoute, (c) => {
 
 app.use("/daemon/devices", requireAuth);
 app.get("/daemon/devices", async (c) => {
-  const devices = await listDaemonDevices(c.get("db"));
+  const devices = await listDaemonDevicesWithRuntimes(c.get("db"));
   const runningRunIdsByDevice = await listRunningRunIdsByDaemonDevice(c.get("db"));
 
   return c.json({
@@ -147,8 +164,153 @@ app.get("/daemon/devices", async (c) => {
       status: device.status,
       lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
       runningRunIds: runningRunIdsByDevice.get(device.id) ?? [],
+      runtimes: device.runtimes,
     })),
   });
+});
+
+app.use("/agents", requireAuth);
+app.use("/agents/*", requireAuth);
+app.get("/agents", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  return c.json({
+    agents: await listAgentsForUser(db, { ownerUserId: user.id }),
+  });
+});
+
+app.post("/agents", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    name?: unknown;
+    description?: unknown;
+    daemonDeviceId?: unknown;
+    runtimeKind?: unknown;
+  };
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const description =
+    typeof body.description === "string" && body.description.trim().length > 0
+      ? body.description.trim()
+      : undefined;
+
+  if (
+    name.length === 0 ||
+    name.length > 120 ||
+    typeof body.daemonDeviceId !== "string" ||
+    body.daemonDeviceId.length === 0 ||
+    !isRuntimeKind(body.runtimeKind)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_AGENT_REQUEST",
+          message:
+            "name, daemonDeviceId, and a supported runtimeKind are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const runtime = await getReadyDaemonRuntime(db, {
+    daemonDeviceId: body.daemonDeviceId,
+    runtimeKind: body.runtimeKind,
+  });
+
+  if (runtime === null) {
+    return c.json(
+      {
+        error: {
+          code: "RUNTIME_UNAVAILABLE",
+          message: "Selected daemon runtime is not available.",
+        },
+      },
+      400,
+    );
+  }
+
+  const createdAt = new Date();
+  const agent = await createAgentProvisioningRecords(db, {
+    id: randomUUID(),
+    ownerUserId: user.id,
+    name,
+    description,
+    runtime,
+    createdAt,
+  });
+  const queueMessageId = await enqueueAgentProvisioningJob(redis, {
+    agent: agent.agent,
+    daemonDeviceId: runtime.daemonDeviceId,
+    runtime: {
+      runtimeKind: runtime.runtimeKind,
+      runtimeVersion: runtime.runtimeVersion,
+      executablePath: runtime.executablePath,
+      capabilities: runtime.capabilities,
+      updatedAt: createdAt.toISOString(),
+    },
+  });
+
+  return c.json({ agent, queueMessageId }, 202);
+});
+
+app.get("/agents/:agentId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const agent = await getAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (agent === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ agent });
 });
 
 app.use("/runs", requireAuth);
@@ -175,14 +337,68 @@ app.post("/runs", async (c) => {
     workspacePath?: string;
   };
   const prompt = body.prompt;
-  const agentId = body.agentId ?? env.AGENTHUB_DEFAULT_AGENT_ID;
-  const daemonDeviceId =
-    body.daemonDeviceId ?? env.AGENTHUB_DEFAULT_DAEMON_DEVICE_ID;
-  const workspacePath = body.workspacePath ?? env.AGENTHUB_DEFAULT_WORKSPACE_PATH;
 
   if (
     typeof prompt !== "string" ||
-    prompt.length === 0 ||
+    prompt.length === 0
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_RUN_REQUEST",
+          message:
+            "prompt is required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const now = new Date().toISOString();
+  let agentId = body.agentId;
+  let daemonDeviceId = body.daemonDeviceId;
+  let workspacePath = body.workspacePath;
+  let runtime: RunQueueJob["runtime"] = {
+    runtimeKind: "codex",
+    capabilities: [],
+    updatedAt: now,
+  };
+
+  if (typeof agentId === "string" && agentId.length > 0) {
+    const runnableAgent = await getRunnableAgentForUser(db, {
+      agentId,
+      ownerUserId: user.id,
+    });
+
+    if (runnableAgent === null) {
+      const existingAgent = await getAgentForUser(db, {
+        agentId,
+        ownerUserId: user.id,
+      });
+
+      return c.json(
+        {
+          error: {
+            code: existingAgent === null ? "AGENT_NOT_FOUND" : "AGENT_NOT_READY",
+            message: existingAgent === null
+              ? "Agent was not found."
+              : "Agent is not ready to run yet.",
+          },
+        },
+        existingAgent === null ? 404 : 400,
+      );
+    }
+
+    daemonDeviceId = runnableAgent.daemonDeviceId;
+    workspacePath = runnableAgent.workspacePath;
+    runtime = runnableAgent.runtime;
+  } else {
+    agentId = env.AGENTHUB_DEFAULT_AGENT_ID;
+    daemonDeviceId = daemonDeviceId ?? env.AGENTHUB_DEFAULT_DAEMON_DEVICE_ID;
+    workspacePath = workspacePath ?? env.AGENTHUB_DEFAULT_WORKSPACE_PATH;
+  }
+
+  if (
     agentId === undefined ||
     daemonDeviceId === undefined ||
     workspacePath === undefined
@@ -192,14 +408,13 @@ app.post("/runs", async (c) => {
         error: {
           code: "INVALID_RUN_REQUEST",
           message:
-            "prompt is required; agentId, daemonDeviceId, and workspacePath must be provided or configured as defaults.",
+            "agentId, daemonDeviceId, and workspacePath must come from a ready agent or be configured as defaults.",
         },
       },
       400,
     );
   }
 
-  const now = new Date().toISOString();
   const job: RunQueueJob = {
     daemonDeviceId,
     prompt,
@@ -212,11 +427,7 @@ app.post("/runs", async (c) => {
       createdAt: now,
       updatedAt: now,
     },
-    runtime: {
-      runtimeKind: "codex",
-      capabilities: [],
-      updatedAt: now,
-    },
+    runtime,
   };
 
   await createRunRecord(db, {

@@ -1,6 +1,7 @@
 import { loadWorkerEnv } from "@agent-hub/config";
 import {
   ackRunQueueMessage,
+  createLogger,
   createAgentHubRedisClient,
   ensureRunQueueGroup,
   publishDaemonAssignment,
@@ -9,13 +10,17 @@ import {
 
 const env = loadWorkerEnv();
 const redis = createAgentHubRedisClient(env.REDIS_URL);
+const logger = createLogger({
+  bindings: {
+    consumer: env.AGENTHUB_WORKER_CONSUMER_NAME,
+    service: "worker",
+  },
+});
 
 await redis.connect();
 await ensureRunQueueGroup(redis);
 
-console.log(
-  `Worker ${env.AGENTHUB_WORKER_CONSUMER_NAME} listening for run jobs`,
-);
+logger.info("Worker listening for run jobs");
 
 let shuttingDown = false;
 
@@ -39,8 +44,13 @@ while (!shuttingDown) {
   for (const message of messages) {
     await publishDaemonAssignment(redis, message.job);
     await ackRunQueueMessage(redis, message.id);
-    console.log(
-      `Dispatched run ${message.job.run.id} to daemon ${message.job.daemonDeviceId}`,
+    logger.info(
+      {
+        daemonDeviceId: message.job.daemonDeviceId,
+        messageId: message.id,
+        runId: message.job.run.id,
+      },
+      "Dispatched run to daemon",
     );
   }
 }

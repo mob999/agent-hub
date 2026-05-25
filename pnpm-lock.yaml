@@ -90,6 +90,9 @@ importers:
       '@agent-hub/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agent-hub/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       ws:
         specifier: ^8.21.0
         version: 8.21.0

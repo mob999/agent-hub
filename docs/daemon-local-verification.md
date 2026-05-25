@@ -58,9 +58,9 @@ Run one command per terminal.
 
 Expected signals:
 
-- API prints `API server listening on http://localhost:3000`.
-- Worker prints `Worker worker-local listening for run jobs`.
-- Daemon prints `Daemon connected as local-dev`.
+- API log contains `"msg":"API server listening"`.
+- Worker log contains `"msg":"Worker listening for run jobs"`.
+- Daemon log contains `"msg":"Daemon connected"`.
 
 ## 3. Verify auth is required
 
@@ -186,7 +186,7 @@ $runId
 
 Expected service logs:
 
-- Worker prints `Dispatched run ... to daemon local-dev`.
+- Worker log contains `"msg":"Dispatched run to daemon"`.
 - Daemon runs Codex.
 
 ## 7. Poll persisted run events

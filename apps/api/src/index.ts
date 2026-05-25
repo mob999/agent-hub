@@ -10,6 +10,7 @@ import {
   createAgentHubRedisClient,
   daemonAssignmentChannel,
   enqueueRunJob,
+  createLogger,
   type RunQueueJob,
 } from "@agent-hub/server";
 import { cors } from "hono/cors";
@@ -37,8 +38,10 @@ const env = loadApiEnv();
 const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const redisSubscriber = redis.duplicate();
+const logger = createLogger({ bindings: { service: "api" } });
 const daemonGateway = new DaemonGateway({
   daemonToken: env.AGENTHUB_DAEMON_TOKEN,
+  logger,
   onDaemonConnected: async (deviceId) => {
     await upsertDaemonDevice(db, {
       id: deviceId,
@@ -68,6 +71,11 @@ await redisSubscriber.subscribe(daemonAssignmentChannel, (payload) => {
       status: "failed",
       error: `Daemon ${message.daemonDeviceId} is not connected.`,
       createdAt: new Date().toISOString(),
+    }).catch((error) => {
+      logger.error(
+        { err: error, runId: message.run.id },
+        "Failed to persist daemon assignment failure",
+      );
     });
   }
 });
@@ -396,7 +404,10 @@ const server = serve(
     port: env.PORT,
   },
   () => {
-    console.log(`API server listening on http://localhost:${env.PORT}`);
+    logger.info(
+      { port: env.PORT, url: `http://localhost:${env.PORT}` },
+      "API server listening",
+    );
   },
 );
 

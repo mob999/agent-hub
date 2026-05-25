@@ -8,10 +8,12 @@ import type {
   RunEvent,
   RunId,
 } from "@agent-hub/core";
+import type { AgentHubLogger } from "@agent-hub/server";
 import { WebSocket, WebSocketServer } from "ws";
 
 export interface DaemonGatewayOptions {
   daemonToken: string;
+  logger?: AgentHubLogger;
   onDaemonConnected?(deviceId: DaemonDeviceId): void | Promise<void>;
   onDaemonDisconnected?(deviceId: DaemonDeviceId): void | Promise<void>;
   onRunEvent(event: RunEvent): void | Promise<void>;
@@ -42,8 +44,8 @@ function send(ws: WebSocket, message: DaemonServerMessage): void {
   }
 }
 
-function reportAsyncError(error: unknown): void {
-  console.error(error instanceof Error ? error.message : String(error));
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 export class DaemonGateway {
@@ -81,7 +83,16 @@ export class DaemonGateway {
           this.#connections.set(message.deviceId, connection);
           void Promise.resolve(
             this.#options.onDaemonConnected?.(message.deviceId),
-          ).catch(reportAsyncError);
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), deviceId: message.deviceId },
+              "Failed to persist daemon connection state",
+            );
+          });
+          this.#options.logger?.info(
+            { deviceId: message.deviceId },
+            "Daemon connected",
+          );
           send(ws, {
             type: "daemon.hello.ack",
             deviceId: message.deviceId,
@@ -109,13 +120,20 @@ export class DaemonGateway {
 
         if (message.type === "run.rejected") {
           connection.runningRunIds.delete(message.runId);
-          void Promise.resolve(this.#options.onRunEvent({
-            type: "run.completed",
-            runId: message.runId,
-            status: "failed",
-            error: message.reason,
-            createdAt: nowIsoDateTime(),
-          })).catch(reportAsyncError);
+          void Promise.resolve(
+            this.#options.onRunEvent({
+              type: "run.completed",
+              runId: message.runId,
+              status: "failed",
+              error: message.reason,
+              createdAt: nowIsoDateTime(),
+            }),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), runId: message.runId },
+              "Failed to persist daemon run rejection",
+            );
+          });
           return;
         }
 
@@ -124,7 +142,16 @@ export class DaemonGateway {
             connection.runningRunIds.delete(message.runId);
           }
           void Promise.resolve(this.#options.onRunEvent(message.event)).catch(
-            reportAsyncError,
+            (error) => {
+              this.#options.logger?.error(
+                {
+                  err: toError(error),
+                  runId: message.runId,
+                  eventType: message.event.type,
+                },
+                "Failed to persist daemon run event",
+              );
+            },
           );
         }
       });
@@ -134,7 +161,16 @@ export class DaemonGateway {
           this.#connections.delete(connection.deviceId);
           void Promise.resolve(
             this.#options.onDaemonDisconnected?.(connection.deviceId),
-          ).catch(reportAsyncError);
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), deviceId: connection?.deviceId },
+              "Failed to persist daemon disconnection state",
+            );
+          });
+          this.#options.logger?.info(
+            { deviceId: connection.deviceId },
+            "Daemon disconnected",
+          );
         }
       });
     });
@@ -163,10 +199,24 @@ export class DaemonGateway {
     const connection = this.#connections.get(message.daemonDeviceId);
 
     if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          daemonDeviceId: message.daemonDeviceId,
+          runId: message.run.id,
+        },
+        "Cannot assign run because daemon is not connected",
+      );
       return false;
     }
 
     send(connection.ws, message);
+    this.#options.logger?.info(
+      {
+        daemonDeviceId: message.daemonDeviceId,
+        runId: message.run.id,
+      },
+      "Assigned run to daemon",
+    );
     return true;
   }
 

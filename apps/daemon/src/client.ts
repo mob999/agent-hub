@@ -7,6 +7,7 @@ import type {
   DaemonServerMessage,
   RunId,
 } from "@agent-hub/core";
+import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
 import { CodexAdapter } from "./runtime/codex";
@@ -43,6 +44,12 @@ export async function startDaemon(): Promise<void> {
   const adapter = new CodexAdapter({
     executablePath: env.CODEX_EXECUTABLE_PATH,
   });
+  const logger = createLogger({
+    bindings: {
+      deviceId: env.AGENTHUB_DEVICE_ID,
+      service: "daemon",
+    },
+  });
   const abortControllers = new Map<RunId, AbortController>();
   const ws = new WebSocket(toDaemonWebSocketUrl(env.AGENTHUB_API_URL));
 
@@ -58,10 +65,9 @@ export async function startDaemon(): Promise<void> {
         },
       ];
     } catch (error) {
-      console.warn(
-        `Codex runtime detection failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+      logger.warn(
+        { err: error },
+        "Codex runtime detection failed",
       );
     }
 
@@ -91,12 +97,13 @@ export async function startDaemon(): Promise<void> {
     }
 
     if (message.type === "daemon.hello.ack") {
-      console.log(`Daemon connected as ${message.deviceId}`);
+      logger.info({ deviceId: message.deviceId }, "Daemon connected");
       return;
     }
 
     if (message.type === "run.cancel") {
       abortControllers.get(message.runId)?.abort();
+      logger.info({ runId: message.runId }, "Run cancellation requested");
       return;
     }
 
@@ -120,6 +127,10 @@ export async function startDaemon(): Promise<void> {
         reason: error instanceof Error ? error.message : String(error),
         sentAt: nowIsoDateTime(),
       });
+      logger.warn(
+        { runId: message.run.id, workspacePath: message.workspacePath },
+        "Rejected run because workspace path is outside daemon root",
+      );
       return;
     }
 
@@ -130,6 +141,10 @@ export async function startDaemon(): Promise<void> {
       runId: message.run.id,
       sentAt: nowIsoDateTime(),
     });
+    logger.info(
+      { runId: message.run.id, workspacePath: message.workspacePath },
+      "Accepted daemon run",
+    );
 
     void (async () => {
       try {
@@ -148,6 +163,7 @@ export async function startDaemon(): Promise<void> {
           });
         }
       } catch (error) {
+        logger.error({ err: error, runId: message.run.id }, "Daemon run failed");
         send(ws, {
           type: "run.event",
           runId: message.run.id,
@@ -162,6 +178,7 @@ export async function startDaemon(): Promise<void> {
         });
       } finally {
         abortControllers.delete(message.run.id);
+        logger.info({ runId: message.run.id }, "Daemon run finished");
       }
     })();
   });
@@ -174,7 +191,7 @@ export async function startDaemon(): Promise<void> {
   });
 
   ws.on("error", (error) => {
-    console.error(`Daemon websocket error: ${error.message}`);
+    logger.error({ err: error }, "Daemon websocket error");
   });
 }
 

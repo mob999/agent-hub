@@ -4,7 +4,7 @@ import {
   createSessionToken,
   getSessionExpiresAt,
   hashSessionToken,
-} from "./session.js";
+} from "../../src/auth/session.js";
 
 describe("session helpers", () => {
   it("createSessionToken returns a non-empty token and two calls are different", () => {

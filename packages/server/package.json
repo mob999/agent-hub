@@ -21,6 +21,8 @@
   "type": "module",
   "dependencies": {
     "@agent-hub/core": "workspace:*",
+    "@agent-hub/db": "workspace:*",
+    "drizzle-orm": "^0.44.7",
     "pino": "^10.3.1",
     "redis": "^5.12.1"
   }

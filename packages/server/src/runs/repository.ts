@@ -5,8 +5,9 @@ import {
   runs,
   type Db,
 } from "@agent-hub/db";
-import type { RunQueueJob } from "@agent-hub/server";
 import { and, asc, eq } from "drizzle-orm";
+
+import type { RunQueueJob } from "../queue/index.js";
 
 export async function createRunRecord(
   db: Db,
@@ -108,6 +109,29 @@ export async function upsertDaemonDevice(
 
 export async function listDaemonDevices(db: Db) {
   return db.select().from(daemonDevices).orderBy(asc(daemonDevices.id));
+}
+
+export async function listRunningRunIdsByDaemonDevice(
+  db: Db,
+): Promise<Map<string, string[]>> {
+  const runningRuns = await db
+    .select({
+      daemonDeviceId: runs.daemonDeviceId,
+      runId: runs.id,
+    })
+    .from(runs)
+    .where(eq(runs.status, "running"))
+    .orderBy(asc(runs.createdAt));
+
+  const runIdsByDevice = new Map<string, string[]>();
+
+  for (const run of runningRuns) {
+    const runIds = runIdsByDevice.get(run.daemonDeviceId) ?? [];
+    runIds.push(run.runId);
+    runIdsByDevice.set(run.daemonDeviceId, runIds);
+  }
+
+  return runIdsByDevice;
 }
 
 export function toAgentRun(row: typeof runs.$inferSelect): AgentRun {

@@ -17,8 +17,8 @@ function nowIsoDateTime(): string {
   return new Date().toISOString();
 }
 
-function toDaemonWebSocketUrl(apiUrl: string): string {
-  const url = new URL(apiUrl);
+function toDaemonWebSocketUrl(gatewayUrl: string): string {
+  const url = new URL(gatewayUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/daemon/connect";
   url.search = "";
@@ -51,7 +51,9 @@ export async function startDaemon(): Promise<void> {
     },
   });
   const abortControllers = new Map<RunId, AbortController>();
-  const ws = new WebSocket(toDaemonWebSocketUrl(env.AGENTHUB_API_URL));
+  const ws = new WebSocket(
+    toDaemonWebSocketUrl(env.AGENTHUB_DAEMON_GATEWAY_URL),
+  );
 
   ws.on("open", async () => {
     let capabilities: AgentRuntimeBinding[] = [];

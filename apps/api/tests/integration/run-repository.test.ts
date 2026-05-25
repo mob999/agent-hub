@@ -19,9 +19,10 @@ import {
   getRunEventsForUser,
   getRunForUser,
   listDaemonDevices,
+  listRunningRunIdsByDaemonDevice,
   toAgentRun,
   upsertDaemonDevice,
-} from "../../src/runs/repository.js";
+} from "@agent-hub/server";
 
 const runDbIntegrationTests = process.env.RUN_DB_INTEGRATION_TESTS === "true";
 const describeDb = runDbIntegrationTests ? describe : describe.skip;
@@ -130,6 +131,7 @@ describeDb("run repository integration", () => {
 
     await appendRunEvent(db, queuedEvent);
     await appendRunEvent(db, startedEvent);
+    const runningRunIdsAfterStart = await listRunningRunIdsByDaemonDevice(db);
     await appendRunEvent(db, completedEvent);
 
     const run = await getRunForUser(db, {
@@ -144,6 +146,7 @@ describeDb("run repository integration", () => {
       runId: job.run.id,
       ownerUserId,
     });
+    const runningRunIdsByDevice = await listRunningRunIdsByDaemonDevice(db);
 
     expect(run).not.toBeNull();
     expect(toAgentRun(run!)).toMatchObject({
@@ -152,6 +155,12 @@ describeDb("run repository integration", () => {
     });
     expect(otherUserRun).toBeNull();
     expect(events).toEqual([queuedEvent, startedEvent, completedEvent]);
+    expect(runningRunIdsAfterStart.get(job.daemonDeviceId)).toContain(
+      job.run.id,
+    );
+    expect(runningRunIdsByDevice.get(job.daemonDeviceId) ?? []).not.toContain(
+      job.run.id,
+    );
   });
 
   it("upserts daemon device status", async () => {

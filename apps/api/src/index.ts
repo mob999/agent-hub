@@ -3,14 +3,19 @@ import { randomUUID } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
-import type { DaemonServerMessage } from "@agent-hub/core";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
 import {
+  appendRunEvent,
   createAgentHubRedisClient,
-  daemonAssignmentChannel,
-  enqueueRunJob,
   createLogger,
+  createRunRecord,
+  enqueueRunJob,
+  getRunEventsForUser,
+  getRunForUser,
+  listDaemonDevices,
+  listRunningRunIdsByDaemonDevice,
+  toAgentRun,
   type RunQueueJob,
 } from "@agent-hub/server";
 import { cors } from "hono/cors";
@@ -21,64 +26,15 @@ import {
   type AppBindings,
 } from "./auth/middleware.js";
 import { authRoutes } from "./routes/auth.js";
-import { DaemonGateway } from "./daemon/gateway.js";
-import {
-  appendRunEvent,
-  createRunRecord,
-  getRunEventsForUser,
-  getRunForUser,
-  listDaemonDevices,
-  toAgentRun,
-  upsertDaemonDevice,
-} from "./runs/repository.js";
 import { AuthUserResponseSchema } from "./schemas/auth.js";
 import { ErrorResponseSchema, HealthResponseSchema } from "./schemas/common.js";
 
 const env = loadApiEnv();
 const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
-const redisSubscriber = redis.duplicate();
 const logger = createLogger({ bindings: { service: "api" } });
-const daemonGateway = new DaemonGateway({
-  daemonToken: env.AGENTHUB_DAEMON_TOKEN,
-  logger,
-  onDaemonConnected: async (deviceId) => {
-    await upsertDaemonDevice(db, {
-      id: deviceId,
-      status: "online",
-    });
-  },
-  onDaemonDisconnected: async (deviceId) => {
-    await upsertDaemonDevice(db, {
-      id: deviceId,
-      status: "offline",
-    });
-  },
-  onRunEvent: async (event) => {
-    await appendRunEvent(db, event);
-  },
-});
 
 await redis.connect();
-await redisSubscriber.connect();
-await redisSubscriber.subscribe(daemonAssignmentChannel, (payload) => {
-  const message = JSON.parse(payload) as DaemonServerMessage;
-
-  if (!daemonGateway.assign(message) && message.type === "run.assigned") {
-    void appendRunEvent(db, {
-      type: "run.completed",
-      runId: message.run.id,
-      status: "failed",
-      error: `Daemon ${message.daemonDeviceId} is not connected.`,
-      createdAt: new Date().toISOString(),
-    }).catch((error) => {
-      logger.error(
-        { err: error, runId: message.run.id },
-        "Failed to persist daemon assignment failure",
-      );
-    });
-  }
-});
 
 const healthRoute = createRoute({
   method: "get",
@@ -183,21 +139,14 @@ app.openapi(healthRoute, (c) => {
 app.use("/daemon/devices", requireAuth);
 app.get("/daemon/devices", async (c) => {
   const devices = await listDaemonDevices(c.get("db"));
-  const onlineDevices = new Map(
-    daemonGateway
-      .listDevices()
-      .map((device) => [device.deviceId, device] as const),
-  );
+  const runningRunIdsByDevice = await listRunningRunIdsByDaemonDevice(c.get("db"));
 
   return c.json({
     devices: devices.map((device) => ({
       id: device.id,
-      status: onlineDevices.get(device.id)?.status ?? device.status,
-      lastSeenAt:
-        onlineDevices.get(device.id)?.lastSeenAt ??
-        device.lastSeenAt?.toISOString() ??
-        null,
-      runningRunIds: onlineDevices.get(device.id)?.runningRunIds ?? [],
+      status: device.status,
+      lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+      runningRunIds: runningRunIdsByDevice.get(device.id) ?? [],
     })),
   });
 });
@@ -398,7 +347,7 @@ app.openapi(debugProtectedRoute, (c) => {
   );
 });
 
-const server = serve(
+serve(
   {
     fetch: app.fetch,
     port: env.PORT,
@@ -410,9 +359,3 @@ const server = serve(
     );
   },
 );
-
-server.on("upgrade", (request, socket, head) => {
-  if (!daemonGateway.handleUpgrade(request, socket, head)) {
-    socket.destroy();
-  }
-});

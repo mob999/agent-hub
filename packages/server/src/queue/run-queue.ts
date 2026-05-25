@@ -2,13 +2,11 @@ import { createClient, type RedisClientType } from "redis";
 
 import type {
   DaemonDeviceId,
-  DaemonServerMessage,
   DaemonRunAssignment,
 } from "@agent-hub/core";
 
 export const runQueueStream = "agenthub:run:queue";
 export const runQueueGroup = "agenthub-workers";
-export const daemonAssignmentChannel = "agenthub:daemon:assignments";
 
 export interface RunQueueJob extends DaemonRunAssignment {
   daemonDeviceId: DaemonDeviceId;
@@ -96,21 +94,4 @@ export async function ackRunQueueMessage(
   messageId: string,
 ): Promise<void> {
   await redis.xAck(runQueueStream, runQueueGroup, messageId);
-}
-
-export async function publishDaemonAssignment(
-  redis: AgentHubRedisClient,
-  job: RunQueueJob,
-): Promise<void> {
-  const message: DaemonServerMessage = {
-    type: "run.assigned",
-    agentId: job.run.agentId,
-    daemonDeviceId: job.daemonDeviceId,
-    run: job.run,
-    prompt: job.prompt,
-    workspacePath: job.workspacePath,
-    runtime: job.runtime,
-  };
-
-  await redis.publish(daemonAssignmentChannel, JSON.stringify(message));
 }

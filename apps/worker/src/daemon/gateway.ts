@@ -8,7 +8,7 @@ import type {
   RunEvent,
   RunId,
 } from "@agent-hub/core";
-import type { AgentHubLogger } from "@agent-hub/server";
+import type { AgentHubLogger, RunQueueJob } from "@agent-hub/server";
 import { WebSocket, WebSocketServer } from "ws";
 
 export interface DaemonGatewayOptions {
@@ -218,6 +218,18 @@ export class DaemonGateway {
       "Assigned run to daemon",
     );
     return true;
+  }
+
+  assignRun(job: RunQueueJob): boolean {
+    return this.assign({
+      type: "run.assigned",
+      agentId: job.run.agentId,
+      daemonDeviceId: job.daemonDeviceId,
+      run: job.run,
+      prompt: job.prompt,
+      workspacePath: job.workspacePath,
+      runtime: job.runtime,
+    });
   }
 
   listDevices() {

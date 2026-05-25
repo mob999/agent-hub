@@ -22,12 +22,10 @@
     "drizzle-orm": "^0.44.7",
     "hono": "^4.12.21",
     "redis": "^5.12.1",
-    "ws": "^8.21.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/node": "^20.11.17",
-    "@types/ws": "^8.18.1",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3"
   }

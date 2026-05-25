@@ -50,7 +50,10 @@ export function loadApiEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
 
 export const workerEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema,
+  WORKER_PORT: portSchema.default(3001),
+  DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
+  AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_WORKER_CONSUMER_NAME: z.string().min(1).default("worker-local"),
 });
 
@@ -64,7 +67,7 @@ export function loadWorkerEnv(
 
 export const daemonEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema,
-  AGENTHUB_API_URL: z.string().url(),
+  AGENTHUB_DAEMON_GATEWAY_URL: z.string().url(),
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DEVICE_ID: z.string().min(1),
   AGENTHUB_WORKSPACE_ROOT: z.string().min(1),

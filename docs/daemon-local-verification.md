@@ -3,7 +3,7 @@
 This guide verifies the local run loop:
 
 ```txt
-API -> Redis Stream -> Worker -> API daemon WebSocket gateway -> Daemon -> Codex -> API -> PostgreSQL
+API -> Redis Stream -> Worker daemon WebSocket gateway -> Daemon -> Codex -> Worker -> PostgreSQL
 ```
 
 ## 1. Start local infrastructure
@@ -25,7 +25,8 @@ AGENTHUB_DAEMON_TOKEN=dev-daemon-token
 AGENTHUB_DEFAULT_DAEMON_DEVICE_ID=local-dev
 AGENTHUB_DEFAULT_AGENT_ID=codex
 AGENTHUB_DEFAULT_WORKSPACE_PATH=/path/to/agent-hub
-AGENTHUB_API_URL=http://localhost:3000
+WORKER_PORT=3001
+AGENTHUB_DAEMON_GATEWAY_URL=http://localhost:3001
 AGENTHUB_DEVICE_ID=local-dev
 AGENTHUB_WORKSPACE_ROOT=/path/to/agent-hub
 ```
@@ -39,7 +40,8 @@ AGENTHUB_DAEMON_TOKEN=dev-daemon-token
 AGENTHUB_DEFAULT_DAEMON_DEVICE_ID=local-dev
 AGENTHUB_DEFAULT_AGENT_ID=codex
 AGENTHUB_DEFAULT_WORKSPACE_PATH=E:\agent-hub
-AGENTHUB_API_URL=http://localhost:3000
+WORKER_PORT=3001
+AGENTHUB_DAEMON_GATEWAY_URL=http://localhost:3001
 AGENTHUB_DEVICE_ID=local-dev
 AGENTHUB_WORKSPACE_ROOT=E:\agent-hub
 ```
@@ -59,6 +61,7 @@ Run one command per terminal.
 Expected signals:
 
 - API log contains `"msg":"API server listening"`.
+- Worker log contains `"msg":"Worker gateway listening"`.
 - Worker log contains `"msg":"Worker listening for run jobs"`.
 - Daemon log contains `"msg":"Daemon connected"`.
 

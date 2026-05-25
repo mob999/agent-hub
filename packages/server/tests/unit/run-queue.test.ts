@@ -3,10 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentHubRedisClient, RunQueueJob } from "../../src";
 import {
   ackRunQueueMessage,
-  daemonAssignmentChannel,
   enqueueRunJob,
   ensureRunQueueGroup,
-  publishDaemonAssignment,
   readRunQueueMessages,
   runQueueGroup,
   runQueueStream,
@@ -96,34 +94,16 @@ describe("run queue", () => {
     ).resolves.toEqual([{ id: "1-0", job }]);
   });
 
-  it("acks messages and publishes daemon assignments", async () => {
+  it("acks messages", async () => {
     const redis = {
-      publish: vi.fn().mockResolvedValue(1),
       xAck: vi.fn().mockResolvedValue(1),
     };
-    const job = createRunQueueJob();
 
     await ackRunQueueMessage(
       redis as unknown as AgentHubRedisClient,
       "1-0",
     );
-    await publishDaemonAssignment(
-      redis as unknown as AgentHubRedisClient,
-      job,
-    );
 
     expect(redis.xAck).toHaveBeenCalledWith(runQueueStream, runQueueGroup, "1-0");
-    expect(redis.publish).toHaveBeenCalledWith(
-      daemonAssignmentChannel,
-      JSON.stringify({
-        type: "run.assigned",
-        agentId: "codex",
-        daemonDeviceId: "local-dev",
-        run: job.run,
-        prompt: job.prompt,
-        workspacePath: job.workspacePath,
-        runtime: job.runtime,
-      }),
-    );
   });
 });

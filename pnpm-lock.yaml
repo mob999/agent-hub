@@ -62,9 +62,6 @@ importers:
       redis:
         specifier: ^5.12.1
         version: 5.12.1
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.0
       zod:
         specifier: ^4.1.11
         version: 4.4.3
@@ -72,9 +69,6 @@ importers:
       '@types/node':
         specifier: ^20.11.17
         version: 20.19.41
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
       tsx:
         specifier: ^4.7.1
         version: 4.22.3
@@ -155,12 +149,22 @@ importers:
       '@agent-hub/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agent-hub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@agent-hub/server':
         specifier: workspace:*
         version: link:../../packages/server
       redis:
         specifier: ^5.12.1
         version: 5.12.1
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
 
   packages/config:
     dependencies:
@@ -192,6 +196,12 @@ importers:
       '@agent-hub/core':
         specifier: workspace:*
         version: link:../core
+      '@agent-hub/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.44.7
+        version: 0.44.7(postgres@3.4.9)
       pino:
         specifier: ^10.3.1
         version: 10.3.1

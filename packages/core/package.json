@@ -8,14 +8,17 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "development": "./src/index.ts",
       "import": "./dist/index.js"
     },
     "./protocol": {
       "types": "./src/protocol/index.ts",
+      "development": "./src/protocol/index.ts",
       "import": "./dist/protocol/index.js"
     },
     "./runtime": {
       "types": "./src/runtime/index.ts",
+      "development": "./src/runtime/index.ts",
       "import": "./dist/runtime/index.js"
     }
   },

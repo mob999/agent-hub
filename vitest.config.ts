@@ -5,6 +5,8 @@ export default defineConfig({
     alias: {
       "@agent-hub/core": new URL("./packages/core/src/index.ts", import.meta.url)
         .pathname,
+      "@agent-hub/db": new URL("./packages/db/src/index.ts", import.meta.url)
+        .pathname,
       "@agent-hub/server": new URL(
         "./packages/server/src/index.ts",
         import.meta.url,

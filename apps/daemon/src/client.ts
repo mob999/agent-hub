@@ -39,6 +39,9 @@ function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | unde
   }
 }
 
+const initialReconnectDelayMs = 1_000;
+const maxReconnectDelayMs = 10_000;
+
 export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
   const adapter = new CodexAdapter({
@@ -51,47 +54,9 @@ export async function startDaemon(): Promise<void> {
     },
   });
   const abortControllers = new Map<RunId, AbortController>();
-  const ws = new WebSocket(
-    toDaemonWebSocketUrl(env.AGENTHUB_DAEMON_GATEWAY_URL),
-  );
+  let reconnectDelayMs = initialReconnectDelayMs;
 
-  ws.on("open", async () => {
-    let capabilities: AgentRuntimeBinding[] = [];
-
-    try {
-      capabilities = [
-        {
-          ...(await adapter.detect()),
-          agentId: "codex",
-          daemonDeviceId: env.AGENTHUB_DEVICE_ID,
-        },
-      ];
-    } catch (error) {
-      logger.warn(
-        { err: error },
-        "Codex runtime detection failed",
-      );
-    }
-
-    send(ws, {
-      type: "daemon.hello",
-      deviceId: env.AGENTHUB_DEVICE_ID,
-      token: env.AGENTHUB_DAEMON_TOKEN,
-      capabilities,
-      sentAt: nowIsoDateTime(),
-    });
-  });
-
-  const heartbeat = setInterval(() => {
-    send(ws, {
-      type: "daemon.heartbeat",
-      deviceId: env.AGENTHUB_DEVICE_ID,
-      runningRunIds: Array.from(abortControllers.keys()),
-      sentAt: nowIsoDateTime(),
-    });
-  }, 10_000);
-
-  ws.on("message", (data) => {
+  const handleMessage = (ws: WebSocket, data: WebSocket.RawData): void => {
     const message = parseServerMessage(data);
 
     if (message === undefined) {
@@ -183,18 +148,75 @@ export async function startDaemon(): Promise<void> {
         logger.info({ runId: message.run.id }, "Daemon run finished");
       }
     })();
-  });
+  };
 
-  ws.on("close", () => {
-    clearInterval(heartbeat);
-    for (const abortController of abortControllers.values()) {
-      abortController.abort();
-    }
-  });
+  const connect = (): void => {
+    const ws = new WebSocket(
+      toDaemonWebSocketUrl(env.AGENTHUB_DAEMON_GATEWAY_URL),
+    );
 
-  ws.on("error", (error) => {
-    logger.error({ err: error }, "Daemon websocket error");
-  });
+    ws.on("open", async () => {
+      reconnectDelayMs = initialReconnectDelayMs;
+      let capabilities: AgentRuntimeBinding[] = [];
+
+      try {
+        capabilities = [
+          {
+            ...(await adapter.detect()),
+            agentId: "codex",
+            daemonDeviceId: env.AGENTHUB_DEVICE_ID,
+          },
+        ];
+      } catch (error) {
+        logger.warn(
+          { err: error },
+          "Codex runtime detection failed",
+        );
+      }
+
+      send(ws, {
+        type: "daemon.hello",
+        deviceId: env.AGENTHUB_DEVICE_ID,
+        token: env.AGENTHUB_DAEMON_TOKEN,
+        capabilities,
+        sentAt: nowIsoDateTime(),
+      });
+    });
+
+    const heartbeat = setInterval(() => {
+      send(ws, {
+        type: "daemon.heartbeat",
+        deviceId: env.AGENTHUB_DEVICE_ID,
+        runningRunIds: Array.from(abortControllers.keys()),
+        sentAt: nowIsoDateTime(),
+      });
+    }, 10_000);
+
+    ws.on("message", (data) => {
+      handleMessage(ws, data);
+    });
+
+    ws.on("close", () => {
+      clearInterval(heartbeat);
+      for (const abortController of abortControllers.values()) {
+        abortController.abort();
+      }
+
+      const nextReconnectDelayMs = reconnectDelayMs;
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
+      logger.info(
+        { reconnectDelayMs: nextReconnectDelayMs },
+        "Daemon websocket closed; reconnecting",
+      );
+      setTimeout(connect, nextReconnectDelayMs);
+    });
+
+    ws.on("error", (error) => {
+      logger.error({ err: error }, "Daemon websocket error");
+    });
+  };
+
+  connect();
 }
 
 export function isDirectDaemonEntry(importMetaUrl: string): boolean {

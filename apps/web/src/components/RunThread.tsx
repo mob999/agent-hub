@@ -1,6 +1,13 @@
 import { Tag } from '@carbon/react'
 import type { LocalRun, RunEvent } from '../lib/api'
-import { eventTitle, formatTime, runStatusLabel, runTagType } from '../lib/format'
+import {
+  eventMessageContent,
+  eventTitle,
+  formatTime,
+  isDisplayRunEvent,
+  runStatusLabel,
+  runTagType,
+} from '../lib/format'
 
 const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leading-5'
 
@@ -13,11 +20,12 @@ interface RunThreadProps {
 
 export function RunThread({ localRun, events, selected, selectRun }: RunThreadProps) {
   const agentMessage = events
-    .filter((event) => event.type === 'message.delta' && event.content)
-    .map((event) => event.content)
+    .map(eventMessageContent)
+    .filter(Boolean)
     .join('')
-  const latestEvent = events.at(-1)
-  const eventPreview = events.slice(-4)
+  const displayEvents = events.filter(isDisplayRunEvent)
+  const latestEvent = displayEvents.at(-1)
+  const eventPreview = displayEvents.slice(-4)
 
   return (
     <article className="grid gap-1" aria-label={`Run ${localRun.run.id}`}>

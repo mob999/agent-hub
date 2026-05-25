@@ -19,6 +19,7 @@ import {
   getRunEventsForUser,
   getRunForUser,
   listDaemonDevices,
+  listRunsForUser,
   listRunningRunIdsByDaemonDevice,
   toAgentRun,
   upsertDaemonDevice,
@@ -146,6 +147,8 @@ describeDb("run repository integration", () => {
       runId: job.run.id,
       ownerUserId,
     });
+    const ownerRuns = await listRunsForUser(db, { ownerUserId });
+    const otherUserRuns = await listRunsForUser(db, { ownerUserId: otherUserId });
     const runningRunIdsByDevice = await listRunningRunIdsByDaemonDevice(db);
 
     expect(run).not.toBeNull();
@@ -155,6 +158,24 @@ describeDb("run repository integration", () => {
     });
     expect(otherUserRun).toBeNull();
     expect(events).toEqual([queuedEvent, startedEvent, completedEvent]);
+    expect(ownerRuns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          prompt: job.prompt,
+          run: expect.objectContaining({
+            id: job.run.id,
+            status: "succeeded",
+          }),
+        }),
+      ]),
+    );
+    expect(otherUserRuns).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          run: expect.objectContaining({ id: job.run.id }),
+        }),
+      ]),
+    );
     expect(runningRunIdsAfterStart.get(job.daemonDeviceId)).toContain(
       job.run.id,
     );

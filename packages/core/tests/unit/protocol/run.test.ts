@@ -36,5 +36,41 @@ describe("run protocol", () => {
     expect(started.name).toBe("Read");
     expect(completed.status).toBe("succeeded");
   });
-});
 
+  it("expresses raw runtime events next to normalized events", () => {
+    const rawPayload = {
+      type: "item.started",
+      item: {
+        id: "item_1",
+        type: "command_execution",
+        command: "/bin/zsh -lc ls",
+      },
+    };
+    const rawEvent = {
+      type: "runtime.event",
+      runId: "run_1",
+      raw: {
+        runtimeKind: "codex",
+        nativeType: "item.started",
+        payload: rawPayload,
+      },
+      createdAt: "2026-05-21T00:00:00.000Z",
+    } satisfies RunEvent;
+    const mappedEvent = {
+      type: "tool.call.started",
+      runId: "run_1",
+      toolCallId: "item_1",
+      name: "command_execution",
+      input: { command: "/bin/zsh -lc ls" },
+      raw: {
+        runtimeKind: "codex",
+        nativeType: "item.started",
+        payload: rawPayload,
+      },
+      createdAt: "2026-05-21T00:00:00.000Z",
+    } satisfies RunEvent;
+
+    expect(rawEvent.raw.nativeType).toBe("item.started");
+    expect(mappedEvent.raw.payload).toBe(rawPayload);
+  });
+});

@@ -149,27 +149,47 @@ describe("CodexAdapter", () => {
     expect(calls[0].process.stdinText).toBe("ship the page");
   });
 
-  it("maps stdout JSONL into run events", async () => {
+  it("stores raw Codex JSONL and emits normalized tool call events", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
 
     calls[0].process.stdout.write(
-      `${JSON.stringify({ type: "message.delta", delta: "hello" })}\n`,
+      `${JSON.stringify({ type: "thread.started", thread_id: "thread_1" })}\n`,
     );
     calls[0].process.stdout.write(
       `${JSON.stringify({
-        type: "tool_call_started",
-        id: "tool_1",
-        name: "Read",
-        input: { path: "README.md" },
+        type: "item.started",
+        item: {
+          id: "item_1",
+          type: "command_execution",
+          command: "/bin/zsh -lc ls",
+          aggregated_output: "",
+          exit_code: null,
+          status: "in_progress",
+        },
       })}\n`,
     );
     calls[0].process.stdout.write(
       `${JSON.stringify({
-        type: "tool_call_completed",
-        id: "tool_1",
-        output: { ok: true },
+        type: "item.completed",
+        item: {
+          id: "item_1",
+          type: "command_execution",
+          command: "/bin/zsh -lc ls",
+          aggregated_output: "README.md\n",
+          exit_code: 0,
+          status: "completed",
+        },
+      })}\n`,
+    );
+    calls[0].process.stdout.write(
+      `${JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 3,
+        },
       })}\n`,
     );
     calls[0].process.close(0);
@@ -179,21 +199,71 @@ describe("CodexAdapter", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: "message.delta",
+          type: "runtime.event",
           runId: "run_1",
-          content: "hello",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "thread.started",
+            payload: expect.objectContaining({
+              thread_id: "thread_1",
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          type: "runtime.event",
+          runId: "run_1",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "item.started",
+          }),
         }),
         expect.objectContaining({
           type: "tool.call.started",
           runId: "run_1",
-          toolCallId: "tool_1",
-          name: "Read",
+          toolCallId: "item_1",
+          name: "command_execution",
+          input: {
+            command: "/bin/zsh -lc ls",
+          },
+          raw: expect.objectContaining({
+            nativeType: "item.started",
+          }),
+        }),
+        expect.objectContaining({
+          type: "runtime.event",
+          runId: "run_1",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "item.completed",
+          }),
         }),
         expect.objectContaining({
           type: "tool.call.completed",
           runId: "run_1",
-          toolCallId: "tool_1",
+          toolCallId: "item_1",
+          name: "command_execution",
           status: "succeeded",
+          output: expect.objectContaining({
+            aggregated_output: "README.md\n",
+            exit_code: 0,
+          }),
+          raw: expect.objectContaining({
+            nativeType: "item.completed",
+          }),
+        }),
+        expect.objectContaining({
+          type: "runtime.event",
+          runId: "run_1",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "turn.completed",
+            payload: expect.objectContaining({
+              usage: expect.objectContaining({
+                input_tokens: 10,
+                output_tokens: 3,
+              }),
+            }),
+          }),
         }),
         expect.objectContaining({
           type: "run.completed",
@@ -203,7 +273,7 @@ describe("CodexAdapter", () => {
     );
   });
 
-  it("maps real Codex agent message item events", async () => {
+  it("stores raw Codex agent messages and emits message deltas", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
@@ -223,9 +293,27 @@ describe("CodexAdapter", () => {
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          type: "runtime.event",
+          runId: "run_1",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "item.completed",
+            payload: expect.objectContaining({
+              item: expect.objectContaining({
+                type: "agent_message",
+                text: "hello-agenthub",
+              }),
+            }),
+          }),
+        }),
+        expect.objectContaining({
           type: "message.delta",
           runId: "run_1",
           content: "hello-agenthub",
+          raw: expect.objectContaining({
+            runtimeKind: "codex",
+            nativeType: "item.completed",
+          }),
         }),
       ]),
     );

@@ -1,11 +1,16 @@
-import type { AgentRun, RunEvent, RunId } from "@agent-hub/core";
+import type {
+  AgentRun,
+  AgentRunSummary,
+  RunEvent,
+  RunId,
+} from "@agent-hub/core";
 import {
   daemonDevices,
   runEvents,
   runs,
   type Db,
 } from "@agent-hub/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
 import { appendRunEventToConversationMessage } from "../conversations/index.js";
@@ -59,6 +64,24 @@ export async function getRunEventsForUser(
     .orderBy(asc(runEvents.createdAt));
 
   return events.map((event) => event.payload as RunEvent);
+}
+
+export async function listRunsForUser(
+  db: Db,
+  input: { ownerUserId: string; limit?: number },
+): Promise<AgentRunSummary[]> {
+  const rows = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.ownerUserId, input.ownerUserId))
+    .orderBy(desc(runs.createdAt))
+    .limit(input.limit ?? 50);
+
+  return rows.map((run) => ({
+    run: toAgentRun(run),
+    prompt: run.prompt,
+    conversationId: run.conversationId ?? undefined,
+  }));
 }
 
 export async function appendRunEvent(db: Db, event: RunEvent): Promise<void> {

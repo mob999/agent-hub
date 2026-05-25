@@ -11,6 +11,7 @@ import type {
   DaemonRuntime,
   RunEvent,
   RunId,
+  RuntimeRawEvent,
 } from "@agent-hub/core/protocol";
 
 import { LineDecoder, parseJsonLine } from "./jsonl";
@@ -134,98 +135,130 @@ function readRecordProperty(
   return undefined;
 }
 
-function mapCodexJsonEvent(
-  value: unknown,
+function createCodexRawEvent(
+  payload: unknown,
+  nativeType: string | undefined,
+): RuntimeRawEvent {
+  return {
+    runtimeKind: "codex",
+    ...(nativeType === undefined ? {} : { nativeType }),
+    payload,
+  };
+}
+
+function createCodexRuntimeEvent(
   runId: RunId,
-): RunEvent | undefined {
+  raw: RuntimeRawEvent,
+  createdAt: string,
+): RunEvent {
+  return {
+    type: "runtime.event",
+    runId,
+    raw,
+    createdAt,
+  };
+}
+
+function mapCodexCommandStatus(
+  item: Record<string, unknown>,
+): Extract<RunEvent, { type: "tool.call.completed" }>["status"] {
+  const exitCode = item.exit_code;
+
+  if (typeof exitCode === "number") {
+    return exitCode === 0 ? "succeeded" : "failed";
+  }
+
+  return item.status === "completed" ? "succeeded" : "failed";
+}
+
+function mapCodexJsonEvents(value: unknown, runId: RunId): RunEvent[] {
+  const createdAt = nowIsoDateTime();
+
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
+    const raw = createCodexRawEvent(value, undefined);
+
+    return [createCodexRuntimeEvent(runId, raw, createdAt)];
   }
 
   const record = value as Record<string, unknown>;
-  const type = readStringProperty(record, ["type", "event", "kind"]);
+  const nativeType = readStringProperty(record, ["type"]);
+  const raw = createCodexRawEvent(record, nativeType);
+  const events: RunEvent[] = [createCodexRuntimeEvent(runId, raw, createdAt)];
 
-  if (type === undefined) {
-    return undefined;
+  if (nativeType !== "item.started" && nativeType !== "item.completed") {
+    return events;
   }
 
-  const createdAt = nowIsoDateTime();
   const item = readRecordProperty(record, ["item"]);
   const itemType =
     item === undefined ? undefined : readStringProperty(item, ["type"]);
-  const itemText =
-    item === undefined
-      ? undefined
-      : toText(item.text) ?? toText(item.content) ?? toText(item.delta);
 
-  if (
-    itemText !== undefined &&
-    type === "item.completed" &&
-    itemType === "agent_message"
-  ) {
-    return {
-      type: "message.delta",
-      runId,
-      content: itemText,
-      createdAt,
-    };
+  if (item === undefined || itemType === undefined) {
+    return events;
   }
 
-  const content = toText(record.delta) ?? toText(record.content) ?? toText(record.text);
+  const itemId =
+    readStringProperty(item, ["id"]) ?? `${runId}:codex-item:${createdAt}`;
 
-  if (
-    content !== undefined &&
-    (type.includes("message") ||
-      type.includes("assistant") ||
-      type.includes("response"))
-  ) {
-    return {
-      type: "message.delta",
-      runId,
-      content,
-      createdAt,
-    };
+  if (nativeType === "item.completed" && itemType === "agent_message") {
+    const content = toText(item.text) ?? toText(item.content) ?? toText(item.delta);
+
+    if (content !== undefined) {
+      events.push({
+        type: "message.delta",
+        runId,
+        content,
+        raw,
+        createdAt,
+      });
+    }
+
+    return events;
   }
 
-  if (type.includes("tool") && type.includes("start")) {
-    return {
+  if (itemType !== "command_execution") {
+    return events;
+  }
+
+  if (nativeType === "item.started") {
+    events.push({
       type: "tool.call.started",
       runId,
-      toolCallId:
-        readStringProperty(record, ["toolCallId", "tool_call_id", "id"]) ??
-        `${runId}:tool:${createdAt}`,
-      name:
-        readStringProperty(record, ["name", "toolName", "tool_name"]) ??
-        "unknown",
-      input: readRecordProperty(record, ["input", "arguments", "args"]),
+      toolCallId: itemId,
+      name: itemType,
+      input: {
+        command: item.command,
+      },
+      raw,
       createdAt,
-    };
+    });
+
+    return events;
   }
 
-  if (
-    type.includes("tool") &&
-    (type.includes("complete") || type.includes("finish") || type.includes("end"))
-  ) {
-    const error = toText(record.error);
+  const status = mapCodexCommandStatus(item);
+  const exitCode = item.exit_code;
 
-    return {
-      type: "tool.call.completed",
-      runId,
-      toolCallId:
-        readStringProperty(record, ["toolCallId", "tool_call_id", "id"]) ??
-        `${runId}:tool:${createdAt}`,
-      status: error === undefined ? "succeeded" : "failed",
-      output: record.output,
-      error,
-      createdAt,
-    };
-  }
+  events.push({
+    type: "tool.call.completed",
+    runId,
+    toolCallId: itemId,
+    name: itemType,
+    status,
+    output: {
+      command: item.command,
+      aggregated_output: item.aggregated_output,
+      exit_code: exitCode,
+      status: item.status,
+    },
+    ...(status === "failed" && typeof exitCode === "number"
+      ? { error: `Command exited with code ${exitCode}` }
+      : {}),
+    raw,
+    createdAt,
+  });
 
-  return undefined;
-}
-
-function toLogLine(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
+  return events;
 }
 
 function createLogLineEvent(
@@ -382,11 +415,9 @@ export class CodexAdapter implements AgentAdapter {
         return;
       }
 
-      const event = mapCodexJsonEvent(parsed.value, input.run.id);
-
-      queue.push(
-        event ?? createLogLineEvent(input.run.id, "stdout", toLogLine(parsed.value)),
-      );
+      for (const event of mapCodexJsonEvents(parsed.value, input.run.id)) {
+        queue.push(event);
+      }
     };
 
     process.stdout.on("data", (chunk) => {

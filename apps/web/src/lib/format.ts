@@ -51,10 +51,12 @@ export function eventTitle(event: RunEvent): string {
       return 'Message delta'
     case 'log.line':
       return event.stream === 'stderr' ? 'Error log' : 'Log line'
+    case 'runtime.event':
+      return event.raw?.nativeType ?? 'Runtime event'
     case 'tool.call.started':
       return `Tool started${event.name ? `: ${event.name}` : ''}`
     case 'tool.call.completed':
-      return 'Tool completed'
+      return `Tool ${event.status ?? 'completed'}${event.name ? `: ${event.name}` : ''}`
     case 'artifact.created':
       return 'Artifact created'
     case 'run.completed':
@@ -62,4 +64,16 @@ export function eventTitle(event: RunEvent): string {
     default:
       return event.type
   }
+}
+
+export function isDisplayRunEvent(event: RunEvent): boolean {
+  return event.type !== 'runtime.event'
+}
+
+export function eventMessageContent(event: RunEvent): string {
+  if (event.type === 'message.delta') {
+    return event.content ?? ''
+  }
+
+  return ''
 }

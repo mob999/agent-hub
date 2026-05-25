@@ -97,6 +97,14 @@ export function buildConversationRunPrompt(input: {
   ].join("\n");
 }
 
+function getAssistantMessageContent(event: RunEvent): string | undefined {
+  if (event.type === "message.delta") {
+    return event.content;
+  }
+
+  return undefined;
+}
+
 export async function ensureDefaultGroupConversation(
   db: Db,
   input: { ownerUserId: string },
@@ -367,7 +375,9 @@ export async function appendRunEventToConversationMessage(
   db: Db,
   event: RunEvent,
 ): Promise<void> {
-  if (event.type !== "message.delta" && event.type !== "run.completed") {
+  const assistantContent = getAssistantMessageContent(event);
+
+  if (assistantContent === undefined && event.type !== "run.completed") {
     return;
   }
 
@@ -378,16 +388,17 @@ export async function appendRunEventToConversationMessage(
         ? "completed"
         : event.status
       : "streaming";
+  const messageError = event.type === "run.completed" ? event.error : undefined;
   const [message] = await db
     .update(conversationMessages)
     .set({
-      ...(event.type === "message.delta"
+      ...(assistantContent !== undefined
         ? {
-            content: sql`${conversationMessages.content} || ${event.content}`,
+            content: sql`${conversationMessages.content} || ${assistantContent}`,
           }
         : {
             status: messageStatus,
-            error: event.error ?? null,
+            error: messageError ?? null,
           }),
       updatedAt,
     })

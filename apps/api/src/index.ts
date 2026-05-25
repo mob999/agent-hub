@@ -29,6 +29,7 @@ import {
   getRunForUser,
   listAgentsForUser,
   listDaemonDevicesWithRuntimes,
+  listRunsForUser,
   listRunningRunIdsByDaemonDevice,
   toAgentRun,
   type RunQueueJob,
@@ -649,6 +650,36 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
 app.use("/runs", requireAuth);
 app.use("/runs/*", requireAuth);
+app.get("/runs", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const limitParam = c.req.query("limit");
+  const parsedLimit =
+    limitParam === undefined ? undefined : Number.parseInt(limitParam, 10);
+  const limit =
+    parsedLimit === undefined || Number.isNaN(parsedLimit)
+      ? 50
+      : Math.min(Math.max(parsedLimit, 1), 100);
+  const runs = await listRunsForUser(db, {
+    ownerUserId: user.id,
+    limit,
+  });
+
+  return c.json({ runs });
+});
+
 app.post("/runs", async (c) => {
   const user = c.get("user");
 

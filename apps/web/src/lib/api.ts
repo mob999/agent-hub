@@ -99,6 +99,12 @@ export interface AgentRun {
   updatedAt: string
 }
 
+export interface AgentRunSummary {
+  run: AgentRun
+  prompt: string
+  conversationId?: string
+}
+
 export type ConversationType = 'group' | 'direct'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
@@ -140,6 +146,12 @@ export interface SendConversationMessageResponse {
   queueMessageId: string
 }
 
+export interface RuntimeRawEvent {
+  runtimeKind: RuntimeKind
+  nativeType?: string
+  payload: unknown
+}
+
 export interface RunEvent {
   type: string
   runId: string
@@ -150,6 +162,10 @@ export interface RunEvent {
   stream?: 'stdout' | 'stderr'
   line?: string
   name?: string
+  toolCallId?: string
+  input?: unknown
+  output?: unknown
+  raw?: RuntimeRawEvent
 }
 
 export interface LocalRun {

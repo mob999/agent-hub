@@ -10,6 +10,7 @@ import {
   apiRequest,
   type AgentDetails,
   type AgentRun,
+  type AgentRunSummary,
   type AuthResponse,
   type Conversation,
   type ConversationMessage,
@@ -38,6 +39,17 @@ const workspaceViewByRoute: Record<WorkspaceRoutePath, WorkspaceView> = {
 
 function isAgentReady(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
+}
+
+function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): LocalRun {
+  const runAgent = agents.find((agent) => agent.agent.id === summary.run.agentId)
+
+  return {
+    channelId: summary.conversationId ?? 'runs',
+    agentName: runAgent?.agent.name,
+    prompt: summary.prompt,
+    run: summary.run,
+  }
 }
 
 interface WorkspacePageProps {
@@ -75,7 +87,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         .length,
     [runs],
   )
-  const orderedRuns = useMemo(() => [...runs].reverse(), [runs])
+  const orderedRuns = useMemo(() => runs, [runs])
   const readyAgentCount = useMemo(() => agents.filter(isAgentReady).length, [agents])
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
@@ -155,6 +167,29 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadRuns = useCallback(async () => {
+    try {
+      const response = await apiRequest<{ runs: AgentRunSummary[] }>('/runs')
+      const loadedRuns = response.runs.map((run) => toLocalRun(run))
+
+      setRuns(loadedRuns)
+      setSelectedRunId((current) => {
+        if (current !== null && loadedRuns.some((localRun) => localRun.run.id === current)) {
+          return current
+        }
+
+        return loadedRuns[0]?.run.id ?? null
+      })
+      setRunError(null)
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to load runs.')
       }
     }
   }, [])
@@ -276,6 +311,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   }, [loadConversations, user])
 
   useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadRuns()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [loadRuns, user])
+
+  useEffect(() => {
     if (activeConversationId === null) {
       return
     }
@@ -316,6 +363,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
 
     return () => window.clearInterval(timer)
   }, [refreshRun, runs])
+
+  useEffect(() => {
+    if (selectedRunId === null) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void refreshRun(selectedRunId)
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [refreshRun, selectedRunId])
 
   useEffect(() => {
     if (
@@ -428,6 +487,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     void loadDevices()
     void loadAgents()
     void loadConversations()
+    void loadRuns()
     if (activeConversationId !== null) {
       void loadMessages(activeConversationId)
     }

@@ -2,7 +2,14 @@ import { InlineNotification, Tag } from '@carbon/react'
 import { JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import type { ReactNode } from 'react'
 import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
-import { eventTitle, formatTime, runStatusLabel, runTagType } from '../lib/format'
+import {
+  eventMessageContent,
+  eventTitle,
+  formatTime,
+  isDisplayRunEvent,
+  runStatusLabel,
+  runTagType,
+} from '../lib/format'
 
 interface RunsPageProps {
   runs: LocalRun[]
@@ -10,6 +17,41 @@ interface RunsPageProps {
   eventsByRun: Record<string, RunEvent[]>
   selectedRunId: string | null
   selectRun: (runId: string) => void
+}
+
+interface EventDetail {
+  label: string
+  value: unknown
+}
+
+function formatEventJson(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  return JSON.stringify(value, null, 2)
+}
+
+function eventDetails(event: RunEvent): EventDetail[] {
+  const details: EventDetail[] = []
+
+  if (event.input !== undefined) {
+    details.push({ label: 'Parameters', value: event.input })
+  }
+
+  if (event.output !== undefined) {
+    details.push({ label: 'Result', value: event.output })
+  }
+
+  if (event.error) {
+    details.push({ label: 'Error', value: event.error })
+  }
+
+  if (event.raw !== undefined && event.type !== 'runtime.event') {
+    details.push({ label: 'Raw runtime event', value: event.raw })
+  }
+
+  return details
 }
 
 export function RunsPage({
@@ -21,9 +63,10 @@ export function RunsPage({
 }: RunsPageProps) {
   const selectedRun = runs.find((localRun) => localRun.run.id === selectedRunId) ?? runs[0] ?? null
   const selectedEvents = selectedRun ? eventsByRun[selectedRun.run.id] ?? [] : []
+  const displayEvents = selectedEvents.filter(isDisplayRunEvent)
   const agentOutput = selectedEvents
-    .filter((event) => event.type === 'message.delta' && event.content)
-    .map((event) => event.content)
+    .map(eventMessageContent)
+    .filter(Boolean)
     .join('')
 
   return (
@@ -147,9 +190,9 @@ export function RunsPage({
 
             <DetailSection
               title="Events"
-              aside={<span className="text-sm text-[var(--cds-text-secondary)]">{selectedEvents.length}</span>}
+              aside={<span className="text-sm text-[var(--cds-text-secondary)]">{displayEvents.length}</span>}
             >
-              {selectedEvents.length === 0 ? (
+              {displayEvents.length === 0 ? (
                 <InlineNotification
                   kind="info"
                   title="No events loaded"
@@ -158,21 +201,13 @@ export function RunsPage({
                   hideCloseButton
                 />
               ) : (
-                <ol className="grid border border-[var(--cds-border-subtle-01)]">
-                  {selectedEvents.map((event, index) => (
-                    <li
-                      className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)_5rem] gap-3 border-b border-[var(--cds-border-subtle-01)] p-3 last:border-b-0 max-[671px]:grid-cols-1"
+                <ol className="grid overflow-hidden border border-[var(--cds-border-subtle-01)]">
+                  {displayEvents.map((event, index) => (
+                    <EventRow
+                      event={event}
+                      index={index}
                       key={`${event.runId}-${event.type}-${event.createdAt}-${index}`}
-                    >
-                      <span className="text-[var(--cds-text-secondary)]">{event.type}</span>
-                      <span className="min-w-0 truncate">{eventTitle(event)}</span>
-                      <time
-                        className="justify-self-end text-[var(--cds-text-secondary)] max-[671px]:justify-self-start"
-                        dateTime={event.createdAt}
-                      >
-                        {formatTime(event.createdAt)}
-                      </time>
-                    </li>
+                    />
                   ))}
                 </ol>
               )}
@@ -202,6 +237,64 @@ export function RunsPage({
         )}
       </section>
     </section>
+  )
+}
+
+interface EventRowProps {
+  event: RunEvent
+  index: number
+}
+
+function EventRow({ event, index }: EventRowProps) {
+  const details = eventDetails(event)
+
+  return (
+    <li className="grid min-w-0 gap-3 border-b border-[var(--cds-border-subtle-01)] px-4 py-3 last:border-b-0 max-[671px]:px-3">
+      <div className="grid min-w-0 grid-cols-[minmax(9rem,13rem)_minmax(0,1fr)_4.5rem] items-start gap-4 max-[671px]:grid-cols-1 max-[671px]:gap-1.5">
+        <Tag
+          className="min-w-0 max-w-full justify-self-start"
+          size="sm"
+          type={event.type.startsWith('tool.call') ? 'blue' : 'gray'}
+        >
+          <span className="block max-w-[11rem] truncate">{event.type}</span>
+        </Tag>
+        <span className="grid min-w-0 gap-1">
+          <span className="min-w-0 break-words font-medium leading-snug">
+            {eventTitle(event)}
+          </span>
+          {event.toolCallId && (
+            <span className="truncate text-xs text-[var(--cds-text-secondary)]">
+              {event.toolCallId}
+            </span>
+          )}
+        </span>
+        <time
+          className="justify-self-end text-xs text-[var(--cds-text-secondary)] max-[671px]:justify-self-start"
+          dateTime={event.createdAt}
+        >
+          {formatTime(event.createdAt)}
+        </time>
+      </div>
+      {details.length > 0 && (
+        <details className="ml-[calc(13rem+1rem)] min-w-0 max-[671px]:ml-0">
+          <summary className="w-fit cursor-pointer text-sm text-[var(--cds-link-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]">
+            Details
+          </summary>
+          <div className="mt-3 grid gap-3">
+            {details.map((detail) => (
+              <section className="grid gap-1.5" key={`${event.runId}-${index}-${detail.label}`}>
+                <h4 className="text-xs font-semibold uppercase leading-snug text-[var(--cds-text-secondary)]">
+                  {detail.label}
+                </h4>
+                <pre className="max-h-72 min-w-0 overflow-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-xs leading-relaxed text-[var(--cds-text-primary)]">
+                  {formatEventJson(detail.value)}
+                </pre>
+              </section>
+            ))}
+          </div>
+        </details>
+      )}
+    </li>
   )
 }
 

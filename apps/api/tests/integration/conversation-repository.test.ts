@@ -184,6 +184,18 @@ describeDb("conversation repository integration", () => {
       type: "message.delta",
       runId: job.run.id,
       content: " there",
+      raw: {
+        runtimeKind: "codex",
+        nativeType: "item.completed",
+        payload: {
+          type: "item.completed",
+          item: {
+            id: "item_message_1",
+            type: "agent_message",
+            text: " there",
+          },
+        },
+      },
       createdAt: "2026-05-26T00:00:02.000Z",
     };
     const completed: RunEvent = {

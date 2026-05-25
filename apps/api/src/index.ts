@@ -53,6 +53,21 @@ function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && runtimeKinds.has(value as RuntimeKind);
 }
 
+function buildAgentInstructions(description: string | undefined): string | undefined {
+  const trimmedDescription = description?.trim();
+
+  if (trimmedDescription === undefined || trimmedDescription.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "AgentHub agent profile:",
+    "Follow this agent profile when responding.",
+    "",
+    trimmedDescription,
+  ].join("\n");
+}
+
 const healthRoute = createRoute({
   method: "get",
   path: "/health",
@@ -358,6 +373,7 @@ app.post("/runs", async (c) => {
   let agentId = body.agentId;
   let daemonDeviceId = body.daemonDeviceId;
   let workspacePath = body.workspacePath;
+  let agentInstructions: string | undefined;
   let runtime: RunQueueJob["runtime"] = {
     runtimeKind: "codex",
     capabilities: [],
@@ -391,6 +407,7 @@ app.post("/runs", async (c) => {
 
     daemonDeviceId = runnableAgent.daemonDeviceId;
     workspacePath = runnableAgent.workspacePath;
+    agentInstructions = buildAgentInstructions(runnableAgent.agent.description);
     runtime = runnableAgent.runtime;
   } else {
     agentId = env.AGENTHUB_DEFAULT_AGENT_ID;
@@ -418,6 +435,7 @@ app.post("/runs", async (c) => {
   const job: RunQueueJob = {
     daemonDeviceId,
     prompt,
+    agentInstructions,
     workspacePath,
     run: {
       id: randomUUID(),

@@ -15,6 +15,7 @@ function createRunQueueJob(): RunQueueJob {
   return {
     daemonDeviceId: "local-dev",
     prompt: "hello",
+    agentInstructions: "Use this agent profile.",
     workspacePath: "/workspace",
     run: {
       id: "00000000-0000-4000-8000-000000000001",
@@ -146,6 +147,7 @@ describe("DaemonGateway", () => {
     expect(gateway.assignRun(job)).toBe(true);
     await expect(assignedMessage).resolves.toMatchObject({
       type: "run.assigned",
+      agentInstructions: job.agentInstructions,
       run: {
         id: job.run.id,
       },

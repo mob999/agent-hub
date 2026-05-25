@@ -253,6 +253,18 @@ function createCodexSpawnOptions(
     : options;
 }
 
+function createCodexDeveloperInstructionsConfig(
+  agentInstructions: string | undefined,
+): string | undefined {
+  const trimmedInstructions = agentInstructions?.trim();
+
+  if (trimmedInstructions === undefined || trimmedInstructions.length === 0) {
+    return undefined;
+  }
+
+  return `developer_instructions=${JSON.stringify(trimmedInstructions)}`;
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
@@ -316,6 +328,9 @@ export class CodexAdapter implements AgentAdapter {
 
   run(input: AgentRunInput): AsyncIterable<RunEvent> {
     const queue = new AsyncEventQueue<RunEvent>();
+    const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
+      input.agentInstructions,
+    );
     const args = [
       "exec",
       "--json",
@@ -324,6 +339,9 @@ export class CodexAdapter implements AgentAdapter {
       input.workspacePath,
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
+      ...(developerInstructionsConfig === undefined
+        ? []
+        : ["-c", developerInstructionsConfig]),
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {

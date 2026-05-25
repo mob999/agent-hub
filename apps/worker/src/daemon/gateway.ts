@@ -329,6 +329,7 @@ export class DaemonGateway {
       daemonDeviceId: job.daemonDeviceId,
       run: job.run,
       prompt: job.prompt,
+      agentInstructions: job.agentInstructions,
       workspacePath: job.workspacePath,
       runtime: job.runtime,
     });

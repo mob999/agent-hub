@@ -7,6 +7,7 @@ import type { AgentRun, RunEvent } from "../protocol/index.js";
 export interface AgentRunInput {
   run: AgentRun;
   prompt: string;
+  agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   abortSignal?: AbortSignal;

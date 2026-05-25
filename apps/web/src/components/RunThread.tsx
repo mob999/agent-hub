@@ -2,6 +2,8 @@ import { Tag } from '@carbon/react'
 import type { LocalRun, RunEvent } from '../lib/api'
 import { eventTitle, formatTime, runStatusLabel, runTagType } from '../lib/format'
 
+const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leading-5'
+
 interface RunThreadProps {
   localRun: LocalRun
   events: RunEvent[]
@@ -33,7 +35,7 @@ export function RunThread({ localRun, events, selected, selectRun }: RunThreadPr
               {formatTime(localRun.run.createdAt)}
             </time>
           </span>
-          <span className="whitespace-pre-wrap break-words">{localRun.prompt}</span>
+          <span className={messageBodyClass}>{localRun.prompt}</span>
         </span>
       </div>
       <button
@@ -62,7 +64,7 @@ export function RunThread({ localRun, events, selected, selectRun }: RunThreadPr
               {formatTime(localRun.run.updatedAt)}
             </time>
           </span>
-          <span className="whitespace-pre-wrap break-words">
+          <span className={messageBodyClass}>
             {agentMessage ||
               (latestEvent
                 ? eventTitle(latestEvent)

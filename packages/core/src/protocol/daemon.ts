@@ -12,6 +12,7 @@ import type { AgentRun, RunEvent, RunId } from "./run.js";
 export interface DaemonRunAssignment {
   run: AgentRun;
   prompt: string;
+  agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
 }

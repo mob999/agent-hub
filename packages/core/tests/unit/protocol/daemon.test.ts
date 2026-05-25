@@ -47,4 +47,30 @@ describe("daemon protocol", () => {
     expect(message.type).toBe("agent.create");
     expect(message.agent.defaultRuntimeKind).toBe(message.runtime.runtimeKind);
   });
+
+  it("expresses run assignment agent instructions", () => {
+    const message: DaemonServerMessage = {
+      type: "run.assigned",
+      agentId: "00000000-0000-4000-8000-000000000001",
+      daemonDeviceId: "local-dev",
+      prompt: "hello",
+      agentInstructions: "Use this agent profile.",
+      workspacePath: "/workspace",
+      run: {
+        id: "00000000-0000-4000-8000-000000000002",
+        agentId: "00000000-0000-4000-8000-000000000001",
+        daemonDeviceId: "local-dev",
+        status: "queued",
+        createdAt: "2026-05-25T00:00:00.000Z",
+        updatedAt: "2026-05-25T00:00:00.000Z",
+      },
+      runtime: {
+        runtimeKind: "codex",
+        capabilities: [],
+        updatedAt: "2026-05-25T00:00:00.000Z",
+      },
+    };
+
+    expect(message.agentInstructions).toBe("Use this agent profile.");
+  });
 });

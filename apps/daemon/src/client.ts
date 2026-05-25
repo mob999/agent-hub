@@ -174,6 +174,7 @@ export async function startDaemon(): Promise<void> {
         for await (const event of adapter.run({
           run: message.run,
           prompt: message.prompt,
+          agentInstructions: message.agentInstructions,
           workspacePath: message.workspacePath,
           runtime: message.runtime,
           abortSignal: abortController.signal,

@@ -14,7 +14,9 @@ import { ChatBot } from '@carbon/react/icons'
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import { ApiRequestError, apiRequest, type AuthResponse } from '../lib/api'
 
-export type RoutePath = '/' | '/login' | '/register'
+export type WorkspaceRoutePath = '/chat' | '/runs' | '/daemon'
+export type AuthRoutePath = '/login' | '/register'
+export type RoutePath = WorkspaceRoutePath | AuthRoutePath
 
 interface AuthPageProps {
   mode: 'login' | 'register'
@@ -88,7 +90,7 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
             : { email: email.trim(), password },
         ),
       })
-      navigate('/')
+      navigate('/chat')
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setServerError(error.message)

@@ -1,4 +1,4 @@
-import { Button, InlineNotification, Tag } from '@carbon/react'
+import { Button, InlineNotification } from '@carbon/react'
 import { Add, ChatBot, Devices, Renew } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
 import type { DaemonDevice, DeviceStatus } from '../lib/api'
@@ -7,10 +7,9 @@ import { formatTime } from '../lib/format'
 interface DaemonPageProps {
   devices: DaemonDevice[]
   deviceError: string | null
-  onlineCount: number
 }
 
-export function DaemonPage({ devices, deviceError, onlineCount }: DaemonPageProps) {
+export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
@@ -25,12 +24,8 @@ export function DaemonPage({ devices, deviceError, onlineCount }: DaemonPageProp
         className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[671px]:hidden"
         aria-label="Daemon list"
       >
-        <header className="grid min-h-18 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b border-[var(--cds-border-subtle-01)] px-4">
+        <header className="grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--cds-border-subtle-01)] px-4">
           <h1 className="truncate text-base font-semibold leading-snug">Daemon</h1>
-          <span className="text-[var(--cds-text-secondary)]">{devices.length}</span>
-          <Tag type={onlineCount > 0 ? 'green' : 'gray'} size="sm">
-            {onlineCount} online
-          </Tag>
           <button
             className="grid h-7 w-7 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-text-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"

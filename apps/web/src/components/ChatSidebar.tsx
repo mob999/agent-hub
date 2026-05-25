@@ -8,7 +8,13 @@ interface ChatSidebarProps {
 }
 
 const sidebarButton =
-  'grid w-full cursor-pointer items-center border border-transparent bg-transparent text-left text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'grid w-full cursor-pointer items-center border text-left text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const transparentListItem =
+  'border-transparent bg-transparent hover:bg-[var(--cds-layer-hover-01)]'
+const selectedListItem =
+  'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-hover-01)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-selected-hover-01)]'
+const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
+const labelWithCount = 'inline-flex items-baseline gap-1'
 
 export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
   return (
@@ -24,28 +30,27 @@ export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
       </header>
 
       <section className="grid gap-0.5 p-3" aria-label="Quick actions">
-        <button className={`${sidebarButton} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
+        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
           <Chat size={16} />
           <span>Search</span>
           <kbd className="text-[var(--cds-text-secondary)]">Ctrl K</kbd>
         </button>
-        <button className={`${sidebarButton} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
+        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
           <JobRun size={16} />
           <span>Activity</span>
-          <small className="text-[var(--cds-text-secondary)]">{activeRunCount}</small>
+          <span className="font-semibold text-[var(--cds-text-primary)]">{activeRunCount}</span>
         </button>
-        <button className={`${sidebarButton} grid-cols-[1rem_minmax(0,1fr)] gap-3 px-3 py-2`} type="button">
+        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)] gap-3 px-3 py-2`} type="button">
           <ChatBot size={16} />
           <span>Saved</span>
         </button>
       </section>
 
       <section className="grid gap-1 p-3" aria-labelledby="groups-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
-          <h3 id="groups-heading" className="truncate text-xs font-semibold uppercase">
-            Groups
+        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
+          <h3 id="groups-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
+            Groups<span className={inlineCount}>({runs.length})</span>
           </h3>
-          <span>{runs.length}</span>
           <button
             className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
@@ -55,10 +60,11 @@ export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
           </button>
         </div>
         <button
-          className={`${sidebarButton} min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 border-[var(--cds-border-interactive)] bg-[var(--cds-layer-selected-01)] px-3 font-semibold`}
+          className={`${sidebarButton} ${selectedListItem} min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
           type="button"
+          aria-current="page"
         >
-          <span className="text-base text-[var(--cds-text-secondary)]">#</span>
+          <span className="text-base text-[var(--cds-text-primary)]">#</span>
           <span>all</span>
           {activeRunCount > 0 && (
             <Tag type="blue" size="sm">
@@ -69,11 +75,10 @@ export function ChatSidebar({ runs, activeRunCount }: ChatSidebarProps) {
       </section>
 
       <section className="grid gap-1 p-3" aria-labelledby="agents-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
-          <h3 id="agents-heading" className="truncate text-xs font-semibold uppercase">
-            Agents
+        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
+          <h3 id="agents-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
+            Agents<span className={inlineCount}>(0)</span>
           </h3>
-          <span>0</span>
           <button
             className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"

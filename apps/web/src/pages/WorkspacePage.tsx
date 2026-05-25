@@ -17,15 +17,26 @@ import {
 } from '../lib/api'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
-import type { RoutePath } from './AuthPage'
+import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const activeChannelId = 'all'
+const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
+  chat: '/chat',
+  runs: '/runs',
+  daemon: '/daemon',
+}
+const workspaceViewByRoute: Record<WorkspaceRoutePath, WorkspaceView> = {
+  '/chat': 'chat',
+  '/runs': 'runs',
+  '/daemon': 'daemon',
+}
 
 interface WorkspacePageProps {
+  route: WorkspaceRoutePath
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ navigate }: WorkspacePageProps) {
+export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -38,9 +49,8 @@ export function WorkspacePage({ navigate }: WorkspacePageProps) {
   const [isCreatingRun, setIsCreatingRun] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
-  const [activeView, setActiveView] = useState<WorkspaceView>('chat')
 
-  const onlineDevices = devices.filter((device) => device.status === 'online')
+  const activeView = workspaceViewByRoute[route]
   const activeRunCount = useMemo(
     () =>
       runs.filter((localRun) => localRun.run.status === 'queued' || localRun.run.status === 'running')
@@ -212,6 +222,9 @@ export function WorkspacePage({ navigate }: WorkspacePageProps) {
       void refreshRun(localRun.run.id)
     })
   }
+  const navigateToView = (view: WorkspaceView) => {
+    navigate(workspaceRouteByView[view])
+  }
 
   if (authLoading) {
     return (
@@ -250,7 +263,7 @@ export function WorkspacePage({ navigate }: WorkspacePageProps) {
         activeView={activeView}
         accountExpanded={accountExpanded}
         toggleAccount={() => setAccountExpanded((expanded) => !expanded)}
-        setActiveView={setActiveView}
+        setActiveView={navigateToView}
         refreshWorkspace={refreshWorkspace}
         logout={logout}
       />
@@ -273,7 +286,6 @@ export function WorkspacePage({ navigate }: WorkspacePageProps) {
         <DaemonPage
           devices={devices}
           deviceError={deviceError}
-          onlineCount={onlineDevices.length}
         />
       ) : (
         <RunsPage

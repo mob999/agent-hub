@@ -242,6 +242,17 @@ function createLogLineEvent(
   };
 }
 
+function createCodexSpawnOptions(
+  options: SpawnOptionsWithoutStdio,
+): SpawnOptionsWithoutStdio {
+  return process.platform === "win32"
+    ? {
+        ...options,
+        shell: true,
+      }
+    : options;
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
@@ -255,7 +266,9 @@ export class CodexAdapter implements AgentAdapter {
 
   async detect(): Promise<AgentRuntimeBinding> {
     const process = this.#spawnProcess(this.#executablePath, ["--version"], {
-      stdio: "pipe",
+      ...createCodexSpawnOptions({
+        stdio: "pipe",
+      }),
     });
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();
@@ -315,8 +328,10 @@ export class CodexAdapter implements AgentAdapter {
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {
-      cwd: input.workspacePath,
-      stdio: "pipe",
+      ...createCodexSpawnOptions({
+        cwd: input.workspacePath,
+        stdio: "pipe",
+      }),
     });
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();

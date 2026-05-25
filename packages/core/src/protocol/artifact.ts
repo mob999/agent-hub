@@ -1,5 +1,5 @@
-import type { AgentId, IsoDateTime } from "./agent";
-import type { RunId } from "./run";
+import type { AgentId, IsoDateTime } from "./agent.js";
+import type { RunId } from "./run.js";
 
 export type ArtifactId = string;
 

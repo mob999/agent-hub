@@ -6,10 +6,16 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --conditions=development --env-file=..\\..\\.env src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@agent-hub/config": "workspace:*",
+    "@agent-hub/core": "workspace:*",
+    "@agent-hub/server": "workspace:*",
+    "redis": "^5.12.1"
+  }
 }

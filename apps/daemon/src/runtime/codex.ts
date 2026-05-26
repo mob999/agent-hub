@@ -1,12 +1,15 @@
 import { spawn as spawnChildProcess } from "node:child_process";
 import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_process";
+import path from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import type {
   AgentAdapter,
   AgentRunInput,
 } from "@agent-hub/core/runtime";
 import type {
+  AgentHubMcpToolName,
   AgentRuntimeConfig,
   DaemonRuntime,
   RunEvent,
@@ -14,6 +17,7 @@ import type {
   RuntimeRawEvent,
 } from "@agent-hub/core/protocol";
 
+import type { AgentHubMcpSessionHandle } from "../mcp/relay";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 type SpawnedProcess = Pick<
@@ -29,7 +33,29 @@ export type SpawnCodexProcess = (
 
 export interface CodexAdapterOptions {
   executablePath?: string;
+  mcpRelay?: AgentHubMcpRelayLike;
+  mcpServerCommand?: AgentHubMcpServerCommand;
   spawnProcess?: SpawnCodexProcess;
+}
+
+export interface AgentHubMcpServerCommand {
+  args: string[];
+  command: string;
+  cwd?: string;
+}
+
+export interface AgentHubMcpRelayLike {
+  createSession(input: {
+    enabledTools: AgentHubMcpToolName[];
+    onToolCall(call: {
+      createdAt: string;
+      input: { content: string };
+      name: AgentHubMcpToolName;
+      runId: RunId;
+      toolCallId: string;
+    }): { accepted: true } | Promise<{ accepted: true }>;
+    runId: RunId;
+  }): AgentHubMcpSessionHandle;
 }
 
 interface AsyncQueueItem<T> {
@@ -298,14 +324,81 @@ function createCodexDeveloperInstructionsConfig(
   return `developer_instructions=${JSON.stringify(trimmedInstructions)}`;
 }
 
+function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
+  const currentFile = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFile);
+  const isTypeScriptSource = currentFile.endsWith(".ts");
+
+  if (isTypeScriptSource) {
+    return {
+      command: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        path.resolve(currentDir, "../mcp/stdio-server.ts"),
+      ],
+      cwd: path.resolve(currentDir, "../../../.."),
+    };
+  }
+
+  return {
+    command: process.execPath,
+    args: [path.resolve(currentDir, "../mcp/stdio-server.js")],
+    cwd: path.resolve(currentDir, ".."),
+  };
+}
+
+function toTomlLiteral(value: string): string {
+  if (!value.includes("'") && !/[\r\n]/.test(value)) {
+    return `'${value}'`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function toTomlStringArray(values: string[]): string {
+  return `[${values.map(toTomlLiteral).join(",")}]`;
+}
+
+function createAgentHubMcpConfigArgs(input: {
+  command: AgentHubMcpServerCommand;
+  session: AgentHubMcpSessionHandle;
+}): string[] {
+  return [
+    "-c",
+    `mcp_servers.agenthub.command=${toTomlLiteral(input.command.command)}`,
+    "-c",
+    `mcp_servers.agenthub.args=${toTomlStringArray(input.command.args)}`,
+    "-c",
+    "mcp_servers.agenthub.startup_timeout_sec=15",
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_RELAY_URL=${toTomlLiteral(input.session.relayUrl)}`,
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_SESSION_TOKEN=${toTomlLiteral(input.session.token)}`,
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS=${toTomlLiteral(input.session.enabledTools.join(","))}`,
+    ...(input.command.cwd === undefined
+      ? []
+      : [
+          "-c",
+          `mcp_servers.agenthub.cwd=${toTomlLiteral(input.command.cwd)}`,
+        ]),
+  ];
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
   #executablePath: string;
+  #mcpRelay: AgentHubMcpRelayLike | undefined;
+  #mcpServerCommand: AgentHubMcpServerCommand;
   #spawnProcess: SpawnCodexProcess;
 
   constructor(options: CodexAdapterOptions = {}) {
     this.#executablePath = options.executablePath ?? "codex";
+    this.#mcpRelay = options.mcpRelay;
+    this.#mcpServerCommand =
+      options.mcpServerCommand ?? createAgentHubMcpServerCommand();
     this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
   }
 
@@ -353,6 +446,7 @@ export class CodexAdapter implements AgentAdapter {
       capabilities: [
         { name: "json-events", enabled: true },
         { name: "ephemeral-runs", enabled: true },
+        { name: "agenthub-mcp", enabled: this.#mcpRelay !== undefined },
       ],
       status: "ready",
       lastSeenAt: nowIsoDateTime(),
@@ -364,6 +458,22 @@ export class CodexAdapter implements AgentAdapter {
     const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
       input.agentInstructions,
     );
+    const mcpSession = this.#mcpRelay?.createSession({
+      enabledTools: input.agentHubMcpTools ?? [],
+      runId: input.run.id,
+      onToolCall: (call) => {
+        queue.push({
+          type: "agenthub.tool.call",
+          runId: call.runId,
+          toolCallId: call.toolCallId,
+          name: call.name,
+          input: call.input,
+          createdAt: call.createdAt,
+        });
+
+        return { accepted: true };
+      },
+    });
     const args = [
       "exec",
       "--json",
@@ -375,6 +485,12 @@ export class CodexAdapter implements AgentAdapter {
       ...(developerInstructionsConfig === undefined
         ? []
         : ["-c", developerInstructionsConfig]),
+      ...(mcpSession === undefined
+        ? []
+        : createAgentHubMcpConfigArgs({
+            command: this.#mcpServerCommand,
+            session: mcpSession,
+          })),
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {
@@ -397,6 +513,7 @@ export class CodexAdapter implements AgentAdapter {
       }
 
       completed = true;
+      mcpSession?.close();
       queue.push({
         type: "run.completed",
         runId: input.run.id,

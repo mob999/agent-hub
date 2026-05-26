@@ -81,18 +81,31 @@ export interface ListConversationMessagesResponse {
   messages: ConversationMessage[];
 }
 
+export type SendConversationMessageMode = "chat" | "task";
+
+export interface ConversationMention {
+  type: "agent";
+  agentId: AgentId;
+  label?: string;
+}
+
 export interface SendConversationMessageRequest {
   content: string;
+  mode?: SendConversationMessageMode;
   agentId?: AgentId;
+  mentions?: ConversationMention[];
 }
 
 export interface SendConversationMessageResponse {
   conversation: Conversation;
   messages: {
     user: ConversationMessage;
-    assistant: ConversationMessage;
+    assistant?: ConversationMessage;
+    assistants: ConversationMessage[];
   };
-  run: AgentRun;
-  queueMessageId: string;
+  run?: AgentRun;
+  runs: AgentRun[];
+  queueMessageId?: string;
+  queueMessageIds: string[];
 }
 

@@ -10,6 +10,7 @@ import type {
 import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
+import { AgentHubMcpRelay } from "./mcp/relay";
 import { CodexAdapter } from "./runtime/codex";
 import {
   assertPathInsideWorkspace,
@@ -48,8 +49,11 @@ const maxReconnectDelayMs = 10_000;
 
 export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
+  const mcpRelay = new AgentHubMcpRelay();
+  await mcpRelay.start();
   const adapter = new CodexAdapter({
     executablePath: env.CODEX_EXECUTABLE_PATH,
+    mcpRelay,
   });
   const logger = createLogger({
     bindings: {
@@ -177,6 +181,7 @@ export async function startDaemon(): Promise<void> {
           agentInstructions: message.agentInstructions,
           workspacePath: message.workspacePath,
           runtime: message.runtime,
+          agentHubMcpTools: message.agentHubMcpTools,
           abortSignal: abortController.signal,
         })) {
           send(ws, {

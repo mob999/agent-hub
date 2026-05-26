@@ -3,9 +3,9 @@ import { PassThrough } from "node:stream";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 
 import type { AgentRunInput } from "@agent-hub/core/runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { CodexAdapter, type SpawnCodexProcess } from "../../src/runtime";
+import { CodexAdapter, type AgentHubMcpRelayLike, type SpawnCodexProcess } from "../../src/runtime";
 
 class MockCodexProcess extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -50,6 +50,28 @@ function createSpawnMock() {
   };
 
   return { calls, spawnProcess };
+}
+
+function createMcpRelayMock() {
+  const sessions: Array<Parameters<AgentHubMcpRelayLike["createSession"]>[0]> = [];
+  const handles: Array<ReturnType<AgentHubMcpRelayLike["createSession"]>> = [];
+  const relay: AgentHubMcpRelayLike = {
+    createSession: (input) => {
+      const handle = {
+        enabledTools: input.enabledTools,
+        relayUrl: "http://127.0.0.1:4173",
+        token: `session_${sessions.length + 1}`,
+        close: vi.fn(),
+      };
+
+      sessions.push(input);
+      handles.push(handle);
+
+      return handle;
+    },
+  };
+
+  return { handles, relay, sessions };
 }
 
 function createRunInput(overrides: Partial<AgentRunInput> = {}): AgentRunInput {
@@ -147,6 +169,80 @@ describe("CodexAdapter", () => {
       `developer_instructions=${JSON.stringify(agentInstructions)}`,
     );
     expect(calls[0].process.stdinText).toBe("ship the page");
+  });
+
+  it("injects a per-run AgentHub MCP stdio server and emits MCP tool events", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const { handles, relay, sessions } = createMcpRelayMock();
+    const adapter = new CodexAdapter({
+      mcpRelay: relay,
+      mcpServerCommand: {
+        command: "node",
+        args: ["agenthub-mcp.js"],
+        cwd: "/repo",
+      },
+      spawnProcess,
+    });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ agentHubMcpTools: ["send_message"] })),
+    );
+
+    expect(calls[0].args).toEqual(
+      expect.arrayContaining([
+        "-c",
+        "mcp_servers.agenthub.command='node'",
+        "mcp_servers.agenthub.args=['agenthub-mcp.js']",
+        "mcp_servers.agenthub.env.AGENTHUB_MCP_RELAY_URL='http://127.0.0.1:4173'",
+        "mcp_servers.agenthub.env.AGENTHUB_MCP_SESSION_TOKEN='session_1'",
+        "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='send_message'",
+        "mcp_servers.agenthub.cwd='/repo'",
+      ]),
+    );
+
+    await sessions[0].onToolCall({
+      runId: "run_1",
+      toolCallId: "tool_1",
+      name: "send_message",
+      input: { content: "I can help." },
+      createdAt: "2026-05-21T00:00:01.000Z",
+    });
+    calls[0].process.close(0);
+
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agenthub.tool.call",
+          runId: "run_1",
+          toolCallId: "tool_1",
+          name: "send_message",
+          input: { content: "I can help." },
+        }),
+      ]),
+    );
+    expect(handles[0].close).toHaveBeenCalledOnce();
+  });
+
+  it("formats MCP stdio args without shell-splitting spaces", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const { relay } = createMcpRelayMock();
+    const adapter = new CodexAdapter({
+      mcpRelay: relay,
+      mcpServerCommand: {
+        command: "node",
+        args: ["--import", "tsx", "E:\\agent-hub\\apps\\daemon\\src\\mcp\\stdio-server.ts"],
+      },
+      spawnProcess,
+    });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ agentHubMcpTools: ["send_message"] })),
+    );
+
+    calls[0].process.close(0);
+    await eventsPromise;
+
+    expect(calls[0].args).toContain(
+      "mcp_servers.agenthub.args=['--import','tsx','E:\\agent-hub\\apps\\daemon\\src\\mcp\\stdio-server.ts']",
+    );
   });
 
   it("stores raw Codex JSONL and emits normalized tool call events", async () => {
@@ -314,6 +410,44 @@ describe("CodexAdapter", () => {
             runtimeKind: "codex",
             nativeType: "item.completed",
           }),
+        }),
+      ]),
+    );
+  });
+
+  it("does not parse AgentHub JSON tool calls from agent messages", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new CodexAdapter({ spawnProcess });
+    const jsonToolCall =
+      '{"type":"agenthub.tool_call","version":1,"tool":"send_message","input":{"content":"hidden"}}';
+    const eventsPromise = collectEvents(adapter.run(createRunInput()));
+
+    calls[0].process.stdout.write(
+      `${JSON.stringify({
+        type: "item.completed",
+        item: {
+          id: "item_0",
+          type: "agent_message",
+          text: jsonToolCall,
+        },
+      })}\n`,
+    );
+    calls[0].process.close(0);
+
+    const events = await eventsPromise;
+
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agenthub.tool.call",
+        }),
+      ]),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "message.delta",
+          content: jsonToolCall,
         }),
       ]),
     );

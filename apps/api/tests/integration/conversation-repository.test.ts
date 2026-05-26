@@ -16,6 +16,7 @@ import {
   appendRunEvent,
   createGroupConversation,
   createUserMessageAndRun,
+  createUserMessageAndRuns,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getConversationForUser,
@@ -329,5 +330,63 @@ describeDb("conversation repository integration", () => {
     });
 
     expect(fetchedUpdated?.agentIds).toEqual([secondAgentId]);
+  });
+
+  it("persists group chat MCP send_message calls as agent messages", async () => {
+    const ownerUserId = await createUser(
+      `conversation-mcp-owner-${randomUUID()}@example.com`,
+    );
+    const firstAgentId = await createAgent(ownerUserId);
+    const secondAgentId = await createAgent(ownerUserId);
+    const conversation = await ensureDefaultGroupConversation(db, {
+      ownerUserId,
+    });
+    const firstJob = createJob({
+      agentId: firstAgentId,
+      conversationId: conversation.id,
+    });
+    const secondJob = createJob({
+      agentId: secondAgentId,
+      conversationId: conversation.id,
+    });
+
+    conversationIds.push(conversation.id);
+    runIds.push(firstJob.run.id, secondJob.run.id);
+
+    const created = await createUserMessageAndRuns(db, {
+      ownerUserId,
+      conversationId: conversation.id,
+      jobs: [firstJob, secondJob],
+      userMessageContent: "who wants this?",
+    });
+
+    expect(created?.messages.assistants).toEqual([]);
+
+    await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: secondJob.run.id,
+      toolCallId: "tool_1",
+      name: "send_message",
+      input: { content: "I can take it." },
+      createdAt: "2026-05-26T00:00:01.000Z",
+    });
+
+    const messages = await listConversationMessagesForUser(db, {
+      ownerUserId,
+      conversationId: conversation.id,
+    });
+
+    expect(messages).toHaveLength(2);
+    expect(messages?.[0]).toMatchObject({
+      senderType: "user",
+      content: "who wants this?",
+    });
+    expect(messages?.[1]).toMatchObject({
+      senderType: "agent",
+      senderAgentId: secondAgentId,
+      runId: secondJob.run.id,
+      content: "I can take it.",
+      status: "completed",
+    });
   });
 });

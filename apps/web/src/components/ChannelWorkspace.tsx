@@ -20,7 +20,7 @@ interface ChannelWorkspaceProps {
   readyAgentCount: number
   canEditConversation: boolean
   setPrompt: (value: string) => void
-  submitRun: (event: FormEvent<HTMLFormElement>) => void
+  submitRun: (event: FormEvent<HTMLFormElement>, mode: 'chat' | 'task') => void
   openCreateAgent: () => void
   openEditConversation: () => void
 }
@@ -310,7 +310,7 @@ export function ChannelWorkspace({
       <Form
         className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
         aria-label="Create run"
-        onSubmit={submitRun}
+        onSubmit={(event) => submitRun(event, composerMode)}
       >
         {hasSelectedConversation && !selectedAgentReady && (
           <InlineNotification

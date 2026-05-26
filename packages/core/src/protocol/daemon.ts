@@ -7,6 +7,7 @@ import type {
   DaemonDeviceId,
   IsoDateTime,
 } from "./agent.js";
+import type { AgentHubMcpToolName } from "./mcp.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
 export interface DaemonRunAssignment {
@@ -15,6 +16,7 @@ export interface DaemonRunAssignment {
   agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
+  agentHubMcpTools?: AgentHubMcpToolName[];
 }
 
 export type DaemonClientMessage =

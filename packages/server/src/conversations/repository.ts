@@ -670,10 +670,160 @@ export async function createUserMessageAndRun(
   });
 }
 
+export async function createUserMessageAndRuns(
+  db: Db,
+  input: {
+    ownerUserId: string;
+    conversationId: ConversationId;
+    jobs: RunQueueJob[];
+    userMessageContent: string;
+  },
+): Promise<{
+  conversation: Conversation;
+  messages: {
+    user: ConversationMessage;
+    assistants: ConversationMessage[];
+  };
+} | null> {
+  return db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return null;
+    }
+
+    const createdAt = new Date(input.jobs[0]?.run.createdAt ?? new Date());
+    const [userMessage] = await tx
+      .insert(conversationMessages)
+      .values({
+        conversationId: input.conversationId,
+        senderType: "user",
+        content: input.userMessageContent,
+        status: "completed",
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .returning();
+
+    if (input.jobs.length > 0) {
+      await tx.insert(runs).values(
+        input.jobs.map((job) => ({
+          id: job.run.id,
+          ownerUserId: input.ownerUserId,
+          conversationId: input.conversationId,
+          agentId: job.run.agentId,
+          daemonDeviceId: job.daemonDeviceId,
+          status: job.run.status,
+          prompt: input.userMessageContent,
+          workspacePath: job.workspacePath,
+          runtime: job.runtime,
+          createdAt: new Date(job.run.createdAt),
+          updatedAt: new Date(job.run.updatedAt),
+        })),
+      );
+
+      await tx.insert(runEvents).values(
+        input.jobs.map((job) => {
+          const queuedEvent: RunEvent = {
+            type: "run.queued",
+            runId: job.run.id,
+            agentId: job.run.agentId,
+            daemonDeviceId: job.daemonDeviceId,
+            createdAt: job.run.createdAt,
+          };
+
+          return {
+            runId: job.run.id,
+            eventType: queuedEvent.type,
+            payload: queuedEvent,
+            createdAt: new Date(job.run.createdAt),
+          };
+        }),
+      );
+    }
+
+    const [updatedConversation] = await tx
+      .update(conversations)
+      .set({
+        lastMessageAt: createdAt,
+        updatedAt: createdAt,
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    return {
+      conversation: toConversation(updatedConversation ?? conversation),
+      messages: {
+        user: toConversationMessage(userMessage),
+        assistants: [],
+      },
+    };
+  });
+}
+
 export async function appendRunEventToConversationMessage(
   db: Db,
   event: RunEvent,
 ): Promise<void> {
+  if (event.type === "agenthub.tool.call") {
+    if (event.name !== "send_message") {
+      return;
+    }
+
+    const content = event.input.content.trim();
+
+    if (content.length === 0) {
+      return;
+    }
+
+    const [run] = await db
+      .select({
+        agentId: runs.agentId,
+        conversationId: runs.conversationId,
+      })
+      .from(runs)
+      .where(eq(runs.id, event.runId))
+      .limit(1);
+
+    if (run === undefined || run.conversationId === null) {
+      return;
+    }
+
+    const conversationId = run.conversationId;
+    const createdAt = new Date(event.createdAt);
+    await db.transaction(async (tx) => {
+      await tx.insert(conversationMessages).values({
+        conversationId,
+        senderType: "agent",
+        senderAgentId: run.agentId,
+        runId: event.runId,
+        content,
+        status: "completed",
+        createdAt,
+        updatedAt: createdAt,
+      });
+
+      await tx
+        .update(conversations)
+        .set({
+          lastMessageAt: createdAt,
+          updatedAt: createdAt,
+        })
+        .where(eq(conversations.id, conversationId));
+    });
+
+    return;
+  }
+
   const assistantContent = getAssistantMessageContent(event);
 
   if (assistantContent === undefined && event.type !== "run.completed") {

@@ -22,6 +22,7 @@ import {
   type LocalRun,
   type RuntimeKind,
   type RunEvent,
+  type SendConversationMessageMode,
   type SendConversationMessageResponse,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
@@ -405,9 +406,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   }, [refreshRun, selectedRunId])
 
   useEffect(() => {
+    const hasActiveConversationRuns =
+      activeConversationId !== null &&
+      runs.some(
+        (localRun) =>
+          localRun.channelId === activeConversationId &&
+          (localRun.run.status === 'queued' || localRun.run.status === 'running'),
+      )
+
     if (
       activeConversationId === null ||
-      !activeConversationMessages.some((message) => message.status === 'streaming')
+      (!hasActiveConversationRuns &&
+        !activeConversationMessages.some((message) => message.status === 'streaming'))
     ) {
       return
     }
@@ -417,9 +427,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     }, 2000)
 
     return () => window.clearInterval(timer)
-  }, [activeConversationId, activeConversationMessages, loadMessages])
+  }, [activeConversationId, activeConversationMessages, loadMessages, runs])
 
-  const submitRun = async (event: FormEvent<HTMLFormElement>) => {
+  const submitRun = async (event: FormEvent<HTMLFormElement>, mode: SendConversationMessageMode) => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt || isCreatingRun) {
@@ -456,10 +466,22 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           method: 'POST',
           body: JSON.stringify({
             content: trimmedPrompt,
+            mode,
           }),
         },
       )
-      const runAgent = agents.find((agent) => agent.agent.id === response.run.agentId)
+      const responseRuns = response.runs.length > 0
+        ? response.runs
+        : response.run === undefined
+          ? []
+          : [response.run]
+      const assistantMessages = [
+        ...response.messages.assistants,
+        ...(response.messages.assistant === undefined ||
+        response.messages.assistants.some((message) => message.id === response.messages.assistant?.id)
+          ? []
+          : [response.messages.assistant]),
+      ]
 
       setConversations((current) => [
         response.conversation,
@@ -471,10 +493,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           ...currentMessages.filter(
             (message) =>
               message.id !== response.messages.user.id &&
-              message.id !== response.messages.assistant.id,
+              !assistantMessages.some((assistant) => assistant.id === message.id),
           ),
           response.messages.user,
-          response.messages.assistant,
+          ...assistantMessages,
         ]
 
         return {
@@ -483,17 +505,23 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         }
       })
       setRuns((current) => [
-        {
-          channelId: activeConversation.id,
-          agentName: runAgent?.agent.name,
-          prompt: trimmedPrompt,
-          run: response.run,
-        },
+        ...responseRuns.map((run) => {
+          const runAgent = agents.find((agent) => agent.agent.id === run.agentId)
+
+          return {
+            channelId: activeConversation.id,
+            agentName: runAgent?.agent.name,
+            prompt: trimmedPrompt,
+            run,
+          }
+        }),
         ...current,
       ])
-      setSelectedRunId(response.run.id)
+      setSelectedRunId(responseRuns[0]?.id ?? null)
       setPrompt('')
-      void refreshRun(response.run.id)
+      responseRuns.forEach((run) => {
+        void refreshRun(run.id)
+      })
       void loadMessages(activeConversation.id)
     } catch (error) {
       if (error instanceof ApiRequestError) {

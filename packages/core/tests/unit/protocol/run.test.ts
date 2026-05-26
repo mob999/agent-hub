@@ -73,4 +73,18 @@ describe("run protocol", () => {
     expect(rawEvent.raw.nativeType).toBe("item.started");
     expect(mappedEvent.raw.payload).toBe(rawPayload);
   });
+
+  it("expresses AgentHub MCP tool calls", () => {
+    const event = {
+      type: "agenthub.tool.call",
+      runId: "run_1",
+      toolCallId: "tool_1",
+      name: "send_message",
+      input: { content: "I can take this one." },
+      createdAt: "2026-05-21T00:00:00.000Z",
+    } satisfies RunEvent;
+
+    expect(event.name).toBe("send_message");
+    expect(event.input.content).toBe("I can take this one.");
+  });
 });

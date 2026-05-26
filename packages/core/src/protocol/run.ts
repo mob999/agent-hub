@@ -5,6 +5,7 @@ import type {
   RuntimeKind,
 } from "./agent.js";
 import type { Artifact } from "./artifact.js";
+import type { AgentHubMcpToolInput, AgentHubMcpToolName } from "./mcp.js";
 
 export type RunId = string;
 
@@ -90,6 +91,15 @@ export type RunEvent =
       status: ToolCallStatus;
       output?: unknown;
       error?: string;
+      raw?: RuntimeRawEvent;
+      createdAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call";
+      runId: RunId;
+      toolCallId: string;
+      name: AgentHubMcpToolName;
+      input: AgentHubMcpToolInput;
       raw?: RuntimeRawEvent;
       createdAt: IsoDateTime;
     }

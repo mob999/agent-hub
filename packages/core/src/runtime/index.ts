@@ -1,5 +1,6 @@
 import type {
   AgentRuntimeConfig,
+  AgentHubMcpToolName,
   DaemonRuntime,
 } from "../protocol/index.js";
 import type { AgentRun, RunEvent } from "../protocol/index.js";
@@ -10,6 +11,7 @@ export interface AgentRunInput {
   agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
+  agentHubMcpTools?: AgentHubMcpToolName[];
   abortSignal?: AbortSignal;
 }
 

@@ -15,14 +15,13 @@ import {
   buildConversationRunPrompt,
   createGroupConversation,
   createUserMessageAndRun,
-  defaultGroupConversationKey,
+  createUserMessageAndRuns,
   enqueueAgentProvisioningJob,
   enqueueRunJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
   getConversationForUser,
-  getFirstRunnableAgentForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
@@ -96,6 +95,70 @@ function isValidAgentIdList(value: unknown): value is string[] {
     ) &&
     new Set(value).size === value.length
   );
+}
+
+function parseMentionedAgentIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const agentIds = value.flatMap((mention) => {
+    if (
+      typeof mention !== "object" ||
+      mention === null ||
+      Array.isArray(mention)
+    ) {
+      return [];
+    }
+
+    const record = mention as Record<string, unknown>;
+
+    return record.type === "agent" &&
+      typeof record.agentId === "string" &&
+      uuidPattern.test(record.agentId)
+      ? [record.agentId]
+      : [];
+  });
+
+  return [...new Set(agentIds)];
+}
+
+function buildGroupChatAgentInstructions(input: {
+  agentInstructions?: string;
+  conversationTitle: string;
+}): string {
+  return [
+    input.agentInstructions,
+    `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
+    "Visible group replies must be sent with the AgentHub MCP tool send_message.",
+    "Do not answer a group chat by writing normal assistant text.",
+  ].filter((line): line is string => line !== undefined && line.trim().length > 0)
+    .join("\n\n");
+}
+
+function buildGroupChatRunPrompt(input: {
+  agentName: string;
+  conversationTitle: string;
+  currentUserMessage: string;
+  messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
+}): string {
+  const conversationPrompt = buildConversationRunPrompt({
+    currentUserMessage: input.currentUserMessage,
+    messages: input.messages ?? [],
+  });
+
+  return [
+    "<agenthub_group_chat_protocol>",
+    `You are ${input.agentName} in #${input.conversationTitle}.`,
+    "Decide whether you should reply to the user's latest message.",
+    "If you should reply, call the MCP tool send_message with { content: string }.",
+    "If the user explicitly asks you to reply, you should normally call send_message.",
+    "If you should not reply, do not call send_message.",
+    "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
+    "</agenthub_group_chat_protocol>",
+    "",
+    conversationPrompt,
+  ].join("\n");
 }
 
 const healthRoute = createRoute({
@@ -786,15 +849,22 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agentId?: unknown;
     content?: unknown;
+    mentions?: unknown;
+    mode?: unknown;
   };
   const content = typeof body.content === "string" ? body.content.trim() : "";
+  const mode = body.mode === undefined || body.mode === "chat"
+    ? "chat"
+    : body.mode === "task"
+      ? "task"
+      : undefined;
 
-  if (content.length === 0) {
+  if (content.length === 0 || mode === undefined) {
     return c.json(
       {
         error: {
           code: "INVALID_MESSAGE_REQUEST",
-          message: "content is required.",
+          message: "content is required and mode must be chat or task.",
         },
       },
       400,
@@ -822,77 +892,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     typeof body.agentId === "string" && body.agentId.length > 0
       ? body.agentId
       : undefined;
-  let runAgent: RunnableAgent | null = null;
-
-  if (conversation.type === "direct") {
-    runAgent = conversation.directAgentId === undefined
-      ? null
-      : await getRunnableAgentForUser(db, {
-          agentId: conversation.directAgentId,
-          ownerUserId: user.id,
-        });
-  } else if (conversation.key === defaultGroupConversationKey) {
-    runAgent = requestedAgentId === undefined
-      ? await getFirstRunnableAgentForUser(db, { ownerUserId: user.id })
-      : await getRunnableAgentForUser(db, {
-          agentId: requestedAgentId,
-          ownerUserId: user.id,
-        });
-  } else {
-    const groupAgentIds = conversation.agentIds ?? [];
-
-    if (
-      requestedAgentId !== undefined &&
-      !groupAgentIds.includes(requestedAgentId)
-    ) {
-      return c.json(
-        {
-          error: {
-            code: "AGENT_NOT_IN_GROUP",
-            message: "Agent is not a member of this group.",
-          },
-        },
-        400,
-      );
-    }
-
-    if (requestedAgentId !== undefined) {
-      runAgent = await getRunnableAgentForUser(db, {
-        agentId: requestedAgentId,
-        ownerUserId: user.id,
-      });
-    } else {
-      for (const agentId of groupAgentIds) {
-        runAgent = await getRunnableAgentForUser(db, {
-          agentId,
-          ownerUserId: user.id,
-        });
-
-        if (runAgent !== null) {
-          break;
-        }
-      }
-    }
-  }
-
-  if (runAgent === null) {
-    return c.json(
-      {
-        error: {
-          code:
-            conversation.type === "direct"
-              ? "AGENT_NOT_READY"
-              : "NO_READY_AGENT",
-          message:
-            conversation.type === "direct"
-              ? "Agent is not ready to run yet."
-              : "Create a ready agent before sending a group message.",
-        },
-      },
-      400,
-    );
-  }
-
+  const mentionedAgentIds = parseMentionedAgentIds(body.mentions);
   const now = new Date().toISOString();
   const priorMessages = await listConversationMessagesForUser(db, {
     conversationId: conversation.id,
@@ -912,14 +912,156 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const job: RunQueueJob = {
+  if (conversation.type === "direct") {
+    const runAgent = conversation.directAgentId === undefined
+      ? null
+      : await getRunnableAgentForUser(db, {
+          agentId: conversation.directAgentId,
+          ownerUserId: user.id,
+        });
+
+    if (runAgent === null) {
+      return c.json(
+        {
+          error: {
+            code: "AGENT_NOT_READY",
+            message: "Agent is not ready to run yet.",
+          },
+        },
+        400,
+      );
+    }
+
+    const job: RunQueueJob = {
+      conversationId: conversation.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      prompt: buildConversationRunPrompt({
+        currentUserMessage: content,
+        messages: priorMessages,
+      }),
+      agentInstructions: buildAgentInstructions(runAgent.agent.description),
+      workspacePath: runAgent.workspacePath,
+      run: {
+        id: randomUUID(),
+        agentId: runAgent.agent.id,
+        daemonDeviceId: runAgent.daemonDeviceId,
+        status: "queued",
+        createdAt: now,
+        updatedAt: now,
+      },
+      runtime: runAgent.runtime,
+    };
+    const result = await createUserMessageAndRun(db, {
+      ownerUserId: user.id,
+      conversationId: conversation.id,
+      job,
+      userMessageContent: content,
+    });
+
+    if (result === null) {
+      return c.json(
+        {
+          error: {
+            code: "CONVERSATION_NOT_FOUND",
+            message: "Conversation was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    const queueMessageId = await enqueueRunJob(redis, job);
+    const assistant = result.messages.assistant;
+
+    return c.json(
+      {
+        conversation: result.conversation,
+        messages: {
+          ...result.messages,
+          assistants: assistant === undefined ? [] : [assistant],
+        },
+        run: job.run,
+        runs: [job.run],
+        queueMessageId,
+        queueMessageIds: [queueMessageId],
+      },
+      202,
+    );
+  }
+
+  if (mode === "task") {
+    return c.json(
+      {
+        error: {
+          code: "TASK_MODE_NOT_IMPLEMENTED",
+          message: "Group task mode is not implemented yet.",
+        },
+      },
+      400,
+    );
+  }
+
+  const groupAgentIds = conversation.agentIds ?? [];
+  const targetAgentIds = requestedAgentId !== undefined
+    ? [requestedAgentId]
+    : mentionedAgentIds.length > 0
+      ? mentionedAgentIds
+      : groupAgentIds;
+  const nonMemberAgentId = targetAgentIds.find(
+    (agentId) => !groupAgentIds.includes(agentId),
+  );
+
+  if (nonMemberAgentId !== undefined) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_IN_GROUP",
+          message: "Agent is not a member of this group.",
+        },
+      },
+      400,
+    );
+  }
+
+  const runAgents: RunnableAgent[] = [];
+
+  for (const agentId of targetAgentIds) {
+    const runAgent = await getRunnableAgentForUser(db, {
+      agentId,
+      ownerUserId: user.id,
+    });
+
+    if (runAgent !== null) {
+      runAgents.push(runAgent);
+    }
+  }
+
+  if (runAgents.length === 0) {
+    return c.json(
+      {
+        error: {
+          code: "NO_READY_AGENT",
+          message: "Create a ready agent before sending a group message.",
+        },
+      },
+      400,
+    );
+  }
+
+  const jobs = runAgents.map((runAgent): RunQueueJob => ({
     conversationId: conversation.id,
     daemonDeviceId: runAgent.daemonDeviceId,
-    prompt: buildConversationRunPrompt({
+    prompt: buildGroupChatRunPrompt({
+      agentName: runAgent.agent.name,
+      conversationTitle: conversation.title,
       currentUserMessage: content,
       messages: priorMessages,
     }),
-    agentInstructions: buildAgentInstructions(runAgent.agent.description),
+    agentInstructions: buildGroupChatAgentInstructions({
+      agentInstructions: buildAgentInstructions(runAgent.agent.description),
+      conversationTitle: conversation.title,
+    }),
+    agentHubMcpTools: ["send_message"],
     workspacePath: runAgent.workspacePath,
     run: {
       id: randomUUID(),
@@ -930,11 +1072,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       updatedAt: now,
     },
     runtime: runAgent.runtime,
-  };
-  const result = await createUserMessageAndRun(db, {
+  }));
+  const result = await createUserMessageAndRuns(db, {
     ownerUserId: user.id,
     conversationId: conversation.id,
-    job,
+    jobs,
     userMessageContent: content,
   });
 
@@ -950,14 +1092,16 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const queueMessageId = await enqueueRunJob(redis, job);
+  const queueMessageIds = await Promise.all(
+    jobs.map((job) => enqueueRunJob(redis, job)),
+  );
 
   return c.json(
     {
       conversation: result.conversation,
       messages: result.messages,
-      run: job.run,
-      queueMessageId,
+      runs: jobs.map((job) => job.run),
+      queueMessageIds,
     },
     202,
   );

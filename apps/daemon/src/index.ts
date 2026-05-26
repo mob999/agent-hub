@@ -1,6 +1,7 @@
 import { isDirectDaemonEntry, startDaemon } from "./client";
 
 export * from "./client";
+export * from "./mcp";
 export * from "./runtime";
 export * from "./workspace";
 

@@ -57,6 +57,8 @@ export function eventTitle(event: RunEvent): string {
       return `Tool started${event.name ? `: ${event.name}` : ''}`
     case 'tool.call.completed':
       return `Tool ${event.status ?? 'completed'}${event.name ? `: ${event.name}` : ''}`
+    case 'agenthub.tool.call':
+      return `AgentHub tool${event.name ? `: ${event.name}` : ''}`
     case 'artifact.created':
       return 'Artifact created'
     case 'run.completed':

@@ -70,7 +70,7 @@ export function AgentCreateModal({
 
   return (
     <Modal
-      className="agent-create-modal"
+      className="centered-modal-actions"
       open={open}
       modalHeading="Create agent"
       primaryButtonText={isCreating ? 'Creating...' : 'Create'}

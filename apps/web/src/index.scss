@@ -39,13 +39,13 @@ textarea {
   font: inherit;
 }
 
-.agent-create-modal .cds--modal-footer .cds--btn {
+.centered-modal-actions .cds--modal-footer .cds--btn {
   align-items: center;
   justify-content: center;
   text-align: center;
 }
 
-.agent-create-modal .cds--modal-footer .cds--btn:not(.cds--skeleton) {
+.centered-modal-actions .cds--modal-footer .cds--btn:not(.cds--skeleton) {
   padding-block: 0;
   padding-inline: 1rem;
 }

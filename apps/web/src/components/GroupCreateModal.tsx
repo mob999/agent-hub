@@ -52,6 +52,7 @@ export function GroupCreateModal({
 
   return (
     <Modal
+      className="centered-modal-actions"
       open={open}
       modalHeading="Create group"
       primaryButtonText={isCreating ? 'Creating...' : 'Create'}

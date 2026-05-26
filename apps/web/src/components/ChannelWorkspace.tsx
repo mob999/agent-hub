@@ -88,7 +88,7 @@ export function ChannelWorkspace({
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
       : activeConversation.key === 'all'
         ? 'General channel for members and agent runs'
-        : activeConversation.description?.trim() ?? ''
+        : activeConversation.description?.trim() || 'Group channel for selected agents'
   const emptyTitle = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
@@ -174,7 +174,7 @@ export function ChannelWorkspace({
       <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-start gap-3">
           <span
-            className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] font-semibold"
+            className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-base font-semibold leading-none"
             aria-hidden="true"
           >
             {!hasSelectedConversation || isAgentDirectMessage ? <ChatBot size={20} /> : '#'}

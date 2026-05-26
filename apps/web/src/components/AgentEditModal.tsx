@@ -30,6 +30,7 @@ export function AgentEditModal({
 
   return (
     <Modal
+      className="centered-modal-actions"
       open={open}
       modalHeading="Edit agent"
       primaryButtonText={isSaving ? 'Saving...' : 'Save'}

@@ -54,6 +54,7 @@ export function GroupEditModal({
 
   return (
     <Modal
+      className="centered-modal-actions"
       open={open}
       modalHeading="Edit group"
       primaryButtonText={isSaving ? 'Saving...' : 'Save'}

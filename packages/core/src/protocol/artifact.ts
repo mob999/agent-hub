@@ -110,7 +110,7 @@ export function inferArtifactFileInfo(input: {
       mimeType: "text/x-diff; charset=utf-8",
       canApply: true,
       canEdit: false,
-      canPreview: false,
+      canPreview: true,
     };
   }
 

@@ -102,7 +102,7 @@ function inferArtifactFileInfo(filename: string): ArtifactFileInfo {
         label: 'Diff',
         language: 'diff',
         canEdit: false,
-        canPreview: false,
+        canPreview: true,
       }
   }
 
@@ -139,6 +139,30 @@ function shouldLoadArtifactContent(filename: string): boolean {
   const fileInfo = inferArtifactFileInfo(filename)
 
   return fileInfo.category === 'markdown' || fileInfo.category === 'diff' || fileInfo.category === 'text'
+}
+
+function diffLineClassName(line: string): string {
+  if (line.startsWith('+++') || line.startsWith('---')) {
+    return 'bg-[var(--cds-layer-accent-01)] text-[var(--cds-text-primary)]'
+  }
+
+  if (line.startsWith('@@')) {
+    return 'bg-[var(--cds-highlight)] text-[var(--cds-text-primary)]'
+  }
+
+  if (line.startsWith('+')) {
+    return 'bg-[#defbe6] text-[#044317]'
+  }
+
+  if (line.startsWith('-')) {
+    return 'bg-[#fff1f1] text-[#750e13]'
+  }
+
+  if (line.startsWith('diff ') || line.startsWith('index ')) {
+    return 'bg-[var(--cds-layer-01)] text-[var(--cds-text-secondary)]'
+  }
+
+  return 'text-[var(--cds-text-primary)]'
 }
 
 export function ArtifactWorkspace({
@@ -544,12 +568,21 @@ export function ArtifactWorkspace({
               </div>
             )
           ) : fileInfo.category === 'diff' ? (
-            <Editor
-              height="100%"
-              language="diff"
-              value={draft}
-              options={{ readOnly: true, minimap: { enabled: false } }}
-            />
+            <div className="h-full min-h-0 overflow-auto bg-[var(--cds-background)] p-3">
+              <pre className="min-w-max whitespace-pre font-mono text-xs leading-5">
+                {draft.split('\n').map((line, index) => (
+                  <div
+                    key={`${index}:${line}`}
+                    className={`grid grid-cols-[4rem_minmax(0,1fr)] ${diffLineClassName(line)}`}
+                  >
+                    <span className="select-none border-r border-[var(--cds-border-subtle-01)] px-2 text-right text-[var(--cds-text-secondary)]">
+                      {index + 1}
+                    </span>
+                    <code className="px-3">{line.length === 0 ? ' ' : line}</code>
+                  </div>
+                ))}
+              </pre>
+            </div>
           ) : isMarkdown ? (
             <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[1055px]:grid-cols-1">
               <div className="min-h-0 min-w-0 overflow-hidden">

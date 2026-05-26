@@ -518,13 +518,22 @@ export function ChannelWorkspace({
                         <div className="grid gap-1 border-t border-[var(--cds-border-subtle-01)] pt-3">
                           <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h4>
                           {task.artifacts.map((artifact) => (
-                            <a
+                            <button
                               key={artifact.id}
-                              className="w-fit text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline"
-                              href={artifact.downloadUrl ?? '#'}
+                              className="w-fit cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                              type="button"
+                              onClick={() => {
+                                setActiveArtifactId(artifact.id)
+                                if (activeConversation) {
+                                  setWorkspacePanel({
+                                    conversationId: activeConversation.id,
+                                    view: 'editor',
+                                  })
+                                }
+                              }}
                             >
                               {artifact.title}
-                            </a>
+                            </button>
                           ))}
                         </div>
                       )}

@@ -1,4 +1,4 @@
-import { Button, InlineLoading, InlineNotification } from '@carbon/react'
+import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import { useEffect, useMemo, useState } from 'react'
@@ -90,6 +90,7 @@ export function ArtifactWorkspace({
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [runningAction, setRunningAction] = useState<ConversationArtifactActionType | null>(null)
+  const [leftInfoPanel, setLeftInfoPanel] = useState<'metadata' | 'history' | null>(null)
 
   useEffect(() => {
     if (selectedArtifact === null) {
@@ -209,14 +210,14 @@ export function ArtifactWorkspace({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-12rem)] grid-cols-[16rem_minmax(0,1fr)_18rem] border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1">
-      <aside className="min-h-0 border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[1055px]:border-b max-[1055px]:border-r-0">
+    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1">
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[1055px]:border-b max-[1055px]:border-r-0">
         <div className="border-b border-[var(--cds-border-subtle-01)] p-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
             Artifacts ({artifacts.length})
           </h2>
         </div>
-        <div className="grid max-h-80 overflow-y-auto p-2 max-[1055px]:max-h-56">
+        <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
 
@@ -240,9 +241,60 @@ export function ArtifactWorkspace({
             )
           })}
         </div>
+        <div className="grid self-end border-t border-[var(--cds-border-subtle-01)]">
+          {leftInfoPanel === 'metadata' && (
+            <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3 text-sm">
+              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Metadata</h3>
+              <p className="truncate text-[var(--cds-text-primary)]">{artifact?.kind}</p>
+              <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil(artifact.sizeBytes / 1024)) : 0} KB</p>
+              {artifact && <p className="text-[var(--cds-text-secondary)]">Updated {formatTime(artifact.updatedAt)}</p>}
+            </section>
+          )}
+          {leftInfoPanel === 'history' && (
+            <section className="grid max-h-72 gap-2 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3">
+              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">History</h3>
+              {(details?.actions ?? []).length === 0 ? (
+                <p className="text-sm text-[var(--cds-text-secondary)]">No actions yet.</p>
+              ) : (
+                <div className="grid gap-2">
+                  {(details?.actions ?? []).map((action) => (
+                    <div key={action.id} className="grid gap-1 border border-[var(--cds-border-subtle-01)] p-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{action.type}</span>
+                        <span className="text-[var(--cds-text-secondary)]">{action.status}</span>
+                      </div>
+                      <time className="text-[var(--cds-text-secondary)]" dateTime={action.updatedAt}>
+                        {formatTime(action.updatedAt)}
+                      </time>
+                      {action.error && <p className="text-[var(--cds-text-error)]">{action.error}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+          <div className="grid grid-cols-2">
+            {(['metadata', 'history'] as const).map((panel) => (
+              <button
+                key={panel}
+                type="button"
+                className={`min-h-10 cursor-pointer border-0 border-r border-[var(--cds-border-subtle-01)] px-3 text-left text-xs font-semibold uppercase focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] last:border-r-0 ${
+                  leftInfoPanel === panel
+                    ? 'bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
+                    : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                }`}
+                onClick={() =>
+                  setLeftInfoPanel((current) => current === panel ? null : panel)
+                }
+              >
+                {panel}
+              </button>
+            ))}
+          </div>
+        </div>
       </aside>
 
-      <main className="grid min-w-0 grid-rows-[auto_minmax(0,1fr)]">
+      <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] p-3">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-[var(--cds-text-primary)]">
@@ -253,17 +305,51 @@ export function ArtifactWorkspace({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {artifact?.downloadUrl && (
-              <Button
-                as="a"
-                href={artifact.downloadUrl}
-                kind="ghost"
-                size="sm"
-                renderIcon={Download}
-              >
-                Download
-              </Button>
-            )}
+            <IconButton
+              kind="ghost"
+              label="Apply"
+              size="md"
+              align="bottom"
+              disabled={!availableActions.includes('apply') || runningAction !== null}
+              onClick={() => createAction('apply')}
+            >
+              <Play size={16} />
+            </IconButton>
+            <IconButton
+              kind="ghost"
+              label="Preview"
+              size="md"
+              align="bottom"
+              disabled={!availableActions.includes('preview') || runningAction !== null}
+              onClick={() => createAction('preview')}
+            >
+              <Launch size={16} />
+            </IconButton>
+            <IconButton
+              kind="ghost"
+              label="Publish"
+              size="md"
+              align="bottom"
+              disabled={!availableActions.includes('publish') || runningAction !== null}
+              onClick={() => createAction('publish')}
+            >
+              <Rocket size={16} />
+            </IconButton>
+            {runningAction && <InlineLoading description={`Queueing ${runningAction}...`} status="active" />}
+            <IconButton
+              kind="ghost"
+              label="Download"
+              size="md"
+              align="bottom"
+              disabled={!artifact?.downloadUrl}
+              onClick={() => {
+                if (artifact?.downloadUrl) {
+                  window.location.assign(artifact.downloadUrl)
+                }
+              }}
+            >
+              <Download size={16} />
+            </IconButton>
             <Button
               kind="primary"
               size="sm"
@@ -293,12 +379,12 @@ export function ArtifactWorkspace({
           ) : artifact?.kind === 'web_preview' ? (
             previewUrl ? (
               <iframe
-                className="h-full min-h-[34rem] w-full border-0 bg-white"
+                className="h-full min-h-0 w-full border-0 bg-white"
                 src={previewUrl}
                 title={artifact.title}
               />
             ) : (
-              <div className="grid h-full min-h-80 place-items-center text-[var(--cds-text-secondary)]">
+              <div className="grid h-full min-h-0 place-items-center text-[var(--cds-text-secondary)]">
                 Start Preview to create a preview URL.
               </div>
             )
@@ -311,7 +397,7 @@ export function ArtifactWorkspace({
               options={{ readOnly: true, minimap: { enabled: false } }}
             />
           ) : isMarkdown ? (
-            <div className="grid h-full min-h-[34rem] grid-cols-2 max-[1055px]:grid-cols-1">
+            <div className="grid h-full min-h-0 grid-cols-2 overflow-hidden max-[1055px]:grid-cols-1">
               <Editor
                 height="100%"
                 language="markdown"
@@ -334,71 +420,6 @@ export function ArtifactWorkspace({
           )}
         </div>
       </main>
-
-      <aside className="min-h-0 overflow-y-auto border-l border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 max-[1055px]:border-l-0 max-[1055px]:border-t">
-        <div className="grid gap-3">
-          <section className="grid gap-1 text-sm">
-            <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Metadata</h3>
-            <p className="truncate text-[var(--cds-text-primary)]">{artifact?.kind}</p>
-            <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil(artifact.sizeBytes / 1024)) : 0} KB</p>
-            {artifact && <p className="text-[var(--cds-text-secondary)]">Updated {formatTime(artifact.updatedAt)}</p>}
-          </section>
-
-          <section className="grid gap-2 border-t border-[var(--cds-border-subtle-01)] pt-3">
-            <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Actions</h3>
-            <Button
-              kind="secondary"
-              size="sm"
-              renderIcon={Play}
-              disabled={!availableActions.includes('apply') || runningAction !== null}
-              onClick={() => createAction('apply')}
-            >
-              Apply
-            </Button>
-            <Button
-              kind="secondary"
-              size="sm"
-              renderIcon={Launch}
-              disabled={!availableActions.includes('preview') || runningAction !== null}
-              onClick={() => createAction('preview')}
-            >
-              Preview
-            </Button>
-            <Button
-              kind="secondary"
-              size="sm"
-              renderIcon={Rocket}
-              disabled={!availableActions.includes('publish') || runningAction !== null}
-              onClick={() => createAction('publish')}
-            >
-              Publish
-            </Button>
-            {runningAction && <InlineLoading description={`Queueing ${runningAction}...`} status="active" />}
-          </section>
-
-          <section className="grid gap-2 border-t border-[var(--cds-border-subtle-01)] pt-3">
-            <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">History</h3>
-            {(details?.actions ?? []).length === 0 ? (
-              <p className="text-sm text-[var(--cds-text-secondary)]">No actions yet.</p>
-            ) : (
-              <div className="grid gap-2">
-                {(details?.actions ?? []).map((action) => (
-                  <div key={action.id} className="grid gap-1 border border-[var(--cds-border-subtle-01)] p-2 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{action.type}</span>
-                      <span className="text-[var(--cds-text-secondary)]">{action.status}</span>
-                    </div>
-                    <time className="text-[var(--cds-text-secondary)]" dateTime={action.updatedAt}>
-                      {formatTime(action.updatedAt)}
-                    </time>
-                    {action.error && <p className="text-[var(--cds-text-error)]">{action.error}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </aside>
     </div>
   )
 }

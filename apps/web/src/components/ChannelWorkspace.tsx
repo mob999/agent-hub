@@ -384,7 +384,12 @@ export function ChannelWorkspace({
         )}
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-6 py-4 max-[1055px]:px-4" aria-live="polite">
+      <div
+        className={`min-h-0 px-6 py-4 max-[1055px]:px-4 ${
+          showEditor ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
+        aria-live="polite"
+      >
         {showWorkspacePage && showTasks ? (
           <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
@@ -471,7 +476,7 @@ export function ChannelWorkspace({
             )}
           </div>
         ) : showWorkspacePage && showEditor ? (
-          <div className="mx-auto grid w-full max-w-[86rem] content-start gap-4">
+          <div className="mx-auto grid h-full min-h-0 w-full max-w-[86rem]">
             <ArtifactWorkspace
               artifacts={artifacts}
               activeArtifactId={activeArtifactId}

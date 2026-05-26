@@ -47,6 +47,72 @@ const workspaceViewByRoute: Record<WorkspaceRoutePath, WorkspaceView> = {
   '/runs': 'runs',
   '/daemon': 'daemon',
 }
+const selectedConversationStoragePrefix = 'agenthub.workspace.selectedConversation'
+const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
+
+function userScopedStorageKey(prefix: string, userId: string): string {
+  return `${prefix}.${userId}`
+}
+
+function readSelectedConversationId(userId: string): string | null {
+  return window.localStorage.getItem(
+    userScopedStorageKey(selectedConversationStoragePrefix, userId),
+  )
+}
+
+function writeSelectedConversationId(userId: string, conversationId: string): void {
+  window.localStorage.setItem(
+    userScopedStorageKey(selectedConversationStoragePrefix, userId),
+    conversationId,
+  )
+}
+
+function readConversationDrafts(userId: string): Record<string, string> {
+  const rawValue = window.localStorage.getItem(
+    userScopedStorageKey(conversationDraftsStoragePrefix, userId),
+  )
+
+  if (rawValue === null) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function readConversationDraft(userId: string, conversationId: string): string {
+  return readConversationDrafts(userId)[conversationId] ?? ''
+}
+
+function writeConversationDraft(userId: string, conversationId: string, draft: string): void {
+  const key = userScopedStorageKey(conversationDraftsStoragePrefix, userId)
+  const drafts = readConversationDrafts(userId)
+  const trimmedDraft = draft.trim()
+
+  if (trimmedDraft.length === 0) {
+    delete drafts[conversationId]
+  } else {
+    drafts[conversationId] = draft
+  }
+
+  if (Object.keys(drafts).length === 0) {
+    window.localStorage.removeItem(key)
+    return
+  }
+
+  window.localStorage.setItem(key, JSON.stringify(drafts))
+}
 
 function isAgentReady(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
@@ -141,6 +207,25 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     [activeConversationId, artifactsByConversation],
   )
 
+  const activateConversation = useCallback((conversationId: string) => {
+    if (user) {
+      writeSelectedConversationId(user.id, conversationId)
+      setPrompt(readConversationDraft(user.id, conversationId))
+    } else {
+      setPrompt('')
+    }
+
+    setActiveConversationId(conversationId)
+  }, [user])
+
+  const updatePrompt = useCallback((value: string) => {
+    setPrompt(value)
+
+    if (user && activeConversationId !== null) {
+      writeConversationDraft(user.id, activeConversationId, value)
+    }
+  }, [activeConversationId, user])
+
   const loadDevices = useCallback(async () => {
     try {
       const response = await apiRequest<{ devices: DaemonDevice[] }>('/daemon/devices')
@@ -182,13 +267,23 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         : [defaultResponse.conversation, ...response.conversations]
 
       setConversations(conversations)
-      setActiveConversationId((current) => {
-        if (current !== null && !conversations.some((conversation) => conversation.id === current)) {
-          return null
-        }
+      const conversationIds = new Set(conversations.map((conversation) => conversation.id))
+      const savedConversationId = user ? readSelectedConversationId(user.id) : null
+      const nextConversationId =
+        activeConversationId !== null && conversationIds.has(activeConversationId)
+          ? activeConversationId
+          : savedConversationId !== null && conversationIds.has(savedConversationId)
+            ? savedConversationId
+            : conversations[0]?.id ?? null
 
-        return current
-      })
+      if (nextConversationId !== activeConversationId) {
+        if (nextConversationId === null || !user) {
+          setPrompt('')
+          setActiveConversationId(nextConversationId)
+        } else {
+          activateConversation(nextConversationId)
+        }
+      }
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
@@ -196,7 +291,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         setRunError('Unable to load conversations.')
       }
     }
-  }, [])
+  }, [activateConversation, activeConversationId, user])
 
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
@@ -584,6 +679,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         ...current,
       ])
       setSelectedRunId(responseRuns[0]?.id ?? null)
+      if (user) {
+        writeConversationDraft(user.id, activeConversation.id, '')
+      }
       setPrompt('')
       responseRuns.forEach((run) => {
         void refreshRun(run.id)
@@ -626,11 +724,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
-      setPrompt('')
       setSelectedRunId(null)
     }
     setRunError(null)
-    setActiveConversationId(conversationId)
+    activateConversation(conversationId)
     void loadMessages(conversationId)
     void loadTasks(conversationId)
     void loadArtifacts(conversationId)
@@ -698,9 +795,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         ...current,
         [response.conversation.id]: [],
       }))
-      setPrompt('')
+      if (user) {
+        writeConversationDraft(user.id, response.conversation.id, '')
+      }
       setSelectedRunId(null)
-      setActiveConversationId(response.conversation.id)
+      activateConversation(response.conversation.id)
       setGroupModalOpen(false)
       void loadConversations()
     } catch (error) {
@@ -738,7 +837,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         response.conversation,
         ...current.filter((conversation) => conversation.id !== response.conversation.id),
       ])
-      setActiveConversationId(response.conversation.id)
+      activateConversation(response.conversation.id)
       setEditingGroupId(null)
       void loadConversations()
     } catch (error) {
@@ -805,7 +904,6 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       })
 
       setAgents((current) => [response.agent, ...current])
-      setPrompt('')
       setSelectedRunId(null)
       const conversationResponse = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
         method: 'POST',
@@ -815,7 +913,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         conversationResponse.conversation,
         ...current.filter((conversation) => conversation.id !== conversationResponse.conversation.id),
       ])
-      setActiveConversationId(conversationResponse.conversation.id)
+      if (user) {
+        writeConversationDraft(user.id, conversationResponse.conversation.id, '')
+      }
+      activateConversation(conversationResponse.conversation.id)
       setAgentModalOpen(false)
       void loadAgents()
       void loadConversations()
@@ -943,7 +1044,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             runError={runError ?? agentError}
             readyAgentCount={readyAgentCount}
             canEditConversation={canEditActiveConversation}
-            setPrompt={setPrompt}
+            setPrompt={updatePrompt}
             submitRun={submitRun}
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}

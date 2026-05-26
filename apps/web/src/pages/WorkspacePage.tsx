@@ -787,10 +787,20 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         body: JSON.stringify(input),
       })
 
-      setConversations((current) => [
-        response.conversation,
-        ...current.filter((conversation) => conversation.id !== response.conversation.id),
-      ])
+      setConversations((current) => {
+        const existingConversation = current.find(
+          (conversation) => conversation.id === response.conversation.id,
+        )
+        const conversation = {
+          ...response.conversation,
+          agentIds: response.conversation.agentIds ?? existingConversation?.agentIds,
+        }
+
+        return [
+          conversation,
+          ...current.filter((item) => item.id !== response.conversation.id),
+        ]
+      })
       setMessagesByConversation((current) => ({
         ...current,
         [response.conversation.id]: [],

@@ -7,6 +7,7 @@ import type {
   AgentRunArtifactUpload,
   AgentHubCreateTaskToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubListTasksToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolName,
   AgentHubMcpToolInput,
@@ -232,6 +233,10 @@ function readToolInput(
     return readSendMessageInput(input);
   }
 
+  if (toolName === "list_tasks") {
+    return readListTasksInput(input);
+  }
+
   if (toolName === "create_task") {
     return readCreateTaskInput(input);
   }
@@ -245,6 +250,18 @@ function readToolInput(
   }
 
   return null;
+}
+
+function readListTasksInput(input: unknown): AgentHubListTasksToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const status = (input as Record<string, unknown>).status;
+
+  return typeof status === "string" && status.length > 0
+    ? { status: status as AgentHubListTasksToolInput["status"] }
+    : {};
 }
 
 async function readArtifactUpload(input: {

@@ -5,7 +5,12 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
-import type { AgentHubMcpToolName, RuntimeKind } from "@agent-hub/core";
+import type {
+  AgentHubListTasksToolResult,
+  AgentHubMcpToolName,
+  ConversationTask,
+  RuntimeKind,
+} from "@agent-hub/core";
 import {
   agentHubAllMcpTools,
   agentHubNonOrchestratorMcpTools,
@@ -150,6 +155,20 @@ function groupChatMcpToolsForAgent(input: {
   return input.orchestratorAgentId === input.agentId
     ? [...agentHubAllMcpTools]
     : [...agentHubNonOrchestratorMcpTools];
+}
+
+function toMcpTaskList(
+  tasks: ConversationTask[],
+): AgentHubListTasksToolResult["tasks"] {
+  return tasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    assigneeAgentId: task.assigneeAgentId,
+    assigneeRunId: task.assigneeRunId,
+    description: task.description,
+    status: task.status,
+    summary: task.summary,
+  }));
 }
 
 function buildGroupChatAgentInstructions(input: {
@@ -1177,6 +1196,29 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
+  const currentConversationTasks =
+    conversation.type === "group"
+      ? await listConversationTasksForUser(db, {
+          conversationId: conversation.id,
+          ownerUserId: user.id,
+          publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        })
+      : [];
+
+  if (currentConversationTasks === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const agentHubMcpTasks = toMcpTaskList(currentConversationTasks);
+
   const agentNamesById = Object.fromEntries(
     (await listAgentsForUser(db, { ownerUserId: user.id })).map((agent) => [
       agent.agent.id,
@@ -1335,6 +1377,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         conversationTitle: conversation.title,
       }),
       agentHubMcpTools: [...agentHubAllMcpTools],
+      agentHubMcpTasks,
       workspacePath: orchestrator.workspacePath,
       run: {
         id: randomUUID(),
@@ -1444,6 +1487,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       agentId: runAgent.agent.id,
       orchestratorAgentId: conversation.orchestratorAgentId,
     }),
+    agentHubMcpTasks,
     workspacePath: runAgent.workspacePath,
     run: {
       id: randomUUID(),

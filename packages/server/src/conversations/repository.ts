@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type {
   AgentHubCreateTaskToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubListTasksToolResult,
   AgentHubUploadArtifactToolInput,
   AgentHubSendMessageToolInput,
   Conversation,
@@ -169,6 +170,33 @@ export function toConversationMessage(
   };
 }
 
+async function getConversationAgentIdsForRow(
+  db: Pick<Db, "select">,
+  row: ConversationRow,
+): Promise<string[] | undefined> {
+  if (row.type !== "group") {
+    return undefined;
+  }
+
+  if (row.key === defaultGroupConversationKey) {
+    const agentRows = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.ownerUserId, row.ownerUserId))
+      .orderBy(asc(agents.createdAt));
+
+    return agentRows.map((agent) => agent.id);
+  }
+
+  const memberRows = await db
+    .select({ agentId: conversationAgentMembers.agentId })
+    .from(conversationAgentMembers)
+    .where(eq(conversationAgentMembers.conversationId, row.id))
+    .orderBy(asc(conversationAgentMembers.position));
+
+  return memberRows.map((member) => member.agentId);
+}
+
 export function toConversationArtifact(
   row: ConversationArtifactRow,
   input: { publicApiBaseUrl?: string } = {},
@@ -257,6 +285,20 @@ export function toConversationTask(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function toMcpTaskListFromRows(
+  rows: ConversationTaskRow[],
+): AgentHubListTasksToolResult["tasks"] {
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    assigneeAgentId: row.assigneeAgentId,
+    assigneeRunId: optionalString(row.assigneeRunId),
+    description: optionalString(row.description),
+    status: row.status as ConversationTask["status"],
+    summary: optionalString(row.summary),
+  }));
 }
 
 function conversationPromptRole(
@@ -1501,8 +1543,11 @@ export async function createUserMessageAndRun(
       .where(eq(conversations.id, input.conversationId))
       .returning();
 
+    const conversationRow = updatedConversation ?? conversation;
+    const agentIds = await getConversationAgentIdsForRow(tx, conversationRow);
+
     return {
-      conversation: toConversation(updatedConversation ?? conversation),
+      conversation: toConversation(conversationRow, agentIds),
       messages: {
         user: toConversationMessage(userMessage),
         assistant: toConversationMessage(assistantMessage),
@@ -1601,8 +1646,11 @@ export async function createUserMessageAndRuns(
       .where(eq(conversations.id, input.conversationId))
       .returning();
 
+    const conversationRow = updatedConversation ?? conversation;
+    const agentIds = await getConversationAgentIdsForRow(tx, conversationRow);
+
     return {
-      conversation: toConversation(updatedConversation ?? conversation),
+      conversation: toConversation(conversationRow, agentIds),
       messages: {
         user: toConversationMessage(userMessage),
         assistants: [],
@@ -1956,6 +2004,7 @@ async function maybeCreateFinalizationRun(
       "Use only AgentHub MCP send_message for the visible final response.",
     ].filter((line): line is string => line !== undefined).join("\n\n"),
     agentHubMcpTools: [...agentHubAllMcpTools],
+    agentHubMcpTasks: toMcpTaskListFromRows(taskRows),
     workspacePath: runAgent.workspacePath,
     run: {
       id: runId,
@@ -2273,6 +2322,12 @@ export async function appendRunEventToConversationMessage(
       const mentionedAgentIds = mentionAgentIds(input);
 
       if (taskIds.length > 0 && mentionedAgentIds.length > 0) {
+        const conversationTaskRows = await tx
+          .select()
+          .from(conversationTasks)
+          .where(eq(conversationTasks.conversationId, conversation.id))
+          .orderBy(asc(conversationTasks.createdAt));
+        const agentHubMcpTasks = toMcpTaskListFromRows(conversationTaskRows);
         const taskRows = await tx
           .select()
           .from(conversationTasks)
@@ -2313,6 +2368,7 @@ export async function appendRunEventToConversationMessage(
               conversationTitle: conversation.title,
             }),
             agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+            agentHubMcpTasks,
             workspacePath: runAgent.workspacePath,
             run: {
               id: runId,

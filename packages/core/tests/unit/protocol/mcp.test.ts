@@ -2,6 +2,7 @@ import type {
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
   AgentHubCompleteTaskToolInput,
+  AgentHubListTasksToolResult,
   AgentHubMcpToolCall,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
@@ -17,12 +18,14 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
+      "list_tasks",
       "create_task",
       "upload_artifact",
       "complete_task",
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
+      "list_tasks",
       "upload_artifact",
       "complete_task",
     ]);
@@ -43,6 +46,22 @@ describe("AgentHub MCP protocol", () => {
 
     expect(input.mentions?.[0]?.label).toBe("Codex");
     expect(input.taskIds).toHaveLength(1);
+  });
+
+  it("expresses list_tasks results with task ids", () => {
+    const result: AgentHubListTasksToolResult = {
+      accepted: true,
+      tasks: [
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          title: "Write tests",
+          assigneeAgentId: "00000000-0000-4000-8000-000000000001",
+          status: "running",
+        },
+      ],
+    };
+
+    expect(result.tasks[0]?.id).toBe("00000000-0000-4000-8000-000000000002");
   });
 
   it("expresses create_task tool calls and results", () => {

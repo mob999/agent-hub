@@ -117,6 +117,55 @@ describe("AgentHubMcpRelay", () => {
     ]);
   });
 
+  it("relays list_tasks calls to the active run session", async () => {
+    const relay = await createStartedRelay();
+    const calls: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      enabledTools: ["list_tasks"],
+      onToolCall: (call) => {
+        calls.push(call);
+        return {
+          accepted: true,
+          tasks: [
+            {
+              id: "task_1",
+              title: "Research market",
+              assigneeAgentId: "agent_2",
+              status: "running",
+            },
+          ],
+        };
+      },
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/list_tasks`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_list",
+          input: { status: "running" },
+        }),
+      },
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      tasks: [{ id: "task_1" }],
+    });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        runId: "run_1",
+        toolCallId: "tool_list",
+        name: "list_tasks",
+        input: { status: "running" },
+      }),
+    ]);
+  });
+
   it("rejects calls after the session is closed", async () => {
     const relay = await createStartedRelay();
     const session = relay.createSession({

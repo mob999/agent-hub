@@ -12,6 +12,8 @@ import type {
   AgentHubCreateTaskToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
+  AgentHubListTasksToolInput,
+  AgentHubListTasksToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
   AgentHubSendMessageToolInput,
@@ -21,11 +23,13 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
+const listTasksToolName = "list_tasks" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
+  listTasksToolName,
   createTaskToolName,
   uploadArtifactToolName,
   completeTaskToolName,
@@ -97,6 +101,33 @@ export async function startAgentHubMcpStdioServer(
                   },
                 },
                 required: ["content"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(listTasksToolName)
+        ? [
+            {
+              name: listTasksToolName,
+              description:
+                "List tasks in the current AgentHub group conversation, including task ids.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: [
+                      "created",
+                      "assigned",
+                      "running",
+                      "succeeded",
+                      "failed",
+                      "cancelled",
+                    ],
+                    description: "Optional task status filter.",
+                  },
+                },
               },
             },
           ]
@@ -220,6 +251,8 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
+        : toolName === listTasksToolName
+          ? readListTasksInput(request.params.arguments)
         : toolName === createTaskToolName
           ? readCreateTaskInput(request.params.arguments)
           : toolName === uploadArtifactToolName
@@ -308,6 +341,18 @@ function readSendMessageInput(value: unknown): AgentHubSendMessageToolInput {
     mentions: mentions && mentions.length > 0 ? mentions : undefined,
     taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
   };
+}
+
+function readListTasksInput(value: unknown): AgentHubListTasksToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("list_tasks arguments must be an object.");
+  }
+
+  const status = (value as Record<string, unknown>).status;
+
+  return typeof status === "string" && status.length > 0
+    ? { status: status as AgentHubListTasksToolInput["status"] }
+    : {};
 }
 
 function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
@@ -434,6 +479,7 @@ async function callRelayTool(input: {
   input:
     | AgentHubCreateTaskToolInput
     | AgentHubSendMessageToolInput
+    | AgentHubListTasksToolInput
     | AgentHubUploadArtifactToolInput
     | AgentHubCompleteTaskToolInput;
   relayUrl: string;
@@ -462,6 +508,7 @@ async function callRelayTool(input: {
   return (await response.json()) as
     | AgentHubCreateTaskToolResult
     | AgentHubSendMessageToolResult
+    | AgentHubListTasksToolResult
     | AgentHubUploadArtifactToolResult
     | AgentHubCompleteTaskToolResult;
 }

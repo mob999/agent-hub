@@ -374,6 +374,7 @@ export async function startDaemon(): Promise<void> {
           workspacePath: message.workspacePath,
           runtime: message.runtime,
           agentHubMcpTools: message.agentHubMcpTools,
+          agentHubMcpTasks: message.agentHubMcpTasks,
           uploadArtifact,
           abortSignal: abortController.signal,
         })) {

@@ -12,6 +12,7 @@ import type {
 import type {
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
+  AgentHubListTasksToolResult,
   AgentHubUploadArtifactToolResult,
   AgentHubMcpToolName,
   AgentRuntimeConfig,
@@ -466,6 +467,9 @@ export class CodexAdapter implements AgentAdapter {
     const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
       input.agentInstructions,
     );
+    const mcpTasks: AgentHubListTasksToolResult["tasks"] = [
+      ...(input.agentHubMcpTasks ?? []),
+    ];
     const mcpSession = this.#mcpRelay?.createSession({
       enabledTools: input.agentHubMcpTools ?? [],
       runId: input.run.id,
@@ -481,6 +485,22 @@ export class CodexAdapter implements AgentAdapter {
           createdAt: call.createdAt,
         });
 
+        if (call.name === "list_tasks") {
+          const status = "status" in call.input &&
+            typeof call.input.status === "string"
+            ? call.input.status
+            : undefined;
+
+          return {
+            accepted: true,
+            tasks: status === undefined
+              ? mcpTasks.map((task) => ({ ...task }))
+              : mcpTasks
+                  .filter((task) => task.status === status)
+                  .map((task) => ({ ...task })),
+          };
+        }
+
         if (
           call.name === "create_task" &&
           "title" in call.input &&
@@ -492,12 +512,20 @@ export class CodexAdapter implements AgentAdapter {
             title: string;
           };
 
+          const task = {
+            id: taskInput.taskId ?? call.toolCallId,
+            title: taskInput.title,
+            assigneeAgentId: taskInput.assigneeAgentId,
+            status: "created" as const,
+          };
+          mcpTasks.push(task);
+
           return {
             accepted: true,
             task: {
-              id: taskInput.taskId ?? call.toolCallId,
-              title: taskInput.title,
-              assigneeAgentId: taskInput.assigneeAgentId,
+              id: task.id,
+              title: task.title,
+              assigneeAgentId: task.assigneeAgentId,
             },
           };
         }

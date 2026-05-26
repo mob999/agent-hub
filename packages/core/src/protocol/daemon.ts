@@ -8,6 +8,7 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
+import type { AgentHubListTasksToolResult } from "./mcp.js";
 import type {
   ConversationArtifact,
   ConversationArtifactActionId,
@@ -24,6 +25,7 @@ export interface DaemonRunAssignment {
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
+  agentHubMcpTasks?: AgentHubListTasksToolResult["tasks"];
 }
 
 export type DaemonClientMessage =

@@ -5,18 +5,21 @@ import type {
   ConversationArtifactId,
   ConversationArtifactKind,
   ConversationMention,
+  ConversationTaskStatus,
   ConversationTaskId,
 } from "./conversation.js";
 import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
+  | "list_tasks"
   | "create_task"
   | "upload_artifact"
   | "complete_task";
 
 export const agentHubAllMcpTools = [
   "send_message",
+  "list_tasks",
   "create_task",
   "upload_artifact",
   "complete_task",
@@ -24,6 +27,7 @@ export const agentHubAllMcpTools = [
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
+  "list_tasks",
   "upload_artifact",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
@@ -36,6 +40,23 @@ export interface AgentHubSendMessageToolInput {
 
 export interface AgentHubSendMessageToolResult {
   accepted: true;
+}
+
+export interface AgentHubListTasksToolInput {
+  status?: ConversationTaskStatus;
+}
+
+export interface AgentHubListTasksToolResult {
+  accepted: true;
+  tasks: Array<{
+    id: ConversationTaskId;
+    title: string;
+    assigneeAgentId: AgentId;
+    assigneeRunId?: RunId;
+    description?: string;
+    status: ConversationTaskStatus;
+    summary?: string;
+  }>;
 }
 
 export interface AgentHubCreateTaskToolInput {
@@ -83,11 +104,13 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
+  | AgentHubListTasksToolInput
   | AgentHubCreateTaskToolInput
   | AgentHubUploadArtifactToolInput
   | AgentHubCompleteTaskToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
+  | AgentHubListTasksToolResult
   | AgentHubCreateTaskToolResult
   | AgentHubUploadArtifactToolResult
   | AgentHubCompleteTaskToolResult;

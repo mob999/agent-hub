@@ -295,6 +295,83 @@ describe("CodexAdapter", () => {
     );
   });
 
+  it("returns current group tasks through the MCP session", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const { relay, sessions } = createMcpRelayMock();
+    const adapter = new CodexAdapter({
+      mcpRelay: relay,
+      spawnProcess,
+    });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({
+        agentHubMcpTools: ["list_tasks", "create_task"],
+        agentHubMcpTasks: [
+          {
+            id: "task_1",
+            title: "Research market",
+            assigneeAgentId: "agent_2",
+            status: "running",
+          },
+        ],
+      })),
+    );
+
+    expect(calls[0].args).toContain(
+      "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='list_tasks,create_task'",
+    );
+
+    const firstResult = await sessions[0].onToolCall({
+      runId: "run_1",
+      toolCallId: "tool_3",
+      name: "list_tasks",
+      input: {},
+      createdAt: "2026-05-21T00:00:01.000Z",
+    });
+    await sessions[0].onToolCall({
+      runId: "run_1",
+      toolCallId: "task_2",
+      name: "create_task",
+      input: {
+        title: "Write report",
+        assigneeAgentId: "agent_3",
+      },
+      createdAt: "2026-05-21T00:00:02.000Z",
+    });
+    const secondResult = await sessions[0].onToolCall({
+      runId: "run_1",
+      toolCallId: "tool_4",
+      name: "list_tasks",
+      input: {},
+      createdAt: "2026-05-21T00:00:03.000Z",
+    });
+    calls[0].process.close(0);
+
+    expect(firstResult).toEqual({
+      accepted: true,
+      tasks: [
+        {
+          id: "task_1",
+          title: "Research market",
+          assigneeAgentId: "agent_2",
+          status: "running",
+        },
+      ],
+    });
+    expect(secondResult).toEqual({
+      accepted: true,
+      tasks: [
+        expect.objectContaining({ id: "task_1" }),
+        expect.objectContaining({
+          id: "task_2",
+          title: "Write report",
+          assigneeAgentId: "agent_3",
+          status: "created",
+        }),
+      ],
+    });
+    await eventsPromise;
+  });
+
   it("stores raw Codex JSONL and emits normalized tool call events", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });

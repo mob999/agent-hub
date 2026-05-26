@@ -2,6 +2,7 @@ import type {
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
+  AgentHubListTasksToolResult,
   AgentHubMcpToolName,
   DaemonRuntime,
 } from "../protocol/index.js";
@@ -20,6 +21,7 @@ export interface AgentRunInput {
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
+  agentHubMcpTasks?: AgentHubListTasksToolResult["tasks"];
   uploadArtifact?(
     upload: AgentRunArtifactUpload,
   ): Promise<AgentHubUploadArtifactToolResult>;

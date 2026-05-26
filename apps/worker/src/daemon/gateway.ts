@@ -382,6 +382,7 @@ export class DaemonGateway {
       workspacePath: job.workspacePath,
       runtime: job.runtime,
       agentHubMcpTools: job.agentHubMcpTools,
+      agentHubMcpTasks: job.agentHubMcpTasks,
     });
   }
 

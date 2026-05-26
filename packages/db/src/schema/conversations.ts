@@ -24,6 +24,10 @@ export const conversations = pgTable(
     title: varchar("title", { length: 160 }).notNull(),
     description: text("description"),
     directAgentId: uuid("direct_agent_id"),
+    orchestratorAgentId: uuid("orchestrator_agent_id").references(
+      () => agents.id,
+      { onDelete: "set null" },
+    ),
     status: varchar("status", { length: 32 }).notNull().default("active"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -39,6 +43,9 @@ export const conversations = pgTable(
     conversationsOwnerDirectAgentUniqueIdx: uniqueIndex(
       "conversations_owner_direct_agent_unique_idx",
     ).on(table.ownerUserId, table.directAgentId),
+    conversationsOrchestratorAgentIdIdx: index(
+      "conversations_orchestrator_agent_id_idx",
+    ).on(table.orchestratorAgentId),
   }),
 );
 
@@ -87,6 +94,50 @@ export const conversationMessages = pgTable(
     conversationMessagesRunIdIdx: index("conversation_messages_run_id_idx").on(
       table.runId,
     ),
+  }),
+);
+
+export const conversationTasks = pgTable(
+  "conversation_tasks",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    creatorRunId: uuid("creator_run_id").notNull(),
+    orchestratorAgentId: uuid("orchestrator_agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    assigneeAgentId: uuid("assignee_agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    assigneeRunId: uuid("assignee_run_id"),
+    dispatchMessageId: uuid("dispatch_message_id").references(
+      () => conversationMessages.id,
+      { onDelete: "set null" },
+    ),
+    title: varchar("title", { length: 160 }).notNull(),
+    description: text("description"),
+    status: varchar("status", { length: 32 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationTasksConversationCreatedAtIdx: index(
+      "conversation_tasks_conversation_created_at_idx",
+    ).on(table.conversationId, table.createdAt),
+    conversationTasksCreatorRunIdIdx: index(
+      "conversation_tasks_creator_run_id_idx",
+    ).on(table.creatorRunId),
+    conversationTasksAssigneeRunIdIdx: index(
+      "conversation_tasks_assignee_run_id_idx",
+    ).on(table.assigneeRunId),
+    conversationTasksAssigneeAgentIdIdx: index(
+      "conversation_tasks_assignee_agent_id_idx",
+    ).on(table.assigneeAgentId),
   }),
 );
 

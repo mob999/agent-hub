@@ -1,13 +1,19 @@
+import { randomUUID } from "node:crypto";
+
 import type {
+  AgentHubCreateTaskToolInput,
+  AgentHubSendMessageToolInput,
   Conversation,
   ConversationId,
   ConversationMessage,
+  ConversationTask,
   RunEvent,
 } from "@agent-hub/core";
 import {
   agents,
   conversationAgentMembers,
   conversationMessages,
+  conversationTasks,
   conversations,
   runEvents,
   runs,
@@ -15,6 +21,7 @@ import {
 } from "@agent-hub/db";
 import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
+import { getRunnableAgentForUser } from "../agents/repository.js";
 import type { RunQueueJob } from "../queue/index.js";
 
 export const defaultGroupConversationKey = "all";
@@ -22,19 +29,32 @@ export const defaultGroupConversationTitle = "all";
 
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
+type ConversationTaskRow = typeof conversationTasks.$inferSelect;
 
 export type CreateGroupConversationResult =
   | { status: "created"; conversation: Conversation }
   | { status: "reserved-key" }
   | { status: "duplicate-key" }
-  | { status: "agents-not-found" };
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-group" };
 
 export type UpdateGroupConversationResult =
   | { status: "updated"; conversation: Conversation }
   | { status: "not-found" }
   | { status: "reserved-key" }
   | { status: "duplicate-key" }
-  | { status: "agents-not-found" };
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-group" };
+
+export type UpdateConversationOrchestratorResult =
+  | { status: "updated"; conversation: Conversation }
+  | { status: "not-found" }
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-group" };
+
+export interface AppendRunEventResult {
+  dispatchJobs: RunQueueJob[];
+}
 
 function optionalString(value: string | null): string | undefined {
   return value ?? undefined;
@@ -61,6 +81,7 @@ export function toConversation(
     description: optionalString(row.description),
     directAgentId: optionalString(row.directAgentId),
     agentIds,
+    orchestratorAgentId: optionalString(row.orchestratorAgentId),
     status: row.status as Conversation["status"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -80,6 +101,24 @@ export function toConversationMessage(
     content: row.content,
     status: row.status as ConversationMessage["status"],
     error: optionalString(row.error),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toConversationTask(row: ConversationTaskRow): ConversationTask {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    creatorRunId: row.creatorRunId,
+    orchestratorAgentId: row.orchestratorAgentId,
+    assigneeAgentId: row.assigneeAgentId,
+    assigneeRunId: optionalString(row.assigneeRunId),
+    dispatchMessageId: optionalString(row.dispatchMessageId),
+    title: row.title,
+    description: optionalString(row.description),
+    status: row.status as ConversationTask["status"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -175,6 +214,27 @@ async function listConversationMemberAgentIds(
   return membersByConversation;
 }
 
+function includesOrNoOrchestrator(input: {
+  agentIds: string[];
+  orchestratorAgentId?: string;
+}): boolean {
+  return (
+    input.orchestratorAgentId === undefined ||
+    input.agentIds.includes(input.orchestratorAgentId)
+  );
+}
+
+function compactUniqueStrings(values: Array<string | undefined>): string[] {
+  return [
+    ...new Set(
+      values.filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      ),
+    ),
+  ];
+}
+
 async function toConversationsWithAgentIds(
   db: Db,
   rows: ConversationRow[],
@@ -267,6 +327,7 @@ export async function createGroupConversation(
     title: string;
     description?: string;
     agentIds: string[];
+    orchestratorAgentId?: string;
   },
 ): Promise<CreateGroupConversationResult> {
   const title = normalizeGroupConversationTitle(input.title);
@@ -275,6 +336,10 @@ export async function createGroupConversation(
 
   if (key === defaultGroupConversationKey) {
     return { status: "reserved-key" };
+  }
+
+  if (!includesOrNoOrchestrator(input)) {
+    return { status: "orchestrator-not-in-group" };
   }
 
   return db.transaction(async (tx) => {
@@ -301,6 +366,7 @@ export async function createGroupConversation(
         key,
         title,
         description,
+        orchestratorAgentId: input.orchestratorAgentId,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -338,6 +404,7 @@ export async function updateGroupConversation(
     title: string;
     description?: string;
     agentIds: string[];
+    orchestratorAgentId?: string;
   },
 ): Promise<UpdateGroupConversationResult> {
   const title = normalizeGroupConversationTitle(input.title);
@@ -346,6 +413,10 @@ export async function updateGroupConversation(
 
   if (key === defaultGroupConversationKey) {
     return { status: "reserved-key" };
+  }
+
+  if (!includesOrNoOrchestrator(input)) {
+    return { status: "orchestrator-not-in-group" };
   }
 
   return db.transaction(async (tx) => {
@@ -406,6 +477,7 @@ export async function updateGroupConversation(
         key,
         title,
         description: description ?? null,
+        orchestratorAgentId: input.orchestratorAgentId ?? null,
         updatedAt: now,
       })
       .where(eq(conversations.id, input.conversationId))
@@ -431,6 +503,92 @@ export async function updateGroupConversation(
     return {
       status: "updated",
       conversation: toConversation(updated, input.agentIds),
+    };
+  });
+}
+
+export async function updateConversationOrchestrator(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    orchestratorAgentId?: string;
+  },
+): Promise<UpdateConversationOrchestratorResult> {
+  return db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" };
+    }
+
+    if (input.orchestratorAgentId !== undefined) {
+      const [agent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.id, input.orchestratorAgentId),
+            eq(agents.ownerUserId, input.ownerUserId),
+          ),
+        )
+        .limit(1);
+
+      if (agent === undefined) {
+        return { status: "agents-not-found" };
+      }
+
+      if (conversation.key !== defaultGroupConversationKey) {
+        const [member] = await tx
+          .select({ agentId: conversationAgentMembers.agentId })
+          .from(conversationAgentMembers)
+          .where(
+            and(
+              eq(conversationAgentMembers.conversationId, conversation.id),
+              eq(conversationAgentMembers.agentId, input.orchestratorAgentId),
+            ),
+          )
+          .limit(1);
+
+        if (member === undefined) {
+          return { status: "orchestrator-not-in-group" };
+        }
+      }
+    }
+
+    const updatedAt = new Date();
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        orchestratorAgentId: input.orchestratorAgentId ?? null,
+        updatedAt,
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" };
+    }
+
+    const [conversationWithAgentIds] = await toConversationsWithAgentIds(
+      db,
+      [updated],
+      { ownerUserId: input.ownerUserId },
+    );
+
+    return {
+      status: "updated",
+      conversation: conversationWithAgentIds ?? toConversation(updated),
     };
   });
 }
@@ -563,6 +721,28 @@ export async function listConversationMessagesForUser(
   return rows.reverse().map(toConversationMessage);
 }
 
+export async function listConversationTasksForUser(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+  },
+): Promise<ConversationTask[] | null> {
+  const conversation = await getConversationForUser(db, input);
+
+  if (conversation === null) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationTasks)
+    .where(eq(conversationTasks.conversationId, input.conversationId))
+    .orderBy(desc(conversationTasks.createdAt));
+
+  return rows.map(toConversationTask);
+}
+
 export async function createUserMessageAndRun(
   db: Db,
   input: {
@@ -614,7 +794,7 @@ export async function createUserMessageAndRun(
       agentId: input.job.run.agentId,
       daemonDeviceId: input.job.daemonDeviceId,
       status: input.job.run.status,
-      prompt: input.userMessageContent,
+      prompt: input.job.prompt,
       workspacePath: input.job.workspacePath,
       runtime: input.job.runtime,
       createdAt,
@@ -723,7 +903,7 @@ export async function createUserMessageAndRuns(
           agentId: job.run.agentId,
           daemonDeviceId: job.daemonDeviceId,
           status: job.run.status,
-          prompt: input.userMessageContent,
+          prompt: job.prompt,
           workspacePath: job.workspacePath,
           runtime: job.runtime,
           createdAt: new Date(job.run.createdAt),
@@ -770,39 +950,282 @@ export async function createUserMessageAndRuns(
   });
 }
 
+function readSendMessageToolInput(
+  input: unknown,
+): AgentHubSendMessageToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("content" in input)
+  ) {
+    return null;
+  }
+
+  const content = (input as AgentHubSendMessageToolInput).content;
+
+  return typeof content === "string" && content.trim().length > 0
+    ? (input as AgentHubSendMessageToolInput)
+    : null;
+}
+
+function readCreateTaskToolInput(
+  input: unknown,
+): AgentHubCreateTaskToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("title" in input) ||
+    !("assigneeAgentId" in input)
+  ) {
+    return null;
+  }
+
+  const taskInput = input as AgentHubCreateTaskToolInput;
+  const title = taskInput.title.trim();
+  const description = taskInput.description?.trim();
+
+  return title.length > 0 &&
+    title.length <= 160 &&
+    typeof taskInput.assigneeAgentId === "string" &&
+    taskInput.assigneeAgentId.length > 0
+    ? {
+        title,
+        description: description && description.length > 0 ? description : undefined,
+        assigneeAgentId: taskInput.assigneeAgentId,
+        taskId: taskInput.taskId,
+      }
+    : null;
+}
+
+function mentionAgentIds(input: AgentHubSendMessageToolInput): string[] {
+  return compactUniqueStrings(
+    input.mentions
+      ?.filter((mention) => mention.type === "agent")
+      .map((mention) => mention.agentId) ?? [],
+  );
+}
+
+function isDefaultGroup(row: Pick<ConversationRow, "key" | "type">): boolean {
+  return row.type === "group" && row.key === defaultGroupConversationKey;
+}
+
+async function isConversationAgentMember(
+  db: Db,
+  input: {
+    agentId: string;
+    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">;
+  },
+): Promise<boolean> {
+  if (input.conversation.type !== "group") {
+    return false;
+  }
+
+  if (isDefaultGroup(input.conversation)) {
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.ownerUserId, input.conversation.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    return agent !== undefined;
+  }
+
+  const [member] = await db
+    .select({ agentId: conversationAgentMembers.agentId })
+    .from(conversationAgentMembers)
+    .where(
+      and(
+        eq(conversationAgentMembers.conversationId, input.conversation.id),
+        eq(conversationAgentMembers.agentId, input.agentId),
+      ),
+    )
+    .limit(1);
+
+  return member !== undefined;
+}
+
+function buildAssignedTaskPrompt(input: {
+  conversationTitle: string;
+  taskTitle: string;
+  taskDescription?: string;
+  dispatchMessage: string;
+}): string {
+  return [
+    "<agenthub_assigned_task>",
+    `Group: #${input.conversationTitle}`,
+    `Task: ${input.taskTitle}`,
+    input.taskDescription ? `Description: ${input.taskDescription}` : undefined,
+    "",
+    "You were assigned this task by the group orchestrator.",
+    "Use the AgentHub MCP tool send_message to post visible progress or the final answer back to the group.",
+    "Do not use normal assistant text as the visible group reply.",
+    "</agenthub_assigned_task>",
+    "",
+    "<orchestrator_dispatch_message>",
+    input.dispatchMessage,
+    "</orchestrator_dispatch_message>",
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function buildAssignedTaskInstructions(input: {
+  agentDescription?: string;
+  conversationTitle: string;
+}): string {
+  return [
+    input.agentDescription === undefined || input.agentDescription.trim().length === 0
+      ? undefined
+      : [
+          "AgentHub agent profile:",
+          "Follow this agent profile when working on the assigned task.",
+          "",
+          input.agentDescription.trim(),
+        ].join("\n"),
+    `You are working inside AgentHub group #${input.conversationTitle}.`,
+    "Visible task updates and final responses must be sent with the AgentHub MCP tool send_message.",
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n\n");
+}
+
 export async function appendRunEventToConversationMessage(
   db: Db,
   event: RunEvent,
-): Promise<void> {
+): Promise<AppendRunEventResult> {
+  const dispatchJobs: RunQueueJob[] = [];
+
+  if (event.type === "run.started" || event.type === "run.completed") {
+    const updatedAt = new Date(event.createdAt);
+    await db
+      .update(conversationTasks)
+      .set({
+        status: event.type === "run.started"
+          ? "running"
+          : event.status,
+        updatedAt,
+      })
+      .where(eq(conversationTasks.assigneeRunId, event.runId));
+  }
+
   if (event.type === "agenthub.tool.call") {
-    if (event.name !== "send_message") {
-      return;
+    if (event.name === "create_task") {
+      const input = readCreateTaskToolInput(event.input);
+
+      if (input === null) {
+        return { dispatchJobs };
+      }
+
+      const [run] = await db
+        .select({
+          agentId: runs.agentId,
+          conversationId: runs.conversationId,
+          ownerUserId: runs.ownerUserId,
+        })
+        .from(runs)
+        .where(eq(runs.id, event.runId))
+        .limit(1);
+
+      if (run === undefined || run.conversationId === null) {
+        return { dispatchJobs };
+      }
+
+      const [conversation] = await db
+        .select()
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.id, run.conversationId),
+            eq(conversations.ownerUserId, run.ownerUserId),
+            eq(conversations.type, "group"),
+          ),
+        )
+        .limit(1);
+
+      if (
+        conversation === undefined ||
+        conversation.orchestratorAgentId !== run.agentId ||
+        !(await isConversationAgentMember(db, {
+          agentId: input.assigneeAgentId,
+          conversation,
+        }))
+      ) {
+        return { dispatchJobs };
+      }
+
+      const createdAt = new Date(event.createdAt);
+      await db
+        .insert(conversationTasks)
+        .values({
+          id: input.taskId ?? randomUUID(),
+          ownerUserId: run.ownerUserId,
+          conversationId: conversation.id,
+          creatorRunId: event.runId,
+          orchestratorAgentId: run.agentId,
+          assigneeAgentId: input.assigneeAgentId,
+          title: input.title,
+          description: input.description,
+          status: "created",
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .onConflictDoNothing();
+
+      return { dispatchJobs };
     }
 
-    const content = event.input.content.trim();
+    if (event.name !== "send_message") {
+      return { dispatchJobs };
+    }
+
+    const input = readSendMessageToolInput(event.input);
+
+    if (input === null) {
+      return { dispatchJobs };
+    }
+
+    const content = input.content.trim();
 
     if (content.length === 0) {
-      return;
+      return { dispatchJobs };
     }
 
     const [run] = await db
       .select({
         agentId: runs.agentId,
         conversationId: runs.conversationId,
+        ownerUserId: runs.ownerUserId,
       })
       .from(runs)
       .where(eq(runs.id, event.runId))
       .limit(1);
 
     if (run === undefined || run.conversationId === null) {
-      return;
+      return { dispatchJobs };
     }
 
     const conversationId = run.conversationId;
     const createdAt = new Date(event.createdAt);
     await db.transaction(async (tx) => {
-      await tx.insert(conversationMessages).values({
-        conversationId,
+      const [conversation] = await tx
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1);
+
+      if (conversation === undefined) {
+        return;
+      }
+
+      const [message] = await tx.insert(conversationMessages).values({
+        conversationId: conversation.id,
         senderType: "agent",
         senderAgentId: run.agentId,
         runId: event.runId,
@@ -810,7 +1233,105 @@ export async function appendRunEventToConversationMessage(
         status: "completed",
         createdAt,
         updatedAt: createdAt,
-      });
+      }).returning();
+
+      const taskIds = compactUniqueStrings(input.taskIds ?? []);
+      const mentionedAgentIds = mentionAgentIds(input);
+
+      if (taskIds.length > 0 && mentionedAgentIds.length > 0) {
+        const taskRows = await tx
+          .select()
+          .from(conversationTasks)
+          .where(
+            and(
+              eq(conversationTasks.conversationId, conversation.id),
+              eq(conversationTasks.creatorRunId, event.runId),
+              eq(conversationTasks.orchestratorAgentId, run.agentId),
+              inArray(conversationTasks.id, taskIds),
+              inArray(conversationTasks.assigneeAgentId, mentionedAgentIds),
+              eq(conversationTasks.status, "created"),
+            ),
+          )
+          .orderBy(asc(conversationTasks.createdAt));
+
+        for (const task of taskRows) {
+          const runAgent = await getRunnableAgentForUser(db, {
+            agentId: task.assigneeAgentId,
+            ownerUserId: run.ownerUserId,
+          });
+
+          if (runAgent === null) {
+            continue;
+          }
+
+          const runId = randomUUID();
+          const job: RunQueueJob = {
+            conversationId: conversation.id,
+            daemonDeviceId: runAgent.daemonDeviceId,
+            prompt: buildAssignedTaskPrompt({
+              conversationTitle: conversation.title,
+              taskTitle: task.title,
+              taskDescription: optionalString(task.description),
+              dispatchMessage: content,
+            }),
+            agentInstructions: buildAssignedTaskInstructions({
+              agentDescription: runAgent.agent.description,
+              conversationTitle: conversation.title,
+            }),
+            agentHubMcpTools: ["send_message"],
+            workspacePath: runAgent.workspacePath,
+            run: {
+              id: runId,
+              agentId: runAgent.agent.id,
+              daemonDeviceId: runAgent.daemonDeviceId,
+              status: "queued",
+              createdAt: event.createdAt,
+              updatedAt: event.createdAt,
+            },
+            runtime: runAgent.runtime,
+          };
+          const queuedEvent: RunEvent = {
+            type: "run.queued",
+            runId,
+            agentId: runAgent.agent.id,
+            daemonDeviceId: runAgent.daemonDeviceId,
+            createdAt: event.createdAt,
+          };
+
+          await tx.insert(runs).values({
+            id: runId,
+            ownerUserId: run.ownerUserId,
+            conversationId: conversation.id,
+            agentId: runAgent.agent.id,
+            daemonDeviceId: runAgent.daemonDeviceId,
+            status: "queued",
+            prompt: job.prompt,
+            workspacePath: runAgent.workspacePath,
+            runtime: runAgent.runtime,
+            createdAt,
+            updatedAt: createdAt,
+          });
+
+          await tx.insert(runEvents).values({
+            runId,
+            eventType: queuedEvent.type,
+            payload: queuedEvent,
+            createdAt,
+          });
+
+          await tx
+            .update(conversationTasks)
+            .set({
+              assigneeRunId: runId,
+              dispatchMessageId: message.id,
+              status: "assigned",
+              updatedAt: createdAt,
+            })
+            .where(eq(conversationTasks.id, task.id));
+
+          dispatchJobs.push(job);
+        }
+      }
 
       await tx
         .update(conversations)
@@ -818,16 +1339,16 @@ export async function appendRunEventToConversationMessage(
           lastMessageAt: createdAt,
           updatedAt: createdAt,
         })
-        .where(eq(conversations.id, conversationId));
+        .where(eq(conversations.id, conversation.id));
     });
 
-    return;
+    return { dispatchJobs };
   }
 
   const assistantContent = getAssistantMessageContent(event);
 
   if (assistantContent === undefined && event.type !== "run.completed") {
-    return;
+    return { dispatchJobs };
   }
 
   const updatedAt = new Date(event.createdAt);
@@ -857,7 +1378,7 @@ export async function appendRunEventToConversationMessage(
     });
 
   if (message === undefined) {
-    return;
+    return { dispatchJobs };
   }
 
   await db
@@ -867,4 +1388,6 @@ export async function appendRunEventToConversationMessage(
       updatedAt,
     })
     .where(eq(conversations.id, message.conversationId));
+
+  return { dispatchJobs };
 }

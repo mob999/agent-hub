@@ -5,6 +5,7 @@ import type {
   ConversationMessage,
   UpdateGroupConversationRequest,
   UpdateGroupConversationResponse,
+  ConversationTask,
 } from "../../../src/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +34,7 @@ describe("conversation protocol", () => {
         "00000000-0000-4000-8000-000000000003",
         "00000000-0000-4000-8000-000000000004",
       ],
+      orchestratorAgentId: "00000000-0000-4000-8000-000000000003",
     };
     const response: CreateGroupConversationResponse = {
       conversation: {
@@ -43,6 +45,7 @@ describe("conversation protocol", () => {
         title: "Design",
         description: request.description,
         agentIds: request.agentIds,
+        orchestratorAgentId: request.orchestratorAgentId,
         status: "active",
         createdAt: "2026-05-26T00:00:00.000Z",
         updatedAt: "2026-05-26T00:00:00.000Z",
@@ -53,6 +56,7 @@ describe("conversation protocol", () => {
     expect(response.conversation.key).toBe("design");
     expect(response.conversation.description).toBe("Design work");
     expect(response.conversation.agentIds).toEqual(request.agentIds);
+    expect(response.conversation.orchestratorAgentId).toBe(request.orchestratorAgentId);
   });
 
   it("expresses custom group conversation updates", () => {
@@ -60,6 +64,7 @@ describe("conversation protocol", () => {
       title: "Design Review",
       description: "Review design work",
       agentIds: ["00000000-0000-4000-8000-000000000004"],
+      orchestratorAgentId: "00000000-0000-4000-8000-000000000004",
     };
     const response: UpdateGroupConversationResponse = {
       conversation: {
@@ -70,6 +75,7 @@ describe("conversation protocol", () => {
         title: request.title,
         description: request.description,
         agentIds: request.agentIds,
+        orchestratorAgentId: request.orchestratorAgentId,
         status: "active",
         createdAt: "2026-05-26T00:00:00.000Z",
         updatedAt: "2026-05-26T00:00:01.000Z",
@@ -78,6 +84,27 @@ describe("conversation protocol", () => {
 
     expect(response.conversation.title).toBe("Design Review");
     expect(response.conversation.agentIds).toEqual(request.agentIds);
+  });
+
+  it("expresses conversation tasks", () => {
+    const task: ConversationTask = {
+      id: "00000000-0000-4000-8000-000000000010",
+      ownerUserId: "00000000-0000-4000-8000-000000000011",
+      conversationId: "00000000-0000-4000-8000-000000000012",
+      creatorRunId: "00000000-0000-4000-8000-000000000013",
+      orchestratorAgentId: "00000000-0000-4000-8000-000000000014",
+      assigneeAgentId: "00000000-0000-4000-8000-000000000015",
+      assigneeRunId: "00000000-0000-4000-8000-000000000016",
+      dispatchMessageId: "00000000-0000-4000-8000-000000000017",
+      title: "Build the page",
+      description: "Implement the task.",
+      status: "running",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:01.000Z",
+    };
+
+    expect(task.status).toBe("running");
+    expect(task.assigneeRunId).toBeDefined();
   });
 
   it("expresses streaming agent messages linked to runs", () => {

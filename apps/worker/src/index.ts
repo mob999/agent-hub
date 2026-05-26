@@ -8,6 +8,7 @@ import {
   appendRunEvent,
   createLogger,
   createAgentHubRedisClient,
+  enqueueRunJob,
   ensureAgentProvisioningQueueGroup,
   ensureRunQueueGroup,
   markAgentProvisioningFailed,
@@ -59,7 +60,8 @@ const gateway = new DaemonGateway({
     });
   },
   onRunEvent: async (event) => {
-    await appendRunEvent(db, event);
+    const result = await appendRunEvent(db, event);
+    await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
   },
 });
 const server = createServer((request, response) => {

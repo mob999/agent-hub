@@ -245,6 +245,56 @@ describe("CodexAdapter", () => {
     );
   });
 
+  it("returns structured create_task results through the MCP session", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const { relay, sessions } = createMcpRelayMock();
+    const adapter = new CodexAdapter({
+      mcpRelay: relay,
+      spawnProcess,
+    });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ agentHubMcpTools: ["create_task", "send_message"] })),
+    );
+
+    expect(calls[0].args).toContain(
+      "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='create_task,send_message'",
+    );
+
+    const result = await sessions[0].onToolCall({
+      runId: "run_1",
+      toolCallId: "tool_2",
+      name: "create_task",
+      input: {
+        title: "Write tests",
+        assigneeAgentId: "agent_2",
+        taskId: "task_1",
+      },
+      createdAt: "2026-05-21T00:00:01.000Z",
+    });
+    calls[0].process.close(0);
+
+    expect(result).toEqual({
+      accepted: true,
+      task: {
+        id: "task_1",
+        title: "Write tests",
+        assigneeAgentId: "agent_2",
+      },
+    });
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agenthub.tool.call",
+          name: "create_task",
+          input: expect.objectContaining({
+            title: "Write tests",
+            taskId: "task_1",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("stores raw Codex JSONL and emits normalized tool call events", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });

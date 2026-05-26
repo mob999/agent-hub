@@ -43,6 +43,13 @@
       "when": 1779774164036,
       "tag": "0005_pink_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779784099630,
+      "tag": "0006_awesome_morlun",
+      "breakpoints": true
     }
   ]
 }

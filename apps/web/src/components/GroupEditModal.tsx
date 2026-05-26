@@ -3,6 +3,8 @@ import {
   InlineNotification,
   Loading,
   Modal,
+  Select,
+  SelectItem,
   TextArea,
   TextInput,
 } from '@carbon/react'
@@ -16,7 +18,7 @@ interface GroupEditModalProps {
   isSaving: boolean
   open: boolean
   onClose: () => void
-  onSave: (input: { title: string; description?: string; agentIds: string[] }) => void
+  onSave: (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -38,6 +40,7 @@ export function GroupEditModal({
 }: GroupEditModalProps) {
   const [title, setTitle] = useState(conversation.title)
   const [description, setDescription] = useState(conversation.description ?? '')
+  const [orchestratorAgentId, setOrchestratorAgentId] = useState(conversation.orchestratorAgentId ?? '')
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(conversation.agentIds ?? [])
   const canSave =
     title.trim().length > 0 &&
@@ -50,6 +53,9 @@ export function GroupEditModal({
         ? [...current, agentId]
         : current.filter((selectedAgentId) => selectedAgentId !== agentId),
     )
+    if (!checked && orchestratorAgentId === agentId) {
+      setOrchestratorAgentId('')
+    }
   }
 
   return (
@@ -70,6 +76,7 @@ export function GroupEditModal({
           title: title.trim(),
           description: description.trim() || undefined,
           agentIds: selectedAgentIds,
+          orchestratorAgentId: orchestratorAgentId || undefined,
         })
       }}
     >
@@ -99,6 +106,20 @@ export function GroupEditModal({
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
         />
+        <Select
+          id="edit-group-orchestrator"
+          labelText="Orchestrator"
+          value={orchestratorAgentId}
+          disabled={isSaving || selectedAgentIds.length === 0}
+          onChange={(event) => setOrchestratorAgentId(event.target.value)}
+        >
+          <SelectItem value="" text="No orchestrator" />
+          {agents
+            .filter((agent) => selectedAgentIds.includes(agent.agent.id))
+            .map((agent) => (
+              <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
+            ))}
+        </Select>
         <div className="grid gap-2" aria-label="Agents">
           <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
             Agents

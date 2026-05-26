@@ -1,18 +1,41 @@
-import type { IsoDateTime } from "./agent.js";
+import type { AgentId, IsoDateTime } from "./agent.js";
+import type { ConversationMention, ConversationTaskId } from "./conversation.js";
 import type { RunId } from "./run.js";
 
-export type AgentHubMcpToolName = "send_message";
+export type AgentHubMcpToolName = "send_message" | "create_task";
 
 export interface AgentHubSendMessageToolInput {
   content: string;
+  mentions?: ConversationMention[];
+  taskIds?: ConversationTaskId[];
 }
 
 export interface AgentHubSendMessageToolResult {
   accepted: true;
 }
 
-export type AgentHubMcpToolInput = AgentHubSendMessageToolInput;
-export type AgentHubMcpToolResult = AgentHubSendMessageToolResult;
+export interface AgentHubCreateTaskToolInput {
+  title: string;
+  description?: string;
+  assigneeAgentId: AgentId;
+  taskId?: ConversationTaskId;
+}
+
+export interface AgentHubCreateTaskToolResult {
+  accepted: true;
+  task: {
+    id: ConversationTaskId;
+    title: string;
+    assigneeAgentId: AgentId;
+  };
+}
+
+export type AgentHubMcpToolInput =
+  | AgentHubSendMessageToolInput
+  | AgentHubCreateTaskToolInput;
+export type AgentHubMcpToolResult =
+  | AgentHubSendMessageToolResult
+  | AgentHubCreateTaskToolResult;
 
 export interface AgentHubMcpToolCall {
   runId: RunId;

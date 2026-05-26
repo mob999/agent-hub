@@ -3,6 +3,7 @@ import type { AgentRun, RunId } from "./run.js";
 
 export type ConversationId = string;
 export type ConversationMessageId = string;
+export type ConversationTaskId = string;
 
 export type ConversationType = "group" | "direct";
 export type ConversationStatus = "active" | "archived";
@@ -10,6 +11,13 @@ export type ConversationMessageSenderType = "user" | "agent" | "system";
 export type ConversationMessageStatus =
   | "completed"
   | "streaming"
+  | "failed"
+  | "cancelled";
+export type ConversationTaskStatus =
+  | "created"
+  | "assigned"
+  | "running"
+  | "succeeded"
   | "failed"
   | "cancelled";
 
@@ -22,6 +30,7 @@ export interface Conversation {
   description?: string;
   directAgentId?: AgentId;
   agentIds?: AgentId[];
+  orchestratorAgentId?: AgentId;
   status: ConversationStatus;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -37,6 +46,22 @@ export interface ConversationMessage {
   content: string;
   status: ConversationMessageStatus;
   error?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationTask {
+  id: ConversationTaskId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  creatorRunId: RunId;
+  orchestratorAgentId: AgentId;
+  assigneeAgentId: AgentId;
+  assigneeRunId?: RunId;
+  dispatchMessageId?: ConversationMessageId;
+  title: string;
+  description?: string;
+  status: ConversationTaskStatus;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -61,6 +86,7 @@ export interface CreateGroupConversationRequest {
   title: string;
   description?: string;
   agentIds: AgentId[];
+  orchestratorAgentId?: AgentId;
 }
 
 export interface CreateGroupConversationResponse {
@@ -71,6 +97,7 @@ export interface UpdateGroupConversationRequest {
   title: string;
   description?: string;
   agentIds: AgentId[];
+  orchestratorAgentId?: AgentId;
 }
 
 export interface UpdateGroupConversationResponse {
@@ -79,6 +106,10 @@ export interface UpdateGroupConversationResponse {
 
 export interface ListConversationMessagesResponse {
   messages: ConversationMessage[];
+}
+
+export interface ListConversationTasksResponse {
+  tasks: ConversationTask[];
 }
 
 export type SendConversationMessageMode = "chat" | "task";

@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type {
+  AgentHubCreateTaskToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolName,
+  AgentHubMcpToolInput,
   AgentHubMcpToolResult,
+  AgentHubSendMessageToolInput,
   RunId,
 } from "@agent-hub/core";
 
@@ -130,9 +133,9 @@ export class AgentHubMcpRelay {
       }
 
       const body = await readJsonBody(request);
-      const input = readToolInput(body);
+      const input = readToolInput(toolName, body);
 
-      if (toolName !== "send_message" || input === null) {
+      if (input === null) {
         writeJson(response, 400, { error: "Invalid AgentHub MCP tool input." });
         return;
       }
@@ -166,7 +169,10 @@ function readToolCallId(value: unknown): string | undefined {
     : undefined;
 }
 
-function readToolInput(value: unknown): { content: string } | null {
+function readToolInput(
+  toolName: AgentHubMcpToolName,
+  value: unknown,
+): AgentHubMcpToolInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
@@ -177,11 +183,87 @@ function readToolInput(value: unknown): { content: string } | null {
     return null;
   }
 
+  if (toolName === "send_message") {
+    return readSendMessageInput(input);
+  }
+
+  if (toolName === "create_task") {
+    return readCreateTaskInput(input);
+  }
+
+  return null;
+}
+
+function readSendMessageInput(input: unknown): AgentHubSendMessageToolInput | null {
   const content = (input as Record<string, unknown>).content;
 
-  return typeof content === "string" && content.trim().length > 0
-    ? { content: content.trim() }
-    : null;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const mentions = Array.isArray(record.mentions)
+    ? record.mentions.flatMap((mention) => {
+        if (
+          typeof mention !== "object" ||
+          mention === null ||
+          Array.isArray(mention)
+        ) {
+          return [];
+        }
+
+        const mentionRecord = mention as Record<string, unknown>;
+
+        return mentionRecord.type === "agent" &&
+          typeof mentionRecord.agentId === "string"
+          ? [
+              {
+                type: "agent" as const,
+                agentId: mentionRecord.agentId,
+                label: typeof mentionRecord.label === "string"
+                  ? mentionRecord.label
+                  : undefined,
+              },
+            ]
+          : [];
+      })
+    : undefined;
+  const taskIds = Array.isArray(record.taskIds)
+    ? record.taskIds.filter((taskId): taskId is string => typeof taskId === "string")
+    : undefined;
+
+  return {
+    content: content.trim(),
+    mentions: mentions && mentions.length > 0 ? mentions : undefined,
+    taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+  };
+}
+
+function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null {
+  const record = input as Record<string, unknown>;
+  const title = record.title;
+  const description = record.description;
+  const assigneeAgentId = record.assigneeAgentId;
+
+  if (
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    title.trim().length > 160 ||
+    typeof assigneeAgentId !== "string" ||
+    assigneeAgentId.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    title: title.trim(),
+    description:
+      typeof description === "string" && description.trim().length > 0
+        ? description.trim()
+        : undefined,
+    assigneeAgentId,
+    taskId: randomUUID(),
+  };
 }
 
 function readJsonBody(request: IncomingMessage): Promise<unknown> {

@@ -13,7 +13,10 @@ import {
 import { and, asc, desc, eq } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
-import { appendRunEventToConversationMessage } from "../conversations/index.js";
+import {
+  appendRunEventToConversationMessage,
+  type AppendRunEventResult,
+} from "../conversations/index.js";
 
 export async function createRunRecord(
   db: Db,
@@ -84,7 +87,10 @@ export async function listRunsForUser(
   }));
 }
 
-export async function appendRunEvent(db: Db, event: RunEvent): Promise<void> {
+export async function appendRunEvent(
+  db: Db,
+  event: RunEvent,
+): Promise<AppendRunEventResult> {
   await db.insert(runEvents).values({
     runId: event.runId,
     eventType: event.type,
@@ -107,7 +113,7 @@ export async function appendRunEvent(db: Db, event: RunEvent): Promise<void> {
     })
     .where(eq(runs.id, event.runId));
 
-  await appendRunEventToConversationMessage(db, event);
+  return appendRunEventToConversationMessage(db, event);
 }
 
 export async function upsertDaemonDevice(

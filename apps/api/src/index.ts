@@ -25,6 +25,7 @@ import {
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
+  listConversationTasksForUser,
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
@@ -35,6 +36,7 @@ import {
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   toAgentRun,
+  updateConversationOrchestrator,
   updateAgentProfileForUser,
   updateGroupConversation,
   type RunnableAgent,
@@ -123,6 +125,12 @@ function parseMentionedAgentIds(value: unknown): string[] {
   return [...new Set(agentIds)];
 }
 
+function parseOptionalAgentId(value: unknown): string | undefined {
+  return typeof value === "string" && uuidPattern.test(value)
+    ? value
+    : undefined;
+}
+
 function buildGroupChatAgentInstructions(input: {
   agentInstructions?: string;
   conversationTitle: string;
@@ -156,6 +164,54 @@ function buildGroupChatRunPrompt(input: {
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
     "</agenthub_group_chat_protocol>",
+    "",
+    conversationPrompt,
+  ].join("\n");
+}
+
+function buildGroupTaskOrchestratorInstructions(input: {
+  agentInstructions?: string;
+  conversationTitle: string;
+}): string {
+  return [
+    input.agentInstructions,
+    `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
+    "In Task mode, break the user's request into concrete tasks for group agents.",
+    "For each task, call create_task with { title, description, assigneeAgentId }.",
+    "After creating tasks, call send_message with a visible dispatch message that @mentions each assignee and includes the created taskIds.",
+    "Do not assign a task to yourself unless you are intentionally doing part of the work.",
+  ].filter((line): line is string => line !== undefined && line.trim().length > 0)
+    .join("\n\n");
+}
+
+function buildGroupTaskOrchestratorPrompt(input: {
+  agentName: string;
+  agents: RunnableAgent[];
+  conversationTitle: string;
+  currentUserMessage: string;
+  messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
+}): string {
+  const conversationPrompt = buildConversationRunPrompt({
+    currentUserMessage: input.currentUserMessage,
+    messages: input.messages ?? [],
+  });
+  const roster = input.agents.map((agent) =>
+    `- ${agent.agent.name}: ${agent.agent.id}${
+      agent.agent.description ? ` (${agent.agent.description})` : ""
+    }`,
+  );
+
+  return [
+    "<agenthub_group_task_protocol>",
+    `You are ${input.agentName}, the Orchestrator in #${input.conversationTitle}.`,
+    "Available group agents:",
+    ...roster,
+    "",
+    "Create tasks only for agents listed above.",
+    "create_task requires assigneeAgentId and returns a task id.",
+    "After creating tasks, call send_message with content, mentions, and taskIds so AgentHub can dispatch the assigned agents.",
+    "Normal assistant text is not visible in group task mode.",
+    "</agenthub_group_task_protocol>",
     "",
     conversationPrompt,
   ].join("\n");
@@ -542,6 +598,7 @@ app.post("/conversations/groups", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agentIds?: unknown;
     description?: unknown;
+    orchestratorAgentId?: unknown;
     title?: unknown;
   };
   const title = typeof body.title === "string"
@@ -551,19 +608,21 @@ app.post("/conversations/groups", async (c) => {
     ? body.description.trim()
     : "";
   const key = groupConversationKeyFromTitle(title);
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
 
   if (
     title.length === 0 ||
     title.length > 80 ||
     key.length > 80 ||
-    !isValidAgentIdList(body.agentIds)
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
   ) {
     return c.json(
       {
         error: {
           code: "INVALID_GROUP_REQUEST",
           message:
-            "title and 1-20 unique agentIds are required.",
+            "title, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
         },
       },
       400,
@@ -575,6 +634,7 @@ app.post("/conversations/groups", async (c) => {
     title,
     description: description.length > 0 ? description : undefined,
     agentIds: body.agentIds,
+    orchestratorAgentId,
   });
 
   if (result.status === "reserved-key") {
@@ -613,6 +673,18 @@ app.post("/conversations/groups", async (c) => {
     );
   }
 
+  if (result.status === "orchestrator-not-in-group") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_GROUP",
+          message: "Orchestrator must be a member of this group.",
+        },
+      },
+      400,
+    );
+  }
+
   return c.json({ conversation: result.conversation }, 201);
 });
 
@@ -634,6 +706,7 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agentIds?: unknown;
     description?: unknown;
+    orchestratorAgentId?: unknown;
     title?: unknown;
   };
   const title = typeof body.title === "string"
@@ -643,19 +716,21 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
     ? body.description.trim()
     : "";
   const key = groupConversationKeyFromTitle(title);
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
 
   if (
     title.length === 0 ||
     title.length > 80 ||
     key.length > 80 ||
-    !isValidAgentIdList(body.agentIds)
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
   ) {
     return c.json(
       {
         error: {
           code: "INVALID_GROUP_REQUEST",
           message:
-            "title and 1-20 unique agentIds are required.",
+            "title, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
         },
       },
       400,
@@ -668,6 +743,7 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
     title,
     description: description.length > 0 ? description : undefined,
     agentIds: body.agentIds,
+    orchestratorAgentId,
   });
 
   if (result.status === "not-found") {
@@ -715,6 +791,98 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
         },
       },
       404,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-group") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_GROUP",
+          message: "Orchestrator must be a member of this group.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
+});
+
+app.patch("/conversations/:conversationId/orchestrator", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    orchestratorAgentId?: unknown;
+  };
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
+
+  if (
+    body.orchestratorAgentId !== undefined &&
+    orchestratorAgentId === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ORCHESTRATOR_REQUEST",
+          message: "orchestratorAgentId must be a valid agent id.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await updateConversationOrchestrator(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    orchestratorAgentId,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-group") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_GROUP",
+          message: "Orchestrator must be a member of this group.",
+        },
+      },
+      400,
     );
   }
 
@@ -829,6 +997,41 @@ app.get("/conversations/:conversationId/messages", async (c) => {
   }
 
   return c.json({ messages });
+});
+
+app.get("/conversations/:conversationId/tasks", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const tasks = await listConversationTasksForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (tasks === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ tasks });
 });
 
 app.post("/conversations/:conversationId/messages", async (c) => {
@@ -989,19 +1192,123 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
+  const groupAgentIds = conversation.agentIds ?? [];
+
   if (mode === "task") {
+    if (conversation.orchestratorAgentId === undefined) {
+      return c.json(
+        {
+          error: {
+            code: "ORCHESTRATOR_NOT_CONFIGURED",
+            message: "Set a group orchestrator before using Task mode.",
+          },
+        },
+        400,
+      );
+    }
+
+    if (!groupAgentIds.includes(conversation.orchestratorAgentId)) {
+      return c.json(
+        {
+          error: {
+            code: "ORCHESTRATOR_NOT_IN_GROUP",
+            message: "Orchestrator must be a member of this group.",
+          },
+        },
+        400,
+      );
+    }
+
+    const orchestrator = await getRunnableAgentForUser(db, {
+      agentId: conversation.orchestratorAgentId,
+      ownerUserId: user.id,
+    });
+
+    if (orchestrator === null) {
+      return c.json(
+        {
+          error: {
+            code: "ORCHESTRATOR_NOT_READY",
+            message: "The configured orchestrator is not ready to run.",
+          },
+        },
+        400,
+      );
+    }
+
+    const readyGroupAgents: RunnableAgent[] = [];
+
+    for (const agentId of groupAgentIds) {
+      const runAgent = await getRunnableAgentForUser(db, {
+        agentId,
+        ownerUserId: user.id,
+      });
+
+      if (runAgent !== null) {
+        readyGroupAgents.push(runAgent);
+      }
+    }
+
+    const job: RunQueueJob = {
+      conversationId: conversation.id,
+      daemonDeviceId: orchestrator.daemonDeviceId,
+      prompt: buildGroupTaskOrchestratorPrompt({
+        agentName: orchestrator.agent.name,
+        agents: readyGroupAgents,
+        conversationTitle: conversation.title,
+        currentUserMessage: content,
+        messages: priorMessages,
+      }),
+      agentInstructions: buildGroupTaskOrchestratorInstructions({
+        agentInstructions: buildAgentInstructions(orchestrator.agent.description),
+        conversationTitle: conversation.title,
+      }),
+      agentHubMcpTools: ["create_task", "send_message"],
+      workspacePath: orchestrator.workspacePath,
+      run: {
+        id: randomUUID(),
+        agentId: orchestrator.agent.id,
+        daemonDeviceId: orchestrator.daemonDeviceId,
+        status: "queued",
+        createdAt: now,
+        updatedAt: now,
+      },
+      runtime: orchestrator.runtime,
+    };
+    const result = await createUserMessageAndRuns(db, {
+      ownerUserId: user.id,
+      conversationId: conversation.id,
+      jobs: [job],
+      userMessageContent: content,
+    });
+
+    if (result === null) {
+      return c.json(
+        {
+          error: {
+            code: "CONVERSATION_NOT_FOUND",
+            message: "Conversation was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    const queueMessageId = await enqueueRunJob(redis, job);
+
     return c.json(
       {
-        error: {
-          code: "TASK_MODE_NOT_IMPLEMENTED",
-          message: "Group task mode is not implemented yet.",
-        },
+        conversation: result.conversation,
+        messages: result.messages,
+        run: job.run,
+        runs: [job.run],
+        queueMessageId,
+        queueMessageIds: [queueMessageId],
       },
-      400,
+      202,
     );
   }
 
-  const groupAgentIds = conversation.agentIds ?? [];
   const targetAgentIds = requestedAgentId !== undefined
     ? [requestedAgentId]
     : mentionedAgentIds.length > 0

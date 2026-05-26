@@ -118,6 +118,7 @@ export type ConversationType = 'group' | 'direct'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
+export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 export interface Conversation {
   id: string
@@ -128,10 +129,27 @@ export interface Conversation {
   description?: string
   directAgentId?: string
   agentIds?: string[]
+  orchestratorAgentId?: string
   status: ConversationStatus
   createdAt: string
   updatedAt: string
   lastMessageAt?: string
+}
+
+export interface ConversationTask {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  creatorRunId: string
+  orchestratorAgentId: string
+  assigneeAgentId: string
+  assigneeRunId?: string
+  dispatchMessageId?: string
+  title: string
+  description?: string
+  status: ConversationTaskStatus
+  createdAt: string
+  updatedAt: string
 }
 
 export interface ConversationMessage {
@@ -179,6 +197,7 @@ export interface CreateGroupConversationRequest {
   title: string
   description?: string
   agentIds: string[]
+  orchestratorAgentId?: string
 }
 
 export interface CreateGroupConversationResponse {
@@ -189,6 +208,7 @@ export interface UpdateGroupConversationRequest {
   title: string
   description?: string
   agentIds: string[]
+  orchestratorAgentId?: string
 }
 
 export interface UpdateGroupConversationResponse {

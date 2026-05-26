@@ -471,6 +471,27 @@ export class CodexAdapter implements AgentAdapter {
           createdAt: call.createdAt,
         });
 
+        if (
+          call.name === "create_task" &&
+          "title" in call.input &&
+          "assigneeAgentId" in call.input
+        ) {
+          const taskInput = call.input as {
+            assigneeAgentId: string;
+            taskId?: string;
+            title: string;
+          };
+
+          return {
+            accepted: true,
+            task: {
+              id: taskInput.taskId ?? call.toolCallId,
+              title: taskInput.title,
+              assigneeAgentId: taskInput.assigneeAgentId,
+            },
+          };
+        }
+
         return { accepted: true };
       },
     });

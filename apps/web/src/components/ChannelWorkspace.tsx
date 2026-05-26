@@ -1,9 +1,10 @@
 import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationMention, ConversationMessage, User } from '../lib/api'
+import { useMemo, useState } from 'react'
+import type { AgentDetails, Conversation, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
 import { formatTime } from '../lib/format'
+import { MessageContent } from './MessageContent'
 
 const inlineLink =
   'cursor-pointer border-0 bg-transparent p-0 font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
@@ -12,6 +13,7 @@ const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leadin
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
+  tasks: ConversationTask[]
   agents: AgentDetails[]
   user: User | null
   prompt: string
@@ -54,6 +56,7 @@ function replaceActiveMention(value: string, agentName: string): string {
 export function ChannelWorkspace({
   activeConversation,
   messages,
+  tasks,
   agents,
   user,
   prompt,
@@ -68,6 +71,7 @@ export function ChannelWorkspace({
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [mentions, setMentions] = useState<ConversationMention[]>([])
+  const [taskPanelConversationId, setTaskPanelConversationId] = useState<string | null>(null)
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -195,6 +199,7 @@ export function ChannelWorkspace({
   const userDisplayName = user?.name?.trim() || user?.email || 'User'
   const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
+  const canOpenTasks = hasSelectedConversation && !isAgentDirectMessage
   const chatTitleClassName =
     hasSelectedConversation && !isAgentDirectMessage
       ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
@@ -235,12 +240,15 @@ export function ChannelWorkspace({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     submitRun(event, composerMode, mentions)
   }
-
-  useEffect(() => {
-    if (prompt.trim().length === 0 && mentions.length > 0) {
+  const handlePromptChange = (value: string) => {
+    setPrompt(value)
+    if (value.trim().length === 0 && mentions.length > 0) {
       setMentions([])
     }
-  }, [mentions.length, prompt])
+  }
+
+  const showTasks = taskPanelConversationId === activeConversation?.id
+  const showTaskPage = showTasks && canOpenTasks
 
   return (
     <section
@@ -278,11 +286,19 @@ export function ChannelWorkspace({
         </div>
         <div className="flex min-w-0 items-center gap-3">
           <IconButton
-            kind="ghost"
+            kind={showTaskPage ? 'secondary' : 'ghost'}
             label="Tasks"
             size="md"
             align="bottom"
             type="button"
+            disabled={!canOpenTasks}
+            onClick={() =>
+              setTaskPanelConversationId((conversationId) =>
+                conversationId === activeConversation?.id
+                  ? null
+                  : activeConversation?.id ?? null,
+              )
+            }
           >
             <Task size={16} />
           </IconButton>
@@ -298,7 +314,7 @@ export function ChannelWorkspace({
           {hasSelectedConversation && (
             <IconButton
               kind="ghost"
-              label={canEditConversation ? 'Settings' : 'System group'}
+              label="Settings"
               size="md"
               align="bottom-end"
               type="button"
@@ -324,7 +340,72 @@ export function ChannelWorkspace({
       </div>
 
       <div className="min-h-0 overflow-y-auto px-6 py-4 max-[1055px]:px-4" aria-live="polite">
-        {visibleMessages.length === 0 ? (
+        {showTaskPage ? (
+          <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Tasks</h2>
+                <p className="text-sm text-[var(--cds-text-secondary)]">
+                  Work created by the group orchestrator for {chatDisplayName}.
+                </p>
+              </div>
+              <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
+                {tasks.length}
+              </span>
+            </div>
+            {tasks.length === 0 ? (
+              <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+                <Task size={32} />
+                <h2 className="cds--type-heading-compact-02">No tasks yet</h2>
+                <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
+                  Send a group message in Task mode. The orchestrator can create tasks and assign them to agents.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {tasks.map((task) => {
+                  const assignee = agents.find((agent) => agent.agent.id === task.assigneeAgentId)
+                  const orchestrator = agents.find((agent) => agent.agent.id === task.orchestratorAgentId)
+
+                  return (
+                    <article
+                      key={task.id}
+                      className="grid gap-3 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-sm text-[var(--cds-text-primary)]"
+                    >
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-base font-semibold">{task.title}</h3>
+                          {task.description && (
+                            <p className="mt-1 text-sm text-[var(--cds-text-secondary)]">
+                              {task.description}
+                            </p>
+                          )}
+                        </div>
+                        <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+                          {task.status}
+                        </span>
+                      </div>
+                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
+                        <div>
+                          <dt className="font-semibold uppercase">Assignee</dt>
+                          <dd className="truncate">{assignee?.agent.name ?? task.assigneeAgentId}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Orchestrator</dt>
+                          <dd className="truncate">{orchestrator?.agent.name ?? task.orchestratorAgentId}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Run</dt>
+                          <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
+                        </div>
+                      </dl>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
             <h2 className="cds--type-heading-compact-02">{emptyTitle}</h2>
@@ -365,7 +446,9 @@ export function ChannelWorkspace({
                         {formatTime(message.updatedAt)}
                       </time>
                     </span>
-                    {message.content && <span className={messageBodyClass}>{message.content}</span>}
+                    {message.content && (
+                      <MessageContent className={messageBodyClass} content={message.content} />
+                    )}
                     {message.error && (
                       <span className="text-xs text-[var(--cds-text-error)]">
                         {message.error}
@@ -384,6 +467,7 @@ export function ChannelWorkspace({
         )}
       </div>
 
+      {!showTaskPage && (
       <Form
         className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
         aria-label="Create run"
@@ -425,7 +509,7 @@ export function ChannelWorkspace({
             value={prompt}
             placeholder={composerPlaceholder}
             disabled={isCreatingRun || !selectedAgentReady}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => handlePromptChange(event.target.value)}
             onKeyDown={handleComposerKeyDown}
           />
           {mentionSuggestions.length > 0 && (
@@ -514,6 +598,7 @@ export function ChannelWorkspace({
           </div>
         </div>
       </Form>
+      )}
     </section>
   )
 }

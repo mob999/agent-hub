@@ -8,6 +8,7 @@ import { ChannelWorkspace } from '../components/ChannelWorkspace'
 import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
+import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import {
   ApiRequestError,
   apiRequest,
@@ -17,6 +18,7 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationMessage,
+  type ConversationTask,
   type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
@@ -88,6 +90,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
+  const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [runs, setRuns] = useState<LocalRun[]>([])
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
@@ -122,10 +125,14 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     activeConversation !== null &&
     (activeConversation.type === 'direct'
       ? activeConversation.directAgentId !== undefined
-      : activeConversation.key !== 'all')
+      : true)
   const activeConversationMessages = useMemo(
     () => (activeConversationId === null ? [] : messagesByConversation[activeConversationId] ?? []),
     [activeConversationId, messagesByConversation],
+  )
+  const activeConversationTasks = useMemo(
+    () => (activeConversationId === null ? [] : tasksByConversation[activeConversationId] ?? []),
+    [activeConversationId, tasksByConversation],
   )
 
   const loadDevices = useCallback(async () => {
@@ -193,6 +200,22 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setMessagesByConversation((current) => ({
         ...current,
         [conversationId]: response.messages,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadTasks = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ tasks: ConversationTask[] }>(
+        `/conversations/${conversationId}/tasks`,
+      )
+      setTasksByConversation((current) => ({
+        ...current,
+        [conversationId]: response.tasks,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -359,10 +382,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
 
     const timer = window.setTimeout(() => {
       void loadMessages(activeConversationId)
+      void loadTasks(activeConversationId)
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [activeConversationId, loadMessages])
+  }, [activeConversationId, loadMessages, loadTasks])
 
   useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
@@ -425,10 +449,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
 
     const timer = window.setInterval(() => {
       void loadMessages(activeConversationId)
+      void loadTasks(activeConversationId)
     }, 2000)
 
     return () => window.clearInterval(timer)
-  }, [activeConversationId, activeConversationMessages, loadMessages, runs])
+  }, [activeConversationId, activeConversationMessages, loadMessages, loadTasks, runs])
 
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
@@ -458,6 +483,15 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setRunError(
         'Selected agent is not ready to receive messages.',
       )
+      return
+    }
+
+    if (
+      activeConversation.type === 'group' &&
+      mode === 'task' &&
+      activeConversation.orchestratorAgentId === undefined
+    ) {
+      setRunError('Set a group orchestrator in settings before using Task mode.')
       return
     }
 
@@ -531,6 +565,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         void refreshRun(run.id)
       })
       void loadMessages(activeConversation.id)
+      void loadTasks(activeConversation.id)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
@@ -554,6 +589,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     void loadRuns()
     if (activeConversationId !== null) {
       void loadMessages(activeConversationId)
+      void loadTasks(activeConversationId)
     }
     runs.forEach((localRun) => {
       void refreshRun(localRun.run.id)
@@ -570,6 +606,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setRunError(null)
     setActiveConversationId(conversationId)
     void loadMessages(conversationId)
+    void loadTasks(conversationId)
   }
   const selectAgentConversation = async (agentId: string) => {
     try {
@@ -611,12 +648,12 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       return
     }
 
-    if (activeConversation.type === 'group' && activeConversation.key !== 'all') {
+    if (activeConversation.type === 'group') {
       setGroupEditError(null)
       setEditingGroupId(activeConversation.id)
     }
   }
-  const createGroup = async (input: { title: string; description?: string; agentIds: string[] }) => {
+  const createGroup = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
     setIsCreatingGroup(true)
     setGroupCreateError(null)
 
@@ -653,7 +690,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setIsCreatingGroup(false)
     }
   }
-  const updateGroup = async (input: { title: string; description?: string; agentIds: string[] }) => {
+  const updateGroup = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
     if (editingGroup === null) {
       return
     }
@@ -684,6 +721,40 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             ? 'A group with this name already exists.'
             : error.message,
         )
+      } else {
+        setGroupEditError('Unable to update the group. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingGroup(false)
+    }
+  }
+  const updateGroupOrchestrator = async (input: { orchestratorAgentId?: string }) => {
+    if (editingGroup === null) {
+      return
+    }
+
+    setIsSavingGroup(true)
+    setGroupEditError(null)
+
+    try {
+      const response = await apiRequest<UpdateGroupConversationResponse>(
+        `/conversations/${editingGroup.id}/orchestrator`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        },
+      )
+
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === response.conversation.id ? response.conversation : conversation,
+        ),
+      )
+      setEditingGroupId(null)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupEditError(error.message)
       } else {
         setGroupEditError('Unable to update the group. Try again in a moment.')
       }
@@ -836,6 +907,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           <ChannelWorkspace
             activeConversation={activeConversation}
             messages={activeConversationMessages}
+            tasks={activeConversationTasks}
             agents={agents}
             user={user}
             prompt={prompt}
@@ -898,16 +970,29 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         />
       )}
       {editingGroup && (
-        <GroupEditModal
-          key={editingGroup.id}
-          open={editingGroup !== null}
-          agents={agents}
-          conversation={editingGroup}
-          error={groupEditError}
-          isSaving={isSavingGroup}
-          onClose={() => setEditingGroupId(null)}
-          onSave={updateGroup}
-        />
+        editingGroup.key === 'all' ? (
+          <GroupOrchestratorModal
+            key={editingGroup.id}
+            open={editingGroup !== null}
+            agents={agents}
+            conversation={editingGroup}
+            error={groupEditError}
+            isSaving={isSavingGroup}
+            onClose={() => setEditingGroupId(null)}
+            onSave={updateGroupOrchestrator}
+          />
+        ) : (
+          <GroupEditModal
+            key={editingGroup.id}
+            open={editingGroup !== null}
+            agents={agents}
+            conversation={editingGroup}
+            error={groupEditError}
+            isSaving={isSavingGroup}
+            onClose={() => setEditingGroupId(null)}
+            onSave={updateGroup}
+          />
+        )
       )}
     </main>
   )

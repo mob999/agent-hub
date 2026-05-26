@@ -4,17 +4,23 @@ import { loadWorkerEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
 import {
   ackAgentProvisioningQueueMessage,
+  ackArtifactActionQueueMessage,
   ackRunQueueMessage,
   appendRunEvent,
+  completeConversationArtifactAction,
   createLogger,
   createAgentHubRedisClient,
   enqueueRunJob,
   ensureAgentProvisioningQueueGroup,
+  ensureArtifactActionQueueGroup,
   ensureRunQueueGroup,
+  getArtifactActionAssignment,
+  markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
   persistConversationArtifactUpload,
   readAgentProvisioningQueueMessages,
+  readArtifactActionQueueMessages,
   readRunQueueMessages,
   setDaemonRuntimesStatus,
   upsertDaemonRuntime,
@@ -70,6 +76,8 @@ const gateway = new DaemonGateway({
     persistConversationArtifactUpload(db, {
       contentBase64: message.contentBase64,
       filename: message.filename,
+      kind: message.kind,
+      metadata: message.metadata,
       mimeType: message.mimeType,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       runId: message.runId,
@@ -77,7 +85,17 @@ const gateway = new DaemonGateway({
       storageRoot: env.AGENTHUB_STORAGE_ROOT,
       taskId: message.taskId,
       title: message.title,
+      targetPath: message.targetPath,
+      displayMode: message.displayMode,
     }),
+  onArtifactActionCompleted: async (message) => {
+    await completeConversationArtifactAction(db, {
+      actionId: message.actionId,
+      error: message.error,
+      result: message.result,
+      status: message.status,
+    });
+  },
 });
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
@@ -99,6 +117,7 @@ server.on("upgrade", (request, socket, head) => {
 await redis.connect();
 await ensureRunQueueGroup(redis);
 await ensureAgentProvisioningQueueGroup(redis);
+await ensureArtifactActionQueueGroup(redis);
 await new Promise<void>((resolve) => {
   server.listen(env.WORKER_PORT, resolve);
 });
@@ -204,6 +223,88 @@ while (!shuttingDown) {
           runId: message.job.run.id,
         },
         "Dispatched run to daemon",
+      );
+    }
+  }
+
+  const artifactActionMessages = await readArtifactActionQueueMessages(
+    redis,
+    env.AGENTHUB_WORKER_CONSUMER_NAME,
+    {
+      count: 5,
+      blockMs: 500,
+    },
+  );
+
+  for (const message of artifactActionMessages) {
+    try {
+      const assignment = await getArtifactActionAssignment(db, {
+        actionId: message.job.actionId,
+        storageRoot: env.AGENTHUB_STORAGE_ROOT,
+      });
+
+      if (assignment === null) {
+        await completeConversationArtifactAction(db, {
+          actionId: message.job.actionId,
+          error: "Artifact action assignment was not found.",
+          status: "failed",
+        });
+        await ackArtifactActionQueueMessage(redis, message.id);
+        continue;
+      }
+
+      await markConversationArtifactActionRunning(db, {
+        actionId: message.job.actionId,
+      });
+
+      const assigned = gateway.assignArtifactAction({
+        type: "artifact.action.assigned",
+        actionId: assignment.actionId,
+        actionType: assignment.actionType,
+        artifactId: assignment.artifactId,
+        contentBase64: assignment.contentBase64,
+        daemonDeviceId: assignment.daemonDeviceId,
+        filename: assignment.filename,
+        metadata: assignment.metadata,
+        sentAt: new Date().toISOString(),
+        targetPath: assignment.targetPath,
+        workspacePath: assignment.workspacePath,
+      });
+
+      if (!assigned) {
+        await completeConversationArtifactAction(db, {
+          actionId: message.job.actionId,
+          error: `Daemon ${assignment.daemonDeviceId} is not connected.`,
+          status: "failed",
+        });
+      }
+
+      await ackArtifactActionQueueMessage(redis, message.id);
+      logger.info(
+        {
+          actionId: message.job.actionId,
+          actionType: message.job.actionType,
+          daemonDeviceId: assignment.daemonDeviceId,
+          messageId: message.id,
+        },
+        assigned
+          ? "Dispatched artifact action to daemon"
+          : "Failed to dispatch artifact action to daemon",
+      );
+    } catch (error) {
+      await completeConversationArtifactAction(db, {
+        actionId: message.job.actionId,
+        error: error instanceof Error ? error.message : String(error),
+        status: "failed",
+      });
+      await ackArtifactActionQueueMessage(redis, message.id);
+      logger.error(
+        {
+          err: error,
+          actionId: message.job.actionId,
+          messageId: message.id,
+        },
+        "Failed to process artifact action queue message",
       );
     }
   }

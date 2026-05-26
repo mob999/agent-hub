@@ -30,6 +30,9 @@ export interface DaemonGatewayOptions {
   onArtifactUpload?(
     message: Extract<DaemonClientMessage, { type: "artifact.upload" }>,
   ): ConversationArtifact | Promise<ConversationArtifact>;
+  onArtifactActionCompleted?(
+    message: Extract<DaemonClientMessage, { type: "artifact.action.completed" }>,
+  ): void | Promise<void>;
 }
 
 interface DaemonConnection {
@@ -226,6 +229,18 @@ export class DaemonGateway {
             this.#pendingAgentProvisioning.delete(message.agentId);
             pending.reject(new Error(message.reason));
           }
+          return;
+        }
+
+        if (message.type === "artifact.action.completed") {
+          void Promise.resolve(
+            this.#options.onArtifactActionCompleted?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), actionId: message.actionId },
+              "Failed to persist artifact action result",
+            );
+          });
         }
       });
 
@@ -368,6 +383,36 @@ export class DaemonGateway {
       runtime: job.runtime,
       agentHubMcpTools: job.agentHubMcpTools,
     });
+  }
+
+  assignArtifactAction(
+    message: Extract<DaemonServerMessage, { type: "artifact.action.assigned" }> & {
+      daemonDeviceId: DaemonDeviceId;
+    },
+  ): boolean {
+    const connection = this.#connections.get(message.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          actionId: message.actionId,
+          daemonDeviceId: message.daemonDeviceId,
+        },
+        "Cannot assign artifact action because daemon is not connected",
+      );
+      return false;
+    }
+
+    const { daemonDeviceId: _daemonDeviceId, ...serverMessage } = message;
+    send(connection.ws, serverMessage);
+    this.#options.logger?.info(
+      {
+        actionId: message.actionId,
+        daemonDeviceId: message.daemonDeviceId,
+      },
+      "Assigned artifact action to daemon",
+    );
+    return true;
   }
 
   listDevices() {

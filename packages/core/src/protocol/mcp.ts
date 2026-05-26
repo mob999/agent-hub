@@ -1,7 +1,9 @@
 import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
+  ConversationArtifactDisplayMode,
   ConversationArtifactId,
+  ConversationArtifactKind,
   ConversationMention,
   ConversationTaskId,
 } from "./conversation.js";
@@ -43,8 +45,12 @@ export interface AgentHubUploadArtifactToolInput {
   taskId: ConversationTaskId;
   title: string;
   localPath: string;
+  kind?: ConversationArtifactKind;
   filename?: string;
   mimeType?: string;
+  metadata?: Record<string, unknown>;
+  targetPath?: string;
+  displayMode?: ConversationArtifactDisplayMode;
 }
 
 export interface AgentHubUploadArtifactToolResult {

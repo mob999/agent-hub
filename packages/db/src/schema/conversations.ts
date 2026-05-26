@@ -164,11 +164,14 @@ export const conversationArtifacts = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     kind: varchar("kind", { length: 32 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("ready"),
     title: varchar("title", { length: 160 }).notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
     mimeType: varchar("mime_type", { length: 160 }),
     sizeBytes: integer("size_bytes").notNull(),
     storageKey: text("storage_key").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    latestRevisionId: uuid("latest_revision_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -185,6 +188,76 @@ export const conversationArtifacts = pgTable(
     conversationArtifactsCreatorAgentIdIdx: index(
       "conversation_artifacts_creator_agent_id_idx",
     ).on(table.creatorAgentId),
+  }),
+);
+
+export const conversationArtifactRevisions = pgTable(
+  "conversation_artifact_revisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => conversationArtifacts.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id"),
+    editorUserId: uuid("editor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    storageKey: text("storage_key").notNull(),
+    contentHash: varchar("content_hash", { length: 128 }).notNull(),
+    summary: text("summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationArtifactRevisionsArtifactCreatedAtIdx: index(
+      "conversation_artifact_revisions_artifact_created_at_idx",
+    ).on(table.artifactId, table.createdAt),
+    conversationArtifactRevisionsConversationIdx: index(
+      "conversation_artifact_revisions_conversation_idx",
+    ).on(table.conversationId),
+  }),
+);
+
+export const conversationArtifactActions = pgTable(
+  "conversation_artifact_actions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => conversationArtifacts.id, { onDelete: "cascade" }),
+    revisionId: uuid("revision_id").references(
+      () => conversationArtifactRevisions.id,
+      { onDelete: "set null" },
+    ),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 32 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    runId: uuid("run_id"),
+    error: text("error"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationArtifactActionsArtifactCreatedAtIdx: index(
+      "conversation_artifact_actions_artifact_created_at_idx",
+    ).on(table.artifactId, table.createdAt),
+    conversationArtifactActionsConversationIdx: index(
+      "conversation_artifact_actions_conversation_idx",
+    ).on(table.conversationId),
+    conversationArtifactActionsStatusIdx: index(
+      "conversation_artifact_actions_status_idx",
+    ).on(table.status),
   }),
 );
 

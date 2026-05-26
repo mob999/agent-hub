@@ -1048,6 +1048,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             submitRun={submitRun}
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}
+            refreshArtifacts={() => {
+              if (activeConversation?.id) {
+                void loadArtifacts(activeConversation.id)
+              }
+            }}
           />
         </>
       ) : activeView === 'daemon' ? (

@@ -8,7 +8,13 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
-import type { ConversationArtifact, ConversationTaskId } from "./conversation.js";
+import type {
+  ConversationArtifact,
+  ConversationArtifactActionId,
+  ConversationArtifactActionType,
+  ConversationArtifactId,
+  ConversationTaskId,
+} from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
 export interface DaemonRunAssignment {
@@ -61,6 +67,10 @@ export type DaemonClientMessage =
       mimeType?: string;
       sizeBytes: number;
       contentBase64: string;
+      kind?: ConversationArtifact["kind"];
+      metadata?: Record<string, unknown>;
+      targetPath?: string;
+      displayMode?: string;
       sentAt: IsoDateTime;
     }
   | {
@@ -76,6 +86,14 @@ export type DaemonClientMessage =
       agentId: AgentId;
       daemonDeviceId: DaemonDeviceId;
       reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "artifact.action.completed";
+      actionId: ConversationArtifactActionId;
+      status: "succeeded" | "failed" | "cancelled";
+      error?: string;
+      result?: Record<string, unknown>;
       sentAt: IsoDateTime;
     };
 
@@ -101,6 +119,18 @@ export type DaemonServerMessage =
       type: "run.cancel";
       runId: RunId;
       reason?: string;
+    }
+  | {
+      type: "artifact.action.assigned";
+      actionId: ConversationArtifactActionId;
+      artifactId: ConversationArtifactId;
+      actionType: ConversationArtifactActionType;
+      filename: string;
+      workspacePath: string;
+      contentBase64: string;
+      metadata?: Record<string, unknown>;
+      targetPath?: string;
+      sentAt: IsoDateTime;
     }
   | {
       type: "artifact.upload.ack";

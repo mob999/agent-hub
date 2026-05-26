@@ -13,16 +13,21 @@ import {
   createLogger,
   createRunRecord,
   buildConversationRunPrompt,
+  createConversationArtifactAction,
+  createConversationArtifactRevision,
   createGroupConversation,
   createUserMessageAndRun,
   createUserMessageAndRuns,
   enqueueAgentProvisioningJob,
+  enqueueArtifactActionJob,
   enqueueRunJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
   getConversationForUser,
   getConversationArtifactForUser,
+  getConversationArtifactContentForUser,
+  getConversationArtifactDetailsForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
@@ -1455,6 +1460,271 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 });
 
 app.use("/artifacts/*", requireAuth);
+app.get("/artifacts/:artifactId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const details = await getConversationArtifactDetailsForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (details === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(details);
+});
+
+app.get("/artifacts/:artifactId/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const content = await getConversationArtifactContentForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    revisionId: c.req.query("revisionId"),
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  });
+
+  if (content === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact content was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(content);
+});
+
+app.get("/artifacts/:artifactId/preview/*", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const details = await getConversationArtifactDetailsForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (details === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const previewAction = details.actions.find(
+    (action) =>
+      action.type === "preview" &&
+      action.status === "succeeded" &&
+      typeof action.result?.previewUrl === "string",
+  );
+  const previewUrl =
+    typeof previewAction?.result?.previewUrl === "string"
+      ? previewAction.result.previewUrl
+      : typeof details.artifact.metadata?.previewUrl === "string"
+        ? details.artifact.metadata.previewUrl
+        : undefined;
+
+  if (previewUrl === undefined) {
+    return c.json(
+      {
+        error: {
+          code: "PREVIEW_NOT_READY",
+          message: "Preview is not ready.",
+        },
+      },
+      404,
+    );
+  }
+
+  const targetUrl = new URL(previewUrl);
+  const suffix = c.req.param("*") ?? "";
+  if (suffix.length > 0) {
+    targetUrl.pathname = `${targetUrl.pathname.replace(/\/$/, "")}/${suffix}`;
+  }
+  targetUrl.search = new URL(c.req.url).search;
+
+  const response = await fetch(targetUrl);
+  const body = await response.arrayBuffer();
+  const headers = new Headers();
+  for (const headerName of [
+    "content-type",
+    "cache-control",
+    "etag",
+    "last-modified",
+  ]) {
+    const value = response.headers.get(headerName);
+
+    if (value !== null) {
+      headers.set(headerName, value);
+    }
+  }
+
+  return new Response(body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+});
+
+app.post("/artifacts/:artifactId/revisions", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    content?: unknown;
+    summary?: unknown;
+  };
+  const content = typeof body.content === "string" ? body.content : undefined;
+  const summary = typeof body.summary === "string" && body.summary.trim().length > 0
+    ? body.summary.trim()
+    : undefined;
+
+  if (content === undefined || Buffer.byteLength(content, "utf8") > 1024 * 1024) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ARTIFACT_REVISION",
+          message: "content is required and must be 1MB or smaller.",
+        },
+      },
+      400,
+    );
+  }
+
+  const revision = await createConversationArtifactRevision(db, {
+    artifactId: c.req.param("artifactId"),
+    content,
+    editorUserId: user.id,
+    ownerUserId: user.id,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    summary,
+  });
+
+  if (revision === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ revision }, 201);
+});
+
+for (const actionType of ["apply", "preview", "publish"] as const) {
+  app.post(`/artifacts/:artifactId/actions/${actionType}`, async (c) => {
+    const user = c.get("user");
+
+    if (!user) {
+      return c.json(
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Authentication required.",
+          },
+        },
+        401,
+      );
+    }
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      revisionId?: unknown;
+    };
+    const result = await createConversationArtifactAction(db, {
+      artifactId: c.req.param("artifactId"),
+      ownerUserId: user.id,
+      revisionId: typeof body.revisionId === "string" ? body.revisionId : undefined,
+      type: actionType,
+    });
+
+    if (result === null) {
+      return c.json(
+        {
+          error: {
+            code: "ARTIFACT_NOT_FOUND",
+            message: "Artifact or revision was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    await enqueueArtifactActionJob(redis, result.job);
+
+    return c.json({ action: result.action }, 202);
+  });
+}
+
 app.get("/artifacts/:artifactId/download", async (c) => {
   const user = c.get("user");
 

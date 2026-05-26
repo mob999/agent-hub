@@ -57,6 +57,13 @@
       "when": 1779788107869,
       "tag": "0007_brave_purple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779790764096,
+      "tag": "0008_new_runaways",
+      "breakpoints": true
     }
   ]
 }

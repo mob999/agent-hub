@@ -1,9 +1,10 @@
 import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useMemo, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
 import { formatTime } from '../lib/format'
+import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
 const inlineLink =
@@ -30,6 +31,7 @@ interface ChannelWorkspaceProps {
   ) => void
   openCreateAgent: () => void
   openEditConversation: () => void
+  refreshArtifacts?: () => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -70,10 +72,12 @@ export function ChannelWorkspace({
   submitRun,
   openCreateAgent,
   openEditConversation,
+  refreshArtifacts,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [mentions, setMentions] = useState<ConversationMention[]>([])
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' | 'editor' } | null>(null)
+  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -255,7 +259,10 @@ export function ChannelWorkspace({
   const showFiles =
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'files'
-  const showWorkspacePage = (showTasks || showFiles) && canOpenWorkspacePanel
+  const showEditor =
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'editor'
+  const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
 
   return (
     <section
@@ -329,6 +336,25 @@ export function ChannelWorkspace({
             }
           >
             <Folder size={16} />
+          </IconButton>
+          <IconButton
+            kind={showEditor ? 'secondary' : 'ghost'}
+            label="Editor"
+            size="md"
+            align="bottom"
+            type="button"
+            disabled={!canOpenWorkspacePanel}
+            onClick={() =>
+              setWorkspacePanel((panel) =>
+                panel?.conversationId === activeConversation?.id && panel?.view === 'editor'
+                  ? null
+                  : activeConversation
+                    ? { conversationId: activeConversation.id, view: 'editor' }
+                    : null,
+              )
+            }
+          >
+            <Code size={16} />
           </IconButton>
           {hasSelectedConversation && (
             <IconButton
@@ -444,6 +470,15 @@ export function ChannelWorkspace({
               </div>
             )}
           </div>
+        ) : showWorkspacePage && showEditor ? (
+          <div className="mx-auto grid w-full max-w-[86rem] content-start gap-4">
+            <ArtifactWorkspace
+              artifacts={artifacts}
+              activeArtifactId={activeArtifactId}
+              onActiveArtifactChange={setActiveArtifactId}
+              onRefreshArtifacts={refreshArtifacts}
+            />
+          </div>
         ) : showWorkspacePage && showFiles ? (
           <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
@@ -477,12 +512,21 @@ export function ChannelWorkspace({
                     >
                       <div className="flex min-w-0 items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <a
-                            className="block truncate text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline"
-                            href={artifact.downloadUrl ?? '#'}
+                          <button
+                            className="block max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                            type="button"
+                            onClick={() => {
+                              setActiveArtifactId(artifact.id)
+                              if (activeConversation) {
+                                setWorkspacePanel({
+                                  conversationId: activeConversation.id,
+                                  view: 'editor',
+                                })
+                              }
+                            }}
                           >
                             {artifact.title}
-                          </a>
+                          </button>
                           <p className="truncate text-sm text-[var(--cds-text-secondary)]">
                             {artifact.filename}
                           </p>

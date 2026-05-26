@@ -1,6 +1,8 @@
 import type {
   Conversation,
   ConversationArtifact,
+  ConversationArtifactAction,
+  ConversationArtifactRevision,
   CreateGroupConversationRequest,
   CreateGroupConversationResponse,
   ConversationMessage,
@@ -96,6 +98,7 @@ describe("conversation protocol", () => {
       runId: "00000000-0000-4000-8000-000000000016",
       creatorAgentId: "00000000-0000-4000-8000-000000000015",
       kind: "report",
+      status: "ready",
       title: "Implementation report",
       filename: "implementation-report.md",
       mimeType: "text/markdown",
@@ -129,6 +132,31 @@ describe("conversation protocol", () => {
     expect(task.status).toBe("succeeded");
     expect(task.assigneeRunId).toBeDefined();
     expect(task.artifacts?.[0]?.downloadUrl).toContain("/download");
+  });
+
+  it("expresses artifact revisions and actions", () => {
+    const revision: ConversationArtifactRevision = {
+      id: "00000000-0000-4000-8000-000000000030",
+      artifactId: "00000000-0000-4000-8000-000000000020",
+      ownerUserId: "00000000-0000-4000-8000-000000000011",
+      conversationId: "00000000-0000-4000-8000-000000000012",
+      editorUserId: "00000000-0000-4000-8000-000000000011",
+      contentHash: "sha256:abc",
+      summary: "Edited report",
+      createdAt: "2026-05-26T00:00:03.000Z",
+    };
+    const action: ConversationArtifactAction = {
+      id: "00000000-0000-4000-8000-000000000031",
+      artifactId: revision.artifactId,
+      revisionId: revision.id,
+      type: "apply",
+      status: "queued",
+      createdAt: "2026-05-26T00:00:04.000Z",
+      updatedAt: "2026-05-26T00:00:04.000Z",
+    };
+
+    expect(action.revisionId).toBe(revision.id);
+    expect(action.type).toBe("apply");
   });
 
   it("expresses streaming agent messages linked to runs", () => {

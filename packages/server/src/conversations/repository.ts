@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AgentHubCreateTaskToolInput,
@@ -7,15 +7,21 @@ import type {
   AgentHubSendMessageToolInput,
   Conversation,
   ConversationArtifact,
+  ConversationArtifactAction,
+  ConversationArtifactActionType,
   ConversationId,
   ConversationMessage,
+  ConversationArtifactDetails,
+  ConversationArtifactRevision,
   ConversationTask,
   RunEvent,
 } from "@agent-hub/core";
 import {
   agents,
   conversationAgentMembers,
+  conversationArtifactActions,
   conversationArtifacts,
+  conversationArtifactRevisions,
   conversationMessages,
   conversationTasks,
   conversations,
@@ -28,11 +34,14 @@ import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { getRunnableAgentForUser } from "../agents/repository.js";
 import {
   buildArtifactDownloadUrl,
+  conversationArtifactRevisionStorageKey,
   conversationArtifactStorageKey,
   sanitizeArtifactFilename,
   writeArtifactContent,
+  writeArtifactTextContent,
+  readArtifactContent,
 } from "../artifacts/index.js";
-import type { RunQueueJob } from "../queue/index.js";
+import type { ArtifactActionQueueJob, RunQueueJob } from "../queue/index.js";
 
 export const defaultGroupConversationKey = "all";
 export const defaultGroupConversationTitle = "all";
@@ -41,6 +50,9 @@ type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 type ConversationTaskRow = typeof conversationTasks.$inferSelect;
 type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
+type ConversationArtifactRevisionRow =
+  typeof conversationArtifactRevisions.$inferSelect;
+type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 
 export type CreateGroupConversationResult =
   | { status: "created"; conversation: Conversation }
@@ -81,6 +93,26 @@ export interface PersistConversationArtifactUploadInput {
   storageRoot: string;
   taskId: string;
   title: string;
+  kind?: ConversationArtifact["kind"];
+  metadata?: Record<string, unknown>;
+  targetPath?: string;
+  displayMode?: string;
+}
+
+export interface CreateConversationArtifactRevisionInput {
+  artifactId: string;
+  content: string;
+  editorUserId: string;
+  ownerUserId: string;
+  storageRoot: string;
+  summary?: string;
+}
+
+export interface CreateConversationArtifactActionInput {
+  artifactId: string;
+  ownerUserId: string;
+  revisionId?: string;
+  type: ConversationArtifactActionType;
 }
 
 function optionalString(value: string | null): string | undefined {
@@ -145,10 +177,13 @@ export function toConversationArtifact(
     runId: row.runId,
     creatorAgentId: row.creatorAgentId,
     kind: row.kind as ConversationArtifact["kind"],
+    status: row.status as ConversationArtifact["status"],
     title: row.title,
     filename: row.filename,
     mimeType: optionalString(row.mimeType),
     sizeBytes: row.sizeBytes,
+    metadata: row.metadata ?? undefined,
+    latestRevisionId: optionalString(row.latestRevisionId),
     downloadUrl:
       input.publicApiBaseUrl === undefined
         ? undefined
@@ -156,6 +191,39 @@ export function toConversationArtifact(
             artifactId: row.id,
             publicApiBaseUrl: input.publicApiBaseUrl,
           }),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toConversationArtifactRevision(
+  row: ConversationArtifactRevisionRow,
+): ConversationArtifactRevision {
+  return {
+    id: row.id,
+    artifactId: row.artifactId,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    runId: optionalString(row.runId),
+    editorUserId: optionalString(row.editorUserId),
+    contentHash: row.contentHash,
+    summary: optionalString(row.summary),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toConversationArtifactAction(
+  row: ConversationArtifactActionRow,
+): ConversationArtifactAction {
+  return {
+    id: row.id,
+    artifactId: row.artifactId,
+    revisionId: optionalString(row.revisionId),
+    type: row.type as ConversationArtifactAction["type"],
+    status: row.status as ConversationArtifactAction["status"],
+    runId: optionalString(row.runId),
+    error: optionalString(row.error),
+    result: row.result ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -886,6 +954,356 @@ export async function getConversationArtifactForUser(
   };
 }
 
+function availableArtifactActions(
+  artifact: ConversationArtifact,
+): ConversationArtifactActionType[] {
+  if (artifact.status !== "ready") {
+    return [];
+  }
+
+  switch (artifact.kind) {
+    case "diff":
+      return ["apply"];
+    case "file":
+    case "document":
+    case "report":
+      return ["apply", "preview", "publish"];
+    case "web_preview":
+      return ["preview"];
+    case "deployment":
+    case "workflow_result":
+    case "image":
+    case "slide_deck":
+      return [];
+  }
+}
+
+export async function getConversationArtifactDetailsForUser(
+  db: Db,
+  input: { artifactId: string; ownerUserId: string; publicApiBaseUrl?: string },
+): Promise<ConversationArtifactDetails | null> {
+  const record = await getConversationArtifactForUser(db, input);
+
+  if (record === null) {
+    return null;
+  }
+
+  const [latestRevision] = record.artifact.latestRevisionId === undefined
+    ? []
+    : await db
+        .select()
+        .from(conversationArtifactRevisions)
+        .where(eq(conversationArtifactRevisions.id, record.artifact.latestRevisionId))
+        .limit(1);
+  const actionRows = await db
+    .select()
+    .from(conversationArtifactActions)
+    .where(eq(conversationArtifactActions.artifactId, input.artifactId))
+    .orderBy(desc(conversationArtifactActions.createdAt));
+
+  return {
+    artifact: record.artifact,
+    latestRevision:
+      latestRevision === undefined
+        ? undefined
+        : toConversationArtifactRevision(latestRevision),
+    actions: actionRows.map(toConversationArtifactAction),
+    availableActions: availableArtifactActions(record.artifact),
+  };
+}
+
+export async function getConversationArtifactContentForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    revisionId?: string;
+    storageRoot: string;
+  },
+): Promise<
+  | { content: string; revision?: ConversationArtifactRevision }
+  | null
+> {
+  const record = await getConversationArtifactForUser(db, input);
+
+  if (record === null) {
+    return null;
+  }
+
+  if (input.revisionId !== undefined) {
+    const [revisionRow] = await db
+      .select()
+      .from(conversationArtifactRevisions)
+      .where(
+        and(
+          eq(conversationArtifactRevisions.id, input.revisionId),
+          eq(conversationArtifactRevisions.artifactId, input.artifactId),
+          eq(conversationArtifactRevisions.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (revisionRow === undefined) {
+      return null;
+    }
+
+    const content = await readArtifactContent({
+      storageKey: revisionRow.storageKey,
+      storageRoot: input.storageRoot,
+    });
+
+    return {
+      content: content.toString("utf8"),
+      revision: toConversationArtifactRevision(revisionRow),
+    };
+  }
+
+  const content = await readArtifactContent({
+    storageKey: record.storageKey,
+    storageRoot: input.storageRoot,
+  });
+
+  return { content: content.toString("utf8") };
+}
+
+export async function createConversationArtifactRevision(
+  db: Db,
+  input: CreateConversationArtifactRevisionInput,
+): Promise<ConversationArtifactRevision | null> {
+  const record = await getConversationArtifactForUser(db, {
+    artifactId: input.artifactId,
+    ownerUserId: input.ownerUserId,
+  });
+
+  if (record === null) {
+    return null;
+  }
+
+  const revisionId = randomUUID();
+  const contentHash = createHash("sha256").update(input.content).digest("hex");
+  const storageKey = conversationArtifactRevisionStorageKey({
+    artifactId: input.artifactId,
+    conversationId: record.artifact.conversationId,
+    filename: record.artifact.filename,
+    revisionId,
+  });
+  await writeArtifactTextContent({
+    content: input.content,
+    storageKey,
+    storageRoot: input.storageRoot,
+  });
+
+  const now = new Date();
+  const [revision] = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(conversationArtifactRevisions)
+      .values({
+        id: revisionId,
+        artifactId: input.artifactId,
+        ownerUserId: input.ownerUserId,
+        conversationId: record.artifact.conversationId,
+        runId: record.artifact.runId,
+        editorUserId: input.editorUserId,
+        storageKey,
+        contentHash,
+        summary: input.summary,
+        createdAt: now,
+      })
+      .returning();
+
+    await tx
+      .update(conversationArtifacts)
+      .set({
+        latestRevisionId: revisionId,
+        updatedAt: now,
+      })
+      .where(eq(conversationArtifacts.id, input.artifactId));
+
+    return [created];
+  });
+
+  return revision === undefined ? null : toConversationArtifactRevision(revision);
+}
+
+export async function createConversationArtifactAction(
+  db: Db,
+  input: CreateConversationArtifactActionInput,
+): Promise<
+  | { action: ConversationArtifactAction; job: ArtifactActionQueueJob }
+  | null
+> {
+  const record = await getConversationArtifactForUser(db, {
+    artifactId: input.artifactId,
+    ownerUserId: input.ownerUserId,
+  });
+
+  if (record === null) {
+    return null;
+  }
+
+  const [run] = await db
+    .select({
+      daemonDeviceId: runs.daemonDeviceId,
+      workspacePath: runs.workspacePath,
+    })
+    .from(runs)
+    .where(eq(runs.id, record.artifact.runId))
+    .limit(1);
+
+  if (run === undefined) {
+    return null;
+  }
+
+  let revisionId = input.revisionId ?? record.artifact.latestRevisionId;
+
+  if (revisionId !== undefined) {
+    const [revision] = await db
+      .select({ id: conversationArtifactRevisions.id })
+      .from(conversationArtifactRevisions)
+      .where(
+        and(
+          eq(conversationArtifactRevisions.id, revisionId),
+          eq(conversationArtifactRevisions.artifactId, input.artifactId),
+          eq(conversationArtifactRevisions.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (revision === undefined) {
+      return null;
+    }
+  } else if (input.type !== "preview" && input.type !== "publish") {
+    revisionId = undefined;
+  }
+
+  const now = new Date();
+  const [actionRow] = await db
+    .insert(conversationArtifactActions)
+    .values({
+      artifactId: input.artifactId,
+      revisionId,
+      ownerUserId: input.ownerUserId,
+      conversationId: record.artifact.conversationId,
+      type: input.type,
+      status: "queued",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (actionRow === undefined) {
+    return null;
+  }
+
+  return {
+    action: toConversationArtifactAction(actionRow),
+    job: {
+      actionId: actionRow.id,
+      artifactId: input.artifactId,
+      actionType: input.type,
+      daemonDeviceId: run.daemonDeviceId,
+      revisionId,
+      workspacePath: run.workspacePath,
+    },
+  };
+}
+
+export async function getArtifactActionAssignment(
+  db: Db,
+  input: { actionId: string; storageRoot: string },
+): Promise<
+  | {
+      actionId: string;
+      actionType: ConversationArtifactActionType;
+      artifactId: string;
+      contentBase64: string;
+      daemonDeviceId: string;
+      filename: string;
+      metadata?: Record<string, unknown>;
+      targetPath?: string;
+      workspacePath: string;
+    }
+  | null
+> {
+  const [row] = await db
+    .select({
+      action: conversationArtifactActions,
+      artifact: conversationArtifacts,
+      revision: conversationArtifactRevisions,
+      run: runs,
+    })
+    .from(conversationArtifactActions)
+    .innerJoin(
+      conversationArtifacts,
+      eq(conversationArtifactActions.artifactId, conversationArtifacts.id),
+    )
+    .innerJoin(runs, eq(conversationArtifacts.runId, runs.id))
+    .leftJoin(
+      conversationArtifactRevisions,
+      eq(conversationArtifactActions.revisionId, conversationArtifactRevisions.id),
+    )
+    .where(eq(conversationArtifactActions.id, input.actionId))
+    .limit(1);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  const storageKey = row.revision?.storageKey ?? row.artifact.storageKey;
+  const content = await readArtifactContent({
+    storageKey,
+    storageRoot: input.storageRoot,
+  });
+  const metadata = row.artifact.metadata ?? {};
+
+  return {
+    actionId: row.action.id,
+    actionType: row.action.type as ConversationArtifactActionType,
+    artifactId: row.artifact.id,
+    contentBase64: content.toString("base64"),
+    daemonDeviceId: row.run.daemonDeviceId,
+    filename: row.artifact.filename,
+    metadata,
+    targetPath: typeof metadata.targetPath === "string"
+      ? metadata.targetPath
+      : undefined,
+    workspacePath: row.run.workspacePath,
+  };
+}
+
+export async function markConversationArtifactActionRunning(
+  db: Db,
+  input: { actionId: string },
+): Promise<void> {
+  await db
+    .update(conversationArtifactActions)
+    .set({
+      status: "running",
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationArtifactActions.id, input.actionId));
+}
+
+export async function completeConversationArtifactAction(
+  db: Db,
+  input: {
+    actionId: string;
+    error?: string;
+    result?: Record<string, unknown>;
+    status: "succeeded" | "failed" | "cancelled";
+  },
+): Promise<void> {
+  await db
+    .update(conversationArtifactActions)
+    .set({
+      status: input.status,
+      error: input.error,
+      result: input.result,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationArtifactActions.id, input.actionId));
+}
+
 export async function persistConversationArtifactUpload(
   db: Db,
   input: PersistConversationArtifactUploadInput,
@@ -948,12 +1366,20 @@ export async function persistConversationArtifactUpload(
       taskId: task.id,
       runId: input.runId,
       creatorAgentId: run.agentId,
-      kind: "report",
+      kind: input.kind ?? "report",
+      status: "ready",
       title: input.title.trim(),
       filename,
       mimeType: input.mimeType,
       sizeBytes: writtenBytes,
       storageKey,
+      metadata: {
+        ...(input.metadata ?? {}),
+        ...(input.targetPath === undefined ? {} : { targetPath: input.targetPath }),
+        ...(input.displayMode === undefined
+          ? {}
+          : { displayMode: input.displayMode }),
+      },
       createdAt: now,
       updatedAt: now,
     })
@@ -1243,6 +1669,7 @@ function readUploadArtifactToolInput(
   const localPath = artifactInput.localPath.trim();
   const filename = artifactInput.filename?.trim();
   const mimeType = artifactInput.mimeType?.trim();
+  const targetPath = artifactInput.targetPath?.trim();
 
   return title.length > 0 &&
     title.length <= 160 &&
@@ -1253,8 +1680,12 @@ function readUploadArtifactToolInput(
         taskId: artifactInput.taskId,
         title,
         localPath,
+        kind: artifactInput.kind,
         filename: filename && filename.length > 0 ? filename : undefined,
         mimeType: mimeType && mimeType.length > 0 ? mimeType : undefined,
+        metadata: artifactInput.metadata,
+        targetPath: targetPath && targetPath.length > 0 ? targetPath : undefined,
+        displayMode: artifactInput.displayMode,
       }
     : null;
 }

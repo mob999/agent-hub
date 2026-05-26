@@ -21,7 +21,34 @@ export type ConversationTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
-export type ConversationArtifactKind = "report" | "file";
+export type ConversationArtifactKind =
+  | "file"
+  | "diff"
+  | "web_preview"
+  | "document"
+  | "slide_deck"
+  | "image"
+  | "workflow_result"
+  | "deployment"
+  | "report";
+export type ConversationArtifactStatus =
+  | "pending"
+  | "ready"
+  | "failed"
+  | "deleted";
+export type ConversationArtifactActionType = "apply" | "publish" | "preview";
+export type ConversationArtifactActionStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+export type ConversationArtifactDisplayMode =
+  | "code"
+  | "diff"
+  | "markdown"
+  | "preview"
+  | "record";
 
 export interface Conversation {
   id: ConversationId;
@@ -60,13 +87,51 @@ export interface ConversationArtifact {
   runId: RunId;
   creatorAgentId: AgentId;
   kind: ConversationArtifactKind;
+  status: ConversationArtifactStatus;
   title: string;
   filename: string;
   mimeType?: string;
   sizeBytes: number;
+  metadata?: Record<string, unknown>;
+  latestRevisionId?: ConversationArtifactRevisionId;
   downloadUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+export type ConversationArtifactRevisionId = string;
+export type ConversationArtifactActionId = string;
+
+export interface ConversationArtifactRevision {
+  id: ConversationArtifactRevisionId;
+  artifactId: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  runId?: RunId;
+  editorUserId?: UserId;
+  contentHash: string;
+  summary?: string;
+  createdAt: IsoDateTime;
+}
+
+export interface ConversationArtifactAction {
+  id: ConversationArtifactActionId;
+  artifactId: ConversationArtifactId;
+  revisionId?: ConversationArtifactRevisionId;
+  type: ConversationArtifactActionType;
+  status: ConversationArtifactActionStatus;
+  runId?: RunId;
+  error?: string;
+  result?: Record<string, unknown>;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationArtifactDetails {
+  artifact: ConversationArtifact;
+  latestRevision?: ConversationArtifactRevision;
+  actions: ConversationArtifactAction[];
+  availableActions: ConversationArtifactActionType[];
 }
 
 export interface ConversationTask {
@@ -138,6 +203,27 @@ export interface ListConversationTasksResponse {
 
 export interface ListConversationArtifactsResponse {
   artifacts: ConversationArtifact[];
+}
+
+export interface GetConversationArtifactResponse
+  extends ConversationArtifactDetails {}
+
+export interface GetConversationArtifactContentResponse {
+  content: string;
+  revision?: ConversationArtifactRevision;
+}
+
+export interface CreateConversationArtifactRevisionRequest {
+  content: string;
+  summary?: string;
+}
+
+export interface CreateConversationArtifactRevisionResponse {
+  revision: ConversationArtifactRevision;
+}
+
+export interface CreateConversationArtifactActionResponse {
+  action: ConversationArtifactAction;
 }
 
 export type SendConversationMessageMode = "chat" | "task";

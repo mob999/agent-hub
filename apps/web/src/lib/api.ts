@@ -1,5 +1,9 @@
 const apiBaseUrl = import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://localhost:3000'
 
+export function apiUrl(path: string): string {
+  return `${apiBaseUrl}${path}`
+}
+
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type DeviceStatus = 'online' | 'offline' | string
 export type WorkspaceView = 'chat' | 'runs' | 'daemon'
@@ -119,7 +123,24 @@ export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
 export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-export type ConversationArtifactKind = 'report' | 'file'
+export type ConversationArtifactKind =
+  | 'file'
+  | 'diff'
+  | 'web_preview'
+  | 'document'
+  | 'slide_deck'
+  | 'image'
+  | 'workflow_result'
+  | 'deployment'
+  | 'report'
+export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
+export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
+export type ConversationArtifactActionStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
 
 export interface Conversation {
   id: string
@@ -166,13 +187,61 @@ export interface ConversationArtifact {
   runId: string
   creatorAgentId: string
   kind: ConversationArtifactKind
+  status: ConversationArtifactStatus
   title: string
   filename: string
   mimeType?: string
+  metadata?: Record<string, unknown>
   sizeBytes: number
   downloadUrl?: string
+  latestRevisionId?: string
   createdAt: string
   updatedAt: string
+}
+
+export interface ConversationArtifactRevision {
+  id: string
+  artifactId: string
+  ownerUserId: string
+  conversationId: string
+  runId?: string
+  editorUserId?: string
+  contentHash: string
+  summary?: string
+  createdAt: string
+}
+
+export interface ConversationArtifactAction {
+  id: string
+  artifactId: string
+  revisionId?: string
+  type: ConversationArtifactActionType
+  status: ConversationArtifactActionStatus
+  runId?: string
+  error?: string
+  result?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationArtifactDetails {
+  artifact: ConversationArtifact
+  latestRevision?: ConversationArtifactRevision
+  actions: ConversationArtifactAction[]
+  availableActions: ConversationArtifactActionType[]
+}
+
+export interface GetConversationArtifactContentResponse {
+  content: string
+  revision?: ConversationArtifactRevision
+}
+
+export interface CreateConversationArtifactRevisionResponse {
+  revision: ConversationArtifactRevision
+}
+
+export interface CreateConversationArtifactActionResponse {
+  action: ConversationArtifactAction
 }
 
 export interface ConversationMessage {
@@ -280,7 +349,7 @@ export class ApiRequestError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {

@@ -151,7 +151,34 @@ export async function startAgentHubMcpStdioServer(
                       "Path to a file inside the current run workspace.",
                   },
                   filename: { type: "string" },
+                  kind: {
+                    type: "string",
+                    enum: [
+                      "file",
+                      "diff",
+                      "web_preview",
+                      "document",
+                      "slide_deck",
+                      "image",
+                      "workflow_result",
+                      "deployment",
+                      "report",
+                    ],
+                  },
+                  metadata: {
+                    type: "object",
+                    additionalProperties: true,
+                  },
                   mimeType: { type: "string" },
+                  targetPath: {
+                    type: "string",
+                    description:
+                      "Workspace-relative path where this artifact should be applied.",
+                  },
+                  displayMode: {
+                    type: "string",
+                    enum: ["source", "preview", "diff", "markdown", "iframe"],
+                  },
                 },
                 required: ["taskId", "title", "localPath"],
               },
@@ -325,7 +352,11 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
   const title = input.title;
   const localPath = input.localPath;
   const filename = input.filename;
+  const kind = input.kind;
+  const metadata = input.metadata;
   const mimeType = input.mimeType;
+  const targetPath = input.targetPath;
+  const displayMode = input.displayMode;
 
   if (typeof taskId !== "string" || taskId.length === 0) {
     throw new Error("upload_artifact.taskId is required.");
@@ -347,9 +378,25 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
         : undefined,
+    kind:
+      typeof kind === "string" && kind.trim().length > 0
+        ? kind.trim() as AgentHubUploadArtifactToolInput["kind"]
+        : undefined,
+    metadata:
+      typeof metadata === "object" && metadata !== null && !Array.isArray(metadata)
+        ? metadata as Record<string, unknown>
+        : undefined,
     mimeType:
       typeof mimeType === "string" && mimeType.trim().length > 0
         ? mimeType.trim()
+        : undefined,
+    targetPath:
+      typeof targetPath === "string" && targetPath.trim().length > 0
+        ? targetPath.trim()
+        : undefined,
+    displayMode:
+      typeof displayMode === "string" && displayMode.trim().length > 0
+        ? displayMode.trim() as AgentHubUploadArtifactToolInput["displayMode"]
         : undefined,
   };
 }

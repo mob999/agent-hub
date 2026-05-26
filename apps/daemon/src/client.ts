@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 import { loadDaemonEnv } from "@agent-hub/config";
@@ -19,6 +22,7 @@ import {
   assertPathInsideWorkspace,
   getAgentWorkspacePath,
   initializeAgentWorkspace,
+  resolveWorkspacePath,
 } from "./workspace";
 
 function nowIsoDateTime(): string {
@@ -50,6 +54,90 @@ function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | unde
 const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
+
+function readStringMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key];
+
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function readNumberMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  const value = metadata?.[key];
+
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+async function handleArtifactAction(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  logger: ReturnType<typeof createLogger>;
+  message: Extract<DaemonServerMessage, { type: "artifact.action.assigned" }>;
+}): Promise<Record<string, unknown> | undefined> {
+  const { env, logger, message } = input;
+
+  assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.workspacePath);
+
+  if (message.actionType === "apply") {
+    const targetPath =
+      message.targetPath ??
+      readStringMetadata(message.metadata, "targetPath") ??
+      message.filename;
+    const resolvedTargetPath = resolveWorkspacePath(message.workspacePath, targetPath);
+    await mkdir(path.dirname(resolvedTargetPath), { recursive: true });
+    await writeFile(resolvedTargetPath, Buffer.from(message.contentBase64, "base64"));
+
+    return {
+      targetPath: path.relative(message.workspacePath, resolvedTargetPath),
+    };
+  }
+
+  if (message.actionType === "preview") {
+    const previewCommand = readStringMetadata(message.metadata, "previewCommand");
+    const previewUrl =
+      readStringMetadata(message.metadata, "previewUrl") ??
+      `http://127.0.0.1:${readNumberMetadata(message.metadata, "port") ?? 5173}`;
+
+    if (previewCommand !== undefined) {
+      const child = spawn(previewCommand, {
+        cwd: message.workspacePath,
+        detached: true,
+        shell: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      logger.info(
+        {
+          actionId: message.actionId,
+          pid: child.pid,
+          previewUrl,
+        },
+        "Started artifact preview command",
+      );
+    }
+
+    return {
+      previewUrl,
+      started: previewCommand !== undefined,
+    };
+  }
+
+  if (message.actionType === "publish") {
+    return {
+      deploymentUrl: readStringMetadata(message.metadata, "deploymentUrl"),
+      message: "Local publish action recorded.",
+      publishedAt: nowIsoDateTime(),
+    };
+  }
+
+  throw new Error(`Unsupported artifact action: ${message.actionType}`);
+}
 
 export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
@@ -115,6 +203,39 @@ export async function startDaemon(): Promise<void> {
       } else {
         pending.reject(new Error(message.reason));
       }
+      return;
+    }
+
+    if (message.type === "artifact.action.assigned") {
+      void (async () => {
+        try {
+          const result = await handleArtifactAction({
+            env,
+            logger,
+            message,
+          });
+
+          send(ws, {
+            type: "artifact.action.completed",
+            actionId: message.actionId,
+            result,
+            status: "succeeded",
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "artifact.action.completed",
+            actionId: message.actionId,
+            error: error instanceof Error ? error.message : String(error),
+            status: "failed",
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, actionId: message.actionId },
+            "Artifact action failed",
+          );
+        }
+      })();
       return;
     }
 
@@ -232,8 +353,12 @@ export async function startDaemon(): Promise<void> {
           taskId: upload.taskId,
           title: upload.title,
           filename: upload.filename,
+          kind: upload.kind,
+          metadata: upload.metadata,
           mimeType: upload.mimeType,
           sizeBytes: upload.sizeBytes,
+          targetPath: upload.targetPath,
+          displayMode: upload.displayMode,
           contentBase64: upload.contentBase64,
           sentAt: nowIsoDateTime(),
         });

@@ -2,9 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentHubRedisClient, RunQueueJob } from "../../src";
 import {
+  ackArtifactActionQueueMessage,
   ackRunQueueMessage,
+  artifactActionQueueGroup,
+  artifactActionQueueStream,
+  enqueueArtifactActionJob,
   enqueueRunJob,
   ensureRunQueueGroup,
+  readArtifactActionQueueMessages,
   readRunQueueMessages,
   runQueueGroup,
   runQueueStream,
@@ -105,5 +110,55 @@ describe("run queue", () => {
     );
 
     expect(redis.xAck).toHaveBeenCalledWith(runQueueStream, runQueueGroup, "1-0");
+  });
+
+  it("enqueues and reads artifact action jobs", async () => {
+    const job = {
+      actionId: "00000000-0000-4000-8000-000000000010",
+      actionType: "apply" as const,
+      artifactId: "00000000-0000-4000-8000-000000000011",
+      daemonDeviceId: "local-dev",
+      workspacePath: "/workspace",
+    };
+    const redis = {
+      xAdd: vi.fn().mockResolvedValue("2-0"),
+      xReadGroup: vi.fn().mockResolvedValue([
+        {
+          name: artifactActionQueueStream,
+          messages: [
+            {
+              id: "2-0",
+              message: {
+                payload: JSON.stringify(job),
+              },
+            },
+          ],
+        },
+      ]),
+      xAck: vi.fn().mockResolvedValue(1),
+    };
+
+    await expect(
+      enqueueArtifactActionJob(redis as unknown as AgentHubRedisClient, job),
+    ).resolves.toBe("2-0");
+    await expect(
+      readArtifactActionQueueMessages(
+        redis as unknown as AgentHubRedisClient,
+        "worker-a",
+      ),
+    ).resolves.toEqual([{ id: "2-0", job }]);
+    await ackArtifactActionQueueMessage(
+      redis as unknown as AgentHubRedisClient,
+      "2-0",
+    );
+
+    expect(redis.xAdd).toHaveBeenCalledWith(artifactActionQueueStream, "*", {
+      payload: JSON.stringify(job),
+    });
+    expect(redis.xAck).toHaveBeenCalledWith(
+      artifactActionQueueStream,
+      artifactActionQueueGroup,
+      "2-0",
+    );
   });
 });

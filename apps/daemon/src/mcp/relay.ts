@@ -286,7 +286,11 @@ function readUploadArtifactInput(
   const title = record.title;
   const localPath = record.localPath;
   const filename = record.filename;
+  const kind = record.kind;
+  const metadata = record.metadata;
   const mimeType = record.mimeType;
+  const targetPath = record.targetPath;
+  const displayMode = record.displayMode;
 
   if (
     typeof taskId !== "string" ||
@@ -308,9 +312,24 @@ function readUploadArtifactInput(
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
         : undefined,
+    kind: typeof kind === "string" && kind.trim().length > 0
+      ? kind.trim() as AgentHubUploadArtifactToolInput["kind"]
+      : undefined,
+    metadata:
+      typeof metadata === "object" && metadata !== null && !Array.isArray(metadata)
+        ? metadata as Record<string, unknown>
+        : undefined,
     mimeType:
       typeof mimeType === "string" && mimeType.trim().length > 0
         ? mimeType.trim()
+        : undefined,
+    targetPath:
+      typeof targetPath === "string" && targetPath.trim().length > 0
+        ? targetPath.trim()
+        : undefined,
+    displayMode:
+      typeof displayMode === "string" && displayMode.trim().length > 0
+        ? displayMode.trim() as AgentHubUploadArtifactToolInput["displayMode"]
         : undefined,
   };
 }

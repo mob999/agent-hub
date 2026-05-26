@@ -22,6 +22,23 @@ export function conversationArtifactStorageKey(input: {
   ].join("/");
 }
 
+export function conversationArtifactRevisionStorageKey(input: {
+  artifactId: string;
+  conversationId: string;
+  filename: string;
+  revisionId: string;
+}): string {
+  return [
+    "conversations",
+    input.conversationId,
+    "artifacts",
+    input.artifactId,
+    "revisions",
+    input.revisionId,
+    sanitizeArtifactFilename(input.filename),
+  ].join("/");
+}
+
 export function resolveStorageKey(storageRoot: string, storageKey: string): string {
   const normalizedKey = storageKey.split("/").filter(Boolean).join(path.sep);
   const root = path.resolve(storageRoot);
@@ -46,6 +63,19 @@ export async function writeArtifactContent(input: {
   await writeFile(filePath, content);
 
   return content.byteLength;
+}
+
+export async function writeArtifactTextContent(input: {
+  content: string;
+  storageKey: string;
+  storageRoot: string;
+}): Promise<number> {
+  const filePath = resolveStorageKey(input.storageRoot, input.storageKey);
+
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, input.content, "utf8");
+
+  return Buffer.byteLength(input.content, "utf8");
 }
 
 export async function readArtifactContent(input: {

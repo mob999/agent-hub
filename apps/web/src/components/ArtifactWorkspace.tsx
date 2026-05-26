@@ -478,7 +478,7 @@ export function ArtifactWorkspace({
                 />
               </div>
               <div className="min-h-0 min-w-0 overflow-hidden border-l border-[var(--cds-border-subtle-01)] max-[1055px]:border-l-0 max-[1055px]:border-t">
-                <div ref={markdownPreviewRef} className="h-full min-h-0 overflow-y-auto px-6 py-4">
+                <div ref={markdownPreviewRef} className="h-full min-h-0 overflow-y-auto p-3">
                   <MessageContent className="block text-sm leading-5" content={draft} />
                 </div>
               </div>

@@ -207,7 +207,7 @@ export function ChannelWorkspace({
   const userDisplayName = user?.name?.trim() || user?.email || 'User'
   const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
-  const canOpenWorkspacePanel = hasSelectedConversation && !isAgentDirectMessage
+  const canOpenWorkspacePanel = hasSelectedConversation
   const chatTitleClassName =
     hasSelectedConversation && !isAgentDirectMessage
       ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
@@ -413,18 +413,20 @@ export function ChannelWorkspace({
 
       <div
         ref={scrollContainerRef}
-        className={`min-h-0 px-6 py-4 max-[1055px]:px-4 ${
+        className={`min-h-0 p-2 ${
           showEditor ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
         aria-live="polite"
       >
         {showWorkspacePage && showTasks ? (
-          <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
+          <div className="grid w-full content-start gap-4">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
               <div>
                 <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Tasks</h2>
                 <p className="text-sm text-[var(--cds-text-secondary)]">
-                  Work created by the group orchestrator for {chatDisplayName}.
+                  {isAgentDirectMessage
+                    ? `Work tracked in your private conversation with ${chatDisplayName}.`
+                    : `Work created by the group orchestrator for ${chatDisplayName}.`}
                 </p>
               </div>
               <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
@@ -436,7 +438,9 @@ export function ChannelWorkspace({
                 <Task size={32} />
                 <h2 className="cds--type-heading-compact-02">No tasks yet</h2>
                 <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
-                  Send a group message in Task mode. The orchestrator can create tasks and assign them to agents.
+                  {isAgentDirectMessage
+                    ? 'Private tasks from this conversation will appear here.'
+                    : 'Send a group message in Task mode. The orchestrator can create tasks and assign them to agents.'}
                 </p>
               </div>
             ) : (
@@ -504,7 +508,7 @@ export function ChannelWorkspace({
             )}
           </div>
         ) : showWorkspacePage && showEditor ? (
-          <div className="mx-auto grid h-full min-h-0 w-full max-w-[86rem]">
+          <div className="grid h-full min-h-0 w-full">
             <ArtifactWorkspace
               artifacts={artifacts}
               activeArtifactId={activeArtifactId}
@@ -513,12 +517,12 @@ export function ChannelWorkspace({
             />
           </div>
         ) : showWorkspacePage && showFiles ? (
-          <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
+          <div className="grid w-full content-start gap-4">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
               <div>
                 <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Files</h2>
                 <p className="text-sm text-[var(--cds-text-secondary)]">
-                  Reports uploaded to the {chatDisplayName} workspace.
+                  Files uploaded to the {chatDisplayName} workspace.
                 </p>
               </div>
               <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
@@ -530,7 +534,9 @@ export function ChannelWorkspace({
                 <Folder size={32} />
                 <h2 className="cds--type-heading-compact-02">No files yet</h2>
                 <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
-                  Assigned agents can upload report files after completing tasks.
+                  {isAgentDirectMessage
+                    ? 'Files created by this private agent conversation will appear here.'
+                    : 'Assigned agents can upload report files after completing tasks.'}
                 </p>
               </div>
             ) : (
@@ -597,7 +603,7 @@ export function ChannelWorkspace({
             </p>
           </div>
         ) : (
-          <div className="mx-auto grid w-full max-w-[68rem] gap-4">
+          <div className="grid w-full gap-4">
             {visibleMessages.map((message) => {
               const senderAgent =
                 message.senderAgentId === undefined

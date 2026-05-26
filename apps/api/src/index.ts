@@ -5,7 +5,11 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
-import type { RuntimeKind } from "@agent-hub/core";
+import type { AgentHubMcpToolName, RuntimeKind } from "@agent-hub/core";
+import {
+  agentHubAllMcpTools,
+  agentHubNonOrchestratorMcpTools,
+} from "@agent-hub/core";
 import {
   appendRunEvent,
   createAgentProvisioningRecords,
@@ -137,6 +141,15 @@ function parseOptionalAgentId(value: unknown): string | undefined {
   return typeof value === "string" && uuidPattern.test(value)
     ? value
     : undefined;
+}
+
+function groupChatMcpToolsForAgent(input: {
+  agentId: string;
+  orchestratorAgentId?: string;
+}): AgentHubMcpToolName[] {
+  return input.orchestratorAgentId === input.agentId
+    ? [...agentHubAllMcpTools]
+    : [...agentHubNonOrchestratorMcpTools];
 }
 
 function buildGroupChatAgentInstructions(input: {
@@ -1321,7 +1334,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         agentInstructions: buildAgentInstructions(orchestrator.agent.description),
         conversationTitle: conversation.title,
       }),
-      agentHubMcpTools: ["create_task", "send_message"],
+      agentHubMcpTools: [...agentHubAllMcpTools],
       workspacePath: orchestrator.workspacePath,
       run: {
         id: randomUUID(),
@@ -1427,7 +1440,10 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       agentInstructions: buildAgentInstructions(runAgent.agent.description),
       conversationTitle: conversation.title,
     }),
-    agentHubMcpTools: ["send_message"],
+    agentHubMcpTools: groupChatMcpToolsForAgent({
+      agentId: runAgent.agent.id,
+      orchestratorAgentId: conversation.orchestratorAgentId,
+    }),
     workspacePath: runAgent.workspacePath,
     run: {
       id: randomUUID(),

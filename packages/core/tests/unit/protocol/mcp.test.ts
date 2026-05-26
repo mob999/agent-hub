@@ -7,9 +7,27 @@ import type {
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
 } from "../../../src/protocol";
+import {
+  agentHubAllMcpTools,
+  agentHubNonOrchestratorMcpTools,
+} from "../../../src/protocol";
 import { describe, expect, it } from "vitest";
 
 describe("AgentHub MCP protocol", () => {
+  it("defines orchestrator and non-orchestrator tool sets", () => {
+    expect(agentHubAllMcpTools).toEqual([
+      "send_message",
+      "create_task",
+      "upload_artifact",
+      "complete_task",
+    ]);
+    expect(agentHubNonOrchestratorMcpTools).toEqual([
+      "send_message",
+      "upload_artifact",
+      "complete_task",
+    ]);
+  });
+
   it("expresses send_message with mentions and task ids", () => {
     const input: AgentHubSendMessageToolInput = {
       content: "Deploying this to @Codex",

@@ -17,6 +17,10 @@ import type {
   RunEvent,
 } from "@agent-hub/core";
 import {
+  agentHubAllMcpTools,
+  agentHubNonOrchestratorMcpTools,
+} from "@agent-hub/core";
+import {
   agents,
   conversationAgentMembers,
   conversationArtifactActions,
@@ -1951,7 +1955,7 @@ async function maybeCreateFinalizationRun(
       "You are the Orchestrator finalizing a completed group Task mode workflow.",
       "Use only AgentHub MCP send_message for the visible final response.",
     ].filter((line): line is string => line !== undefined).join("\n\n"),
-    agentHubMcpTools: ["send_message"],
+    agentHubMcpTools: [...agentHubAllMcpTools],
     workspacePath: runAgent.workspacePath,
     run: {
       id: runId,
@@ -2308,11 +2312,7 @@ export async function appendRunEventToConversationMessage(
               agentDescription: runAgent.agent.description,
               conversationTitle: conversation.title,
             }),
-            agentHubMcpTools: [
-              "send_message",
-              "upload_artifact",
-              "complete_task",
-            ],
+            agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
             workspacePath: runAgent.workspacePath,
             run: {
               id: runId,

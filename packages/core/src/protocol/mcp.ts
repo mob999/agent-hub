@@ -15,6 +15,19 @@ export type AgentHubMcpToolName =
   | "upload_artifact"
   | "complete_task";
 
+export const agentHubAllMcpTools = [
+  "send_message",
+  "create_task",
+  "upload_artifact",
+  "complete_task",
+] as const satisfies readonly AgentHubMcpToolName[];
+
+export const agentHubNonOrchestratorMcpTools = [
+  "send_message",
+  "upload_artifact",
+  "complete_task",
+] as const satisfies readonly AgentHubMcpToolName[];
+
 export interface AgentHubSendMessageToolInput {
   content: string;
   mentions?: ConversationMention[];

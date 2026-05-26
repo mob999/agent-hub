@@ -15,7 +15,7 @@ interface AppRailProps {
 const railButton =
   'grid h-10 w-10 cursor-pointer place-items-center border border-transparent bg-transparent text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const activeRailButton =
-  'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)]'
+  'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] shadow-[inset_3px_0_0_var(--cds-text-primary)] hover:bg-[var(--cds-layer-01)]'
 
 export function AppRail({
   user,
@@ -74,6 +74,7 @@ export function AppRail({
           className={`${railButton} ${activeView === 'chat' ? activeRailButton : ''}`}
           type="button"
           aria-label="Chat"
+          aria-current={activeView === 'chat' ? 'page' : undefined}
           onClick={() => setActiveView('chat')}
         >
           <Chat size={20} />
@@ -82,6 +83,7 @@ export function AppRail({
           className={`${railButton} ${activeView === 'runs' ? activeRailButton : ''}`}
           type="button"
           aria-label="Runs"
+          aria-current={activeView === 'runs' ? 'page' : undefined}
           onClick={() => setActiveView('runs')}
         >
           <JobRun size={20} />
@@ -90,6 +92,7 @@ export function AppRail({
           className={`${railButton} ${activeView === 'daemon' ? activeRailButton : ''}`}
           type="button"
           aria-label="Daemon"
+          aria-current={activeView === 'daemon' ? 'page' : undefined}
           onClick={() => setActiveView('daemon')}
         >
           <Devices size={20} />

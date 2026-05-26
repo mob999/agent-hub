@@ -21,6 +21,10 @@ const selectedListItem =
 const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 
+function isAgentReady(agent: AgentDetails): boolean {
+  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
+}
+
 function isAgentPending(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
 }
@@ -62,7 +66,9 @@ export function ChatSidebar({
         <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
           <Activity size={16} />
           <span>Activity</span>
-          <span className="font-semibold text-[var(--cds-text-primary)]">{activeRunCount}</span>
+          <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
+            {activeRunCount}
+          </span>
         </button>
         <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)] gap-3 px-3 py-2`} type="button">
           <Bookmark size={16} />
@@ -130,7 +136,7 @@ export function ChatSidebar({
                 <button
                   className={`${sidebarButton} ${
                     agentSelected ? selectedListItem : transparentListItem
-                  } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.25rem] gap-2 px-3 py-2`}
+                  } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
                   type="button"
                   key={agent.agent.id}
                   aria-current={agentSelected ? 'page' : undefined}
@@ -147,6 +153,14 @@ export function ChatSidebar({
                       description="Creating agent"
                       className="justify-self-end"
                     />
+                  ) : isAgentReady(agent) ? (
+                    <span className="grid h-6 w-6 place-items-center justify-self-end" title="Ready">
+                      <span
+                        className="h-2 w-2 rounded-full bg-[var(--cds-support-success)]"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">Ready</span>
+                    </span>
                   ) : (
                     <span aria-hidden="true" />
                   )}

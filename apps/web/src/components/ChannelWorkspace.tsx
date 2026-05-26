@@ -1,8 +1,8 @@
 import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { useState } from 'react'
-import type { AgentDetails, Conversation, ConversationMessage, User } from '../lib/api'
+import { useEffect, useMemo, useState } from 'react'
+import type { AgentDetails, Conversation, ConversationMention, ConversationMessage, User } from '../lib/api'
 import { formatTime } from '../lib/format'
 
 const inlineLink =
@@ -20,7 +20,11 @@ interface ChannelWorkspaceProps {
   readyAgentCount: number
   canEditConversation: boolean
   setPrompt: (value: string) => void
-  submitRun: (event: FormEvent<HTMLFormElement>, mode: 'chat' | 'task') => void
+  submitRun: (
+    event: FormEvent<HTMLFormElement>,
+    mode: 'chat' | 'task',
+    mentions: ConversationMention[],
+  ) => void
   openCreateAgent: () => void
   openEditConversation: () => void
 }
@@ -31,6 +35,20 @@ function isAgentReady(agent: AgentDetails): boolean {
 
 function displayNameInitial(name: string): string {
   return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
+}
+
+function mentionSearchTerm(value: string): string | null {
+  const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(value)
+
+  return match?.[1]?.toLowerCase() ?? null
+}
+
+function replaceActiveMention(value: string, agentName: string): string {
+  return value.replace(/(?:^|\s)@([\p{L}\p{N}_-]*)$/u, (match) => {
+    const prefix = match.startsWith('@') ? '' : ' '
+
+    return `${prefix}@${agentName} `
+  })
 }
 
 export function ChannelWorkspace({
@@ -49,6 +67,7 @@ export function ChannelWorkspace({
   openEditConversation,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
+  const [mentions, setMentions] = useState<ConversationMention[]>([])
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -67,6 +86,32 @@ export function ChannelWorkspace({
               groupAgentIds.includes(agent.agent.id) &&
               isAgentReady(agent),
           ).length
+  const mentionableAgents = useMemo(() => {
+    if (activeConversation?.type !== 'group') {
+      return []
+    }
+
+    const memberIds = activeConversation.agentIds ?? []
+
+    return agents
+      .filter(
+        (agent) =>
+          memberIds.includes(agent.agent.id) &&
+          isAgentReady(agent),
+      )
+      .sort((first, second) => first.agent.name.localeCompare(second.agent.name))
+  }, [activeConversation, agents])
+  const mentionTerm = hasSelectedConversation && !isAgentDirectMessage ? mentionSearchTerm(prompt) : null
+  const mentionSuggestions =
+    mentionTerm === null
+      ? []
+      : mentionableAgents
+          .filter(
+            (agent) =>
+              agent.agent.name.toLowerCase().includes(mentionTerm) &&
+              !mentions.some((mention) => mention.agentId === agent.agent.id),
+          )
+          .slice(0, 6)
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
     : hasSelectedConversation && readyGroupAgentCount > 0
@@ -155,6 +200,11 @@ export function ChannelWorkspace({
       ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
       : 'min-w-0 truncate text-xl font-semibold leading-tight'
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape' && mentionSuggestions.length > 0) {
+      event.preventDefault()
+      return
+    }
+
     if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) {
       return
     }
@@ -164,6 +214,33 @@ export function ChannelWorkspace({
       event.currentTarget.form?.requestSubmit()
     }
   }
+  const selectMention = (agent: AgentDetails) => {
+    setPrompt(replaceActiveMention(prompt, agent.agent.name))
+    setMentions((current) =>
+      current.some((mention) => mention.agentId === agent.agent.id)
+        ? current
+        : [
+            ...current,
+            {
+              type: 'agent',
+              agentId: agent.agent.id,
+              label: agent.agent.name,
+            },
+          ],
+    )
+  }
+  const removeMention = (agentId: string) => {
+    setMentions((current) => current.filter((mention) => mention.agentId !== agentId))
+  }
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    submitRun(event, composerMode, mentions)
+  }
+
+  useEffect(() => {
+    if (prompt.trim().length === 0 && mentions.length > 0) {
+      setMentions([])
+    }
+  }, [mentions.length, prompt])
 
   return (
     <section
@@ -310,7 +387,7 @@ export function ChannelWorkspace({
       <Form
         className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
         aria-label="Create run"
-        onSubmit={(event) => submitRun(event, composerMode)}
+        onSubmit={handleSubmit}
       >
         {hasSelectedConversation && !selectedAgentReady && (
           <InlineNotification
@@ -322,6 +399,22 @@ export function ChannelWorkspace({
           />
         )}
         <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
+          {mentions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+              {mentions.map((mention) => (
+                <button
+                  key={mention.agentId}
+                  type="button"
+                  className="inline-flex h-6 items-center gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] px-2 text-xs font-semibold text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-02)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  onClick={() => removeMention(mention.agentId)}
+                  aria-label={`Remove ${mention.label ?? 'agent'} mention`}
+                >
+                  @{mention.label ?? 'agent'}
+                  <span aria-hidden="true">x</span>
+                </button>
+              ))}
+            </div>
+          )}
           <label className="sr-only" htmlFor="run-prompt">
             {`Message ${chatDisplayName}`}
           </label>
@@ -335,6 +428,24 @@ export function ChannelWorkspace({
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={handleComposerKeyDown}
           />
+          {mentionSuggestions.length > 0 && (
+            <div className="mx-2 mb-1 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
+              {mentionSuggestions.map((agent) => (
+                <button
+                  key={agent.agent.id}
+                  type="button"
+                  className="flex min-h-10 cursor-pointer items-center gap-2 border-0 bg-transparent px-3 text-left text-sm text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-02)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]"
+                  onClick={() => selectMention(agent)}
+                >
+                  <span className="grid h-6 w-6 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
+                    {displayNameInitial(agent.agent.name)}
+                  </span>
+                  <span className="min-w-0 truncate font-semibold">@{agent.agent.name}</span>
+                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--cds-support-success)]" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex min-h-10 items-center gap-2 px-2 pb-2 pt-1 max-[671px]:flex-wrap">
             <div className="flex items-center gap-1.5" aria-label="Message tools">
               <button

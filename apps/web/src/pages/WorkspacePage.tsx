@@ -20,6 +20,7 @@ import {
   type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
+  type ConversationMention,
   type RuntimeKind,
   type RunEvent,
   type SendConversationMessageMode,
@@ -429,7 +430,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     return () => window.clearInterval(timer)
   }, [activeConversationId, activeConversationMessages, loadMessages, runs])
 
-  const submitRun = async (event: FormEvent<HTMLFormElement>, mode: SendConversationMessageMode) => {
+  const submitRun = async (
+    event: FormEvent<HTMLFormElement>,
+    mode: SendConversationMessageMode,
+    mentions: ConversationMention[],
+  ) => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt || isCreatingRun) {
@@ -467,6 +472,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           body: JSON.stringify({
             content: trimmedPrompt,
             mode,
+            ...(activeConversation.type === 'group' && mentions.length > 0
+              ? { mentions }
+              : {}),
           }),
         },
       )

@@ -59,6 +59,9 @@ type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export type CreateGroupConversationResult =
   | { status: "created"; conversation: Conversation }
   | { status: "reserved-key" }
@@ -1778,11 +1781,15 @@ function readCompleteTaskToolInput(
     : null;
 }
 
-function mentionAgentIds(input: AgentHubSendMessageToolInput): string[] {
+function mentionAgentReferences(input: AgentHubSendMessageToolInput): string[] {
   return compactUniqueStrings(
-    input.mentions
-      ?.filter((mention) => mention.type === "agent")
-      .map((mention) => mention.agentId) ?? [],
+    input.mentions?.flatMap((mention) => {
+      if (mention.type !== "agent") {
+        return [];
+      }
+
+      return [mention.agentId, mention.label];
+    }) ?? [],
   );
 }
 
@@ -1828,6 +1835,84 @@ async function isConversationAgentMember(
     .limit(1);
 
   return member !== undefined;
+}
+
+async function listConversationAgentRefs(
+  db: Db,
+  conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">,
+): Promise<Array<{ id: string; name: string }>> {
+  if (conversation.type !== "group") {
+    return [];
+  }
+
+  if (isDefaultGroup(conversation)) {
+    return db
+      .select({ id: agents.id, name: agents.name })
+      .from(agents)
+      .where(eq(agents.ownerUserId, conversation.ownerUserId));
+  }
+
+  return db
+    .select({ id: agents.id, name: agents.name })
+    .from(conversationAgentMembers)
+    .innerJoin(agents, eq(agents.id, conversationAgentMembers.agentId))
+    .where(eq(conversationAgentMembers.conversationId, conversation.id))
+    .orderBy(asc(conversationAgentMembers.position));
+}
+
+async function resolveConversationAgentReference(
+  db: Db,
+  input: {
+    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">;
+    reference: string;
+  },
+): Promise<string | null> {
+  const reference = input.reference.trim().replace(/^@/, "");
+
+  if (reference.length === 0) {
+    return null;
+  }
+
+  if (
+    uuidPattern.test(reference) &&
+    await isConversationAgentMember(db, {
+      agentId: reference,
+      conversation: input.conversation,
+    })
+  ) {
+    return reference;
+  }
+
+  const normalizedReference = reference.toLocaleLowerCase();
+  const agentRefs = await listConversationAgentRefs(db, input.conversation);
+  const match = agentRefs.find(
+    (agent) => agent.name.toLocaleLowerCase() === normalizedReference,
+  );
+
+  return match?.id ?? null;
+}
+
+async function resolveMentionedAgentIds(
+  db: Db,
+  input: {
+    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">;
+    message: AgentHubSendMessageToolInput;
+  },
+): Promise<string[]> {
+  const resolvedAgentIds: string[] = [];
+
+  for (const reference of mentionAgentReferences(input.message)) {
+    const agentId = await resolveConversationAgentReference(db, {
+      conversation: input.conversation,
+      reference,
+    });
+
+    if (agentId !== null) {
+      resolvedAgentIds.push(agentId);
+    }
+  }
+
+  return compactUniqueStrings(resolvedAgentIds);
 }
 
 function buildAssignedTaskPrompt(input: {
@@ -2144,9 +2229,26 @@ export async function appendRunEventToConversationMessage(
 
       if (
         conversation === undefined ||
-        conversation.orchestratorAgentId !== run.agentId ||
+        conversation.orchestratorAgentId !== run.agentId
+      ) {
+        return { dispatchJobs };
+      }
+
+      const assigneeAgentId = await resolveConversationAgentReference(db, {
+        conversation,
+        reference: input.assigneeAgentId,
+      });
+
+      if (assigneeAgentId === null) {
+        return { dispatchJobs };
+      }
+
+      const isSelfAssigned = assigneeAgentId === run.agentId;
+
+      if (
+        !isSelfAssigned &&
         !(await isConversationAgentMember(db, {
-          agentId: input.assigneeAgentId,
+          agentId: assigneeAgentId,
           conversation,
         }))
       ) {
@@ -2162,10 +2264,11 @@ export async function appendRunEventToConversationMessage(
           conversationId: conversation.id,
           creatorRunId: event.runId,
           orchestratorAgentId: run.agentId,
-          assigneeAgentId: input.assigneeAgentId,
+          assigneeAgentId,
+          assigneeRunId: isSelfAssigned ? event.runId : undefined,
           title: input.title,
           description: input.description,
-          status: "created",
+          status: isSelfAssigned ? "running" : "created",
           createdAt,
           updatedAt: createdAt,
         })
@@ -2319,26 +2422,34 @@ export async function appendRunEventToConversationMessage(
       }).returning();
 
       const taskIds = compactUniqueStrings(input.taskIds ?? []);
-      const mentionedAgentIds = mentionAgentIds(input);
+      const mentionedAgentIds = await resolveMentionedAgentIds(db, {
+        conversation,
+        message: input,
+      });
 
-      if (taskIds.length > 0 && mentionedAgentIds.length > 0) {
+      if (taskIds.length > 0) {
         const conversationTaskRows = await tx
           .select()
           .from(conversationTasks)
           .where(eq(conversationTasks.conversationId, conversation.id))
           .orderBy(asc(conversationTasks.createdAt));
         const agentHubMcpTasks = toMcpTaskListFromRows(conversationTaskRows);
+        const taskWhere = [
+          eq(conversationTasks.conversationId, conversation.id),
+          eq(conversationTasks.creatorRunId, event.runId),
+          eq(conversationTasks.orchestratorAgentId, run.agentId),
+          inArray(conversationTasks.id, taskIds),
+          eq(conversationTasks.status, "created"),
+        ];
         const taskRows = await tx
           .select()
           .from(conversationTasks)
           .where(
             and(
-              eq(conversationTasks.conversationId, conversation.id),
-              eq(conversationTasks.creatorRunId, event.runId),
-              eq(conversationTasks.orchestratorAgentId, run.agentId),
-              inArray(conversationTasks.id, taskIds),
-              inArray(conversationTasks.assigneeAgentId, mentionedAgentIds),
-              eq(conversationTasks.status, "created"),
+              ...taskWhere,
+              ...(mentionedAgentIds.length === 0
+                ? []
+                : [inArray(conversationTasks.assigneeAgentId, mentionedAgentIds)]),
             ),
           )
           .orderBy(asc(conversationTasks.createdAt));

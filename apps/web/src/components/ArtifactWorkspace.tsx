@@ -1,7 +1,8 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
-import { useEffect, useMemo, useState } from 'react'
+import type { editor as MonacoEditor } from 'monaco-editor'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ConversationArtifact,
   ConversationArtifactAction,
@@ -91,6 +92,10 @@ export function ArtifactWorkspace({
   const [isSaving, setIsSaving] = useState(false)
   const [runningAction, setRunningAction] = useState<ConversationArtifactActionType | null>(null)
   const [leftInfoPanel, setLeftInfoPanel] = useState<'metadata' | 'history' | null>(null)
+  const markdownEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const markdownScrollDisposableRef = useRef<{ dispose: () => void } | null>(null)
+  const markdownContentDisposableRef = useRef<{ dispose: () => void } | null>(null)
+  const markdownPreviewRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (selectedArtifact === null) {
@@ -140,6 +145,70 @@ export function ArtifactWorkspace({
     (artifact.kind === 'file' || artifact.kind === 'report' || artifact.kind === 'document')
   const isMarkdown = artifact?.kind === 'report' || artifact?.kind === 'document' || languageFromFilename(artifact?.filename ?? '') === 'markdown'
   const originalDiff = readMetadataString(artifact?.metadata, 'originalContent') ?? ''
+
+  const syncMarkdownPreviewScroll = useCallback(() => {
+    const editor = markdownEditorRef.current
+    const preview = markdownPreviewRef.current
+
+    if (editor === null || preview === null) {
+      return
+    }
+
+    const editorScrollMax = Math.max(0, editor.getScrollHeight() - editor.getLayoutInfo().height)
+    const previewScrollMax = Math.max(0, preview.scrollHeight - preview.clientHeight)
+
+    if (editorScrollMax === 0 || previewScrollMax === 0) {
+      preview.scrollTop = 0
+      return
+    }
+
+    preview.scrollTop = (editor.getScrollTop() / editorScrollMax) * previewScrollMax
+  }, [])
+
+  const handleMarkdownEditorMount = useCallback(
+    (editor: MonacoEditor.IStandaloneCodeEditor) => {
+      markdownScrollDisposableRef.current?.dispose()
+      markdownContentDisposableRef.current?.dispose()
+      markdownEditorRef.current = editor
+      markdownScrollDisposableRef.current = editor.onDidScrollChange(syncMarkdownPreviewScroll)
+      markdownContentDisposableRef.current = editor.onDidContentSizeChange(syncMarkdownPreviewScroll)
+      requestAnimationFrame(syncMarkdownPreviewScroll)
+    },
+    [syncMarkdownPreviewScroll],
+  )
+
+  useEffect(() => {
+    if (!isMarkdown) {
+      markdownScrollDisposableRef.current?.dispose()
+      markdownContentDisposableRef.current?.dispose()
+      markdownScrollDisposableRef.current = null
+      markdownContentDisposableRef.current = null
+      markdownEditorRef.current = null
+      return
+    }
+
+    const preview = markdownPreviewRef.current
+
+    if (preview === null) {
+      return
+    }
+
+    requestAnimationFrame(syncMarkdownPreviewScroll)
+    const resizeObserver = new ResizeObserver(syncMarkdownPreviewScroll)
+    resizeObserver.observe(preview)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [draft, isMarkdown, selectedArtifactId, syncMarkdownPreviewScroll])
+
+  useEffect(
+    () => () => {
+      markdownScrollDisposableRef.current?.dispose()
+      markdownContentDisposableRef.current?.dispose()
+    },
+    [],
+  )
 
   const saveRevision = async () => {
     if (artifact === null || draft === content) {
@@ -397,16 +466,21 @@ export function ArtifactWorkspace({
               options={{ readOnly: true, minimap: { enabled: false } }}
             />
           ) : isMarkdown ? (
-            <div className="grid h-full min-h-0 grid-cols-2 overflow-hidden max-[1055px]:grid-cols-1">
-              <Editor
-                height="100%"
-                language="markdown"
-                value={draft}
-                options={{ minimap: { enabled: false }, readOnly: !canEdit, wordWrap: 'on' }}
-                onChange={(value) => setDraft(value ?? '')}
-              />
-              <div className="min-h-0 overflow-y-auto border-l border-[var(--cds-border-subtle-01)] p-4 max-[1055px]:border-l-0 max-[1055px]:border-t">
-                <MessageContent className="block whitespace-pre-wrap text-sm leading-5" content={draft} />
+            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[1055px]:grid-cols-1">
+              <div className="min-h-0 min-w-0 overflow-hidden">
+                <Editor
+                  height="100%"
+                  language="markdown"
+                  value={draft}
+                  options={{ minimap: { enabled: false }, readOnly: !canEdit, wordWrap: 'on' }}
+                  onMount={handleMarkdownEditorMount}
+                  onChange={(value) => setDraft(value ?? '')}
+                />
+              </div>
+              <div className="min-h-0 min-w-0 overflow-hidden border-l border-[var(--cds-border-subtle-01)] max-[1055px]:border-l-0 max-[1055px]:border-t">
+                <div ref={markdownPreviewRef} className="h-full min-h-0 overflow-y-auto px-6 py-4">
+                  <MessageContent className="block text-sm leading-5" content={draft} />
+                </div>
               </div>
             </div>
           ) : (

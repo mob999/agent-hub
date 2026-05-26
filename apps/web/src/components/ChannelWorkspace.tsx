@@ -1,7 +1,8 @@
-import { Form, IconButton, InlineLoading, InlineNotification, Tag, TextArea } from '@carbon/react'
-import { Add, ChatBot, Folder, JobRun, Send, Task } from '@carbon/react/icons'
-import type { FormEvent } from 'react'
-import type { AgentDetails, Conversation, ConversationMessage } from '../lib/api'
+import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
+import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Task } from '@carbon/react/icons'
+import type { FormEvent, KeyboardEvent } from 'react'
+import { useState } from 'react'
+import type { AgentDetails, Conversation, ConversationMessage, User } from '../lib/api'
 import { formatTime } from '../lib/format'
 
 const inlineLink =
@@ -12,6 +13,7 @@ interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
   agents: AgentDetails[]
+  user: User | null
   prompt: string
   isCreatingRun: boolean
   runError: string | null
@@ -25,26 +27,15 @@ function isAgentReady(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
 }
 
-function messageStatusTagType(status: ConversationMessage['status']): 'green' | 'blue' | 'red' | 'gray' {
-  if (status === 'completed') {
-    return 'green'
-  }
-
-  if (status === 'streaming') {
-    return 'blue'
-  }
-
-  if (status === 'failed') {
-    return 'red'
-  }
-
-  return 'gray'
+function displayNameInitial(name: string): string {
+  return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
 }
 
 export function ChannelWorkspace({
   activeConversation,
   messages,
   agents,
+  user,
   prompt,
   isCreatingRun,
   runError,
@@ -53,6 +44,7 @@ export function ChannelWorkspace({
   submitRun,
   openCreateAgent,
 }: ChannelWorkspaceProps) {
+  const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -120,6 +112,31 @@ export function ChannelWorkspace({
     : isAgentDirectMessage
       ? `Private chat ${chatTitle}`
       : 'Channel all'
+  const isAgentTyping = messages.some(
+    (message) => message.senderType === 'agent' && message.status === 'streaming',
+  )
+  const visibleMessages = messages.filter(
+    (message) =>
+      !(
+        message.senderType === 'agent' &&
+        message.status === 'streaming' &&
+        message.content.trim().length === 0 &&
+        !message.error
+      ),
+  )
+  const userDisplayName = user?.name?.trim() || user?.email || 'User'
+  const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
+  const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) {
+      return
+    }
+
+    event.preventDefault()
+    if (canSendMessage) {
+      event.currentTarget.form?.requestSubmit()
+    }
+  }
 
   return (
     <section
@@ -136,7 +153,18 @@ export function ChannelWorkspace({
             {!hasSelectedConversation || isAgentDirectMessage ? <ChatBot size={20} /> : '#'}
           </span>
           <div className="grid min-w-0 gap-0.5">
-            <h1 className="truncate text-xl font-semibold leading-tight">{chatTitle}</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="min-w-0 truncate text-xl font-semibold leading-tight">{chatTitle}</h1>
+              {isAgentTyping && (
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-[var(--cds-text-primary)]">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-[var(--cds-support-info)]"
+                    aria-hidden="true"
+                  />
+                  输入中
+                </span>
+              )}
+            </div>
             <p className="truncate text-sm leading-snug text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
               {chatDescription}
             </p>
@@ -173,7 +201,7 @@ export function ChannelWorkspace({
       </div>
 
       <div className="min-h-0 overflow-y-auto px-6 py-4 max-[1055px]:px-4" aria-live="polite">
-        {messages.length === 0 ? (
+        {visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
             <h2 className="cds--type-heading-compact-02">{emptyTitle}</h2>
@@ -183,17 +211,18 @@ export function ChannelWorkspace({
           </div>
         ) : (
           <div className="mx-auto grid w-full max-w-[68rem] gap-4">
-            {messages.map((message) => {
+            {visibleMessages.map((message) => {
               const senderAgent =
                 message.senderAgentId === undefined
                   ? null
                   : agents.find((agent) => agent.agent.id === message.senderAgentId) ?? null
               const senderName =
                 message.senderType === 'user'
-                  ? 'You'
+                  ? userDisplayName
                   : message.senderType === 'agent'
                     ? senderAgent?.agent.name ?? 'Agent'
                     : 'System'
+              const avatarInitial = displayNameInitial(senderName)
 
               return (
                 <article
@@ -204,23 +233,16 @@ export function ChannelWorkspace({
                     className="grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm font-semibold max-[671px]:h-7 max-[671px]:w-7"
                     aria-hidden="true"
                   >
-                    {message.senderType === 'user' ? 'Y' : message.senderType === 'agent' ? 'A' : 'S'}
+                    {avatarInitial}
                   </span>
                   <span className="grid min-w-0 gap-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <strong>{senderName}</strong>
-                      {message.senderType !== 'user' && (
-                        <Tag type={messageStatusTagType(message.status)} size="sm">
-                          {message.status}
-                        </Tag>
-                      )}
                       <time className="text-xs text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
                         {formatTime(message.updatedAt)}
                       </time>
                     </span>
-                    <span className={messageBodyClass}>
-                      {message.content || (message.status === 'streaming' ? 'Thinking...' : '')}
-                    </span>
+                    {message.content && <span className={messageBodyClass}>{message.content}</span>}
                     {message.error && (
                       <span className="text-xs text-[var(--cds-text-error)]">
                         {message.error}
@@ -240,7 +262,7 @@ export function ChannelWorkspace({
       </div>
 
       <Form
-        className="grid gap-2 border-t border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-4 pb-4 pt-3"
+        className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
         aria-label="Create run"
         onSubmit={submitRun}
       >
@@ -253,37 +275,70 @@ export function ChannelWorkspace({
             hideCloseButton
           />
         )}
-        <TextArea
-          id="run-prompt"
-          labelText={isAgentDirectMessage ? `Message ${chatTitle}` : 'Message #all'}
-          hideLabel
-          rows={3}
-          value={prompt}
-          placeholder={composerPlaceholder}
-          disabled={isCreatingRun || !selectedAgentReady}
-          onChange={(event) => setPrompt(event.target.value)}
-        />
-        <div className="flex items-center justify-between gap-4 max-[671px]:flex-wrap max-[671px]:items-start">
-          <div className="flex gap-1.5" aria-label="Message tools">
-            <button
-              className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-              type="button"
-              aria-label="Add attachment"
-            >
-              <Add size={16} />
-            </button>
-            <button
-              className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-              type="button"
-              aria-label="Run task"
-            >
-              <JobRun size={16} />
-            </button>
-          </div>
-          <label className="ml-auto inline-flex items-center gap-1.5 text-sm text-[var(--cds-text-secondary)] max-[671px]:ml-0">
-            <input type="checkbox" checked readOnly />
-            <span>As task</span>
+        <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
+          <label className="sr-only" htmlFor="run-prompt">
+            {isAgentDirectMessage ? `Message ${chatTitle}` : 'Message #all'}
           </label>
+          <textarea
+            id="run-prompt"
+            className="min-h-16 w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+            rows={2}
+            value={prompt}
+            placeholder={composerPlaceholder}
+            disabled={isCreatingRun || !selectedAgentReady}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+          />
+          <div className="flex min-h-10 items-center gap-2 px-2 pb-2 pt-1 max-[671px]:flex-wrap">
+            <div className="flex items-center gap-1.5" aria-label="Message tools">
+              <button
+                className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+                type="button"
+                aria-label="Add image"
+                disabled={isCreatingRun || !selectedAgentReady}
+              >
+                <ImageIcon size={16} />
+              </button>
+              <button
+                className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+                type="button"
+                aria-label="Attach file"
+                disabled={isCreatingRun || !selectedAgentReady}
+              >
+                <Attachment size={16} />
+              </button>
+            </div>
+            {showComposerModeSwitch && (
+              <div
+                className="ml-1 inline-flex h-8 overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+                role="group"
+                aria-label="Message mode"
+              >
+                {(['chat', 'task'] as const).map((mode) => {
+                  const selected = composerMode === mode
+
+                  return (
+                    <button
+                      className={`min-w-14 cursor-pointer border-0 px-3 text-sm font-semibold capitalize focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                        selected
+                          ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
+                          : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                      }`}
+                      type="button"
+                      key={mode}
+                      aria-pressed={selected}
+                      onClick={() => setComposerMode(mode)}
+                    >
+                      {mode}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <div className="ml-auto flex items-center gap-3">
+              <span className="hidden text-xs text-[var(--cds-text-secondary)] sm:inline">
+                Ctrl+Enter
+              </span>
           {isCreatingRun ? (
             <InlineLoading description="Queueing run..." status="active" />
           ) : (
@@ -293,11 +348,13 @@ export function ChannelWorkspace({
               kind="primary"
               size="md"
               align="top-end"
-              disabled={prompt.trim().length === 0 || !selectedAgentReady}
+              disabled={!canSendMessage}
             >
-              <Send size={20} />
+              <SendAltFilled size={18} />
             </IconButton>
           )}
+            </div>
+          </div>
         </div>
       </Form>
     </section>

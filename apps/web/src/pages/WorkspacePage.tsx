@@ -631,6 +631,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             activeConversation={activeConversation}
             messages={activeConversationMessages}
             agents={agents}
+            user={user}
             prompt={prompt}
             isCreatingRun={isCreatingRun}
             runError={runError ?? agentError}

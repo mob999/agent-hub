@@ -1,5 +1,5 @@
 import { Activity, Add, Bookmark, ChatBot, Search } from '@carbon/react/icons'
-import { Tag } from '@carbon/react'
+import { Loading, Tag } from '@carbon/react'
 import type { AgentDetails, Conversation } from '../lib/api'
 
 interface ChatSidebarProps {
@@ -21,24 +21,8 @@ const selectedListItem =
 const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 
-function isAgentReady(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
-}
-
-function agentStatusTag(agent: AgentDetails): { type: 'green' | 'blue' | 'red' | 'gray'; label: string } {
-  if (isAgentReady(agent)) {
-    return { type: 'green', label: 'ready' }
-  }
-
-  if (agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending') {
-    return { type: 'blue', label: 'pending' }
-  }
-
-  if (agent.runtimeBinding.status === 'unavailable' || agent.workspace.status === 'unavailable') {
-    return { type: 'red', label: 'error' }
-  }
-
-  return { type: 'gray', label: agent.runtimeBinding.status }
+function isAgentPending(agent: AgentDetails): boolean {
+  return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
 }
 
 export function ChatSidebar({
@@ -138,7 +122,6 @@ export function ChatSidebar({
         ) : (
           <div className="grid gap-1">
             {agents.map((agent) => {
-              const status = agentStatusTag(agent)
               const agentSelected =
                 activeConversation?.type === 'direct' &&
                 activeConversation.directAgentId === agent.agent.id
@@ -147,17 +130,26 @@ export function ChatSidebar({
                 <button
                   className={`${sidebarButton} ${
                     agentSelected ? selectedListItem : transparentListItem
-                  } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-2 px-3`}
+                  } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.25rem] gap-2 px-3 py-2`}
                   type="button"
                   key={agent.agent.id}
                   aria-current={agentSelected ? 'page' : undefined}
                   onClick={() => selectAgent(agent.agent.id)}
                 >
-                  <ChatBot size={16} />
-                  <span className="truncate">{agent.agent.name}</span>
-                  <Tag type={status.type} size="sm">
-                    {status.label}
-                  </Tag>
+                  <span className="grid h-6 w-5 place-items-center" aria-hidden="true">
+                    <ChatBot size={16} />
+                  </span>
+                  <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
+                  {isAgentPending(agent) ? (
+                    <Loading
+                      small
+                      withOverlay={false}
+                      description="Creating agent"
+                      className="justify-self-end"
+                    />
+                  ) : (
+                    <span aria-hidden="true" />
+                  )}
                 </button>
               )
             })}

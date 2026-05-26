@@ -37,17 +37,21 @@ describe("conversation prompt builder", () => {
         createMessage({ senderType: "user", content: "Build the page." }),
         createMessage({
           senderType: "agent",
+          senderAgentId: "00000000-0000-4000-8000-000000000003",
           content: "The page is implemented.",
         }),
         createMessage({ senderType: "agent", content: "   " }),
       ],
+      agentNamesById: {
+        "00000000-0000-4000-8000-000000000003": "dudu",
+      },
     });
 
     expect(prompt).toBe([
       "<conversation_history>",
       "User:\nBuild the page.",
       "",
-      "Agent:\nThe page is implemented.",
+      "dudu:\nThe page is implemented.",
       "</conversation_history>",
       "",
       "<user_request>",

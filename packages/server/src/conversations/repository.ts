@@ -255,26 +255,32 @@ export function toConversationTask(
   };
 }
 
-function conversationPromptRole(message: ConversationMessage): string {
+function conversationPromptRole(
+  message: ConversationMessage,
+  agentNamesById: Record<string, string> = {},
+): string {
   if (message.senderType === "user") {
     return "User";
   }
 
   if (message.senderType === "agent") {
-    return "Agent";
+    return message.senderAgentId === undefined
+      ? "Agent"
+      : agentNamesById[message.senderAgentId] ?? "Agent";
   }
 
   return "System";
 }
 
 export function buildConversationRunPrompt(input: {
+  agentNamesById?: Record<string, string>;
   currentUserMessage: string;
   messages: ConversationMessage[];
 }): string {
   const history = input.messages
     .filter((message) => message.content.trim().length > 0)
     .map((message) => {
-      const role = conversationPromptRole(message);
+      const role = conversationPromptRole(message, input.agentNamesById);
 
       return `${role}:\n${message.content.trim()}`;
     });

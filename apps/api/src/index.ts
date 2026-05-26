@@ -153,12 +153,14 @@ function buildGroupChatAgentInstructions(input: {
 }
 
 function buildGroupChatRunPrompt(input: {
+  agentNamesById?: Record<string, string>;
   agentName: string;
   conversationTitle: string;
   currentUserMessage: string;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
   const conversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
     currentUserMessage: input.currentUserMessage,
     messages: input.messages ?? [],
   });
@@ -193,6 +195,7 @@ function buildGroupTaskOrchestratorInstructions(input: {
 }
 
 function buildGroupTaskOrchestratorPrompt(input: {
+  agentNamesById?: Record<string, string>;
   agentName: string;
   agents: RunnableAgent[];
   conversationTitle: string;
@@ -200,6 +203,7 @@ function buildGroupTaskOrchestratorPrompt(input: {
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
   const conversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
     currentUserMessage: input.currentUserMessage,
     messages: input.messages ?? [],
   });
@@ -1160,6 +1164,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
+  const agentNamesById = Object.fromEntries(
+    (await listAgentsForUser(db, { ownerUserId: user.id })).map((agent) => [
+      agent.agent.id,
+      agent.agent.name,
+    ]),
+  );
+
   if (conversation.type === "direct") {
     const runAgent = conversation.directAgentId === undefined
       ? null
@@ -1184,6 +1195,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: buildConversationRunPrompt({
+        agentNamesById,
         currentUserMessage: content,
         messages: priorMessages,
       }),
@@ -1298,6 +1310,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
       prompt: buildGroupTaskOrchestratorPrompt({
+        agentNamesById,
         agentName: orchestrator.agent.name,
         agents: readyGroupAgents,
         conversationTitle: conversation.title,
@@ -1404,6 +1417,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     conversationId: conversation.id,
     daemonDeviceId: runAgent.daemonDeviceId,
     prompt: buildGroupChatRunPrompt({
+      agentNamesById,
       agentName: runAgent.agent.name,
       conversationTitle: conversation.title,
       currentUserMessage: content,

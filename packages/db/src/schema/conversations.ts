@@ -1,4 +1,5 @@
 import {
+  integer,
   index,
   pgTable,
   text,
@@ -8,6 +9,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+import { agents } from "./agents.js";
 import { users } from "./auth.js";
 
 export const conversations = pgTable(
@@ -36,6 +38,28 @@ export const conversations = pgTable(
     conversationsOwnerDirectAgentUniqueIdx: uniqueIndex(
       "conversations_owner_direct_agent_unique_idx",
     ).on(table.ownerUserId, table.directAgentId),
+  }),
+);
+
+export const conversationAgentMembers = pgTable(
+  "conversation_agent_members",
+  {
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationAgentMembersUniqueIdx: uniqueIndex(
+      "conversation_agent_members_unique_idx",
+    ).on(table.conversationId, table.agentId),
+    conversationAgentMembersAgentIdIdx: index(
+      "conversation_agent_members_agent_id_idx",
+    ).on(table.agentId),
   }),
 );
 

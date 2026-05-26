@@ -20,6 +20,7 @@ export interface Conversation {
   key?: string;
   title: string;
   directAgentId?: AgentId;
+  agentIds?: AgentId[];
   status: ConversationStatus;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -52,6 +53,15 @@ export interface EnsureDirectConversationRequest {
 }
 
 export interface EnsureDirectConversationResponse {
+  conversation: Conversation;
+}
+
+export interface CreateGroupConversationRequest {
+  title: string;
+  agentIds: AgentId[];
+}
+
+export interface CreateGroupConversationResponse {
   conversation: Conversation;
 }
 

@@ -8,6 +8,7 @@ interface ChatSidebarProps {
   agents: AgentDetails[]
   activeConversationId: string | null
   onCreateAgent: () => void
+  onCreateGroup: () => void
   selectGroup: (conversationId: string) => void
   selectAgent: (agentId: string) => void
 }
@@ -35,6 +36,7 @@ export function ChatSidebar({
   agents,
   activeConversationId,
   onCreateAgent,
+  onCreateGroup,
   selectGroup,
   selectAgent,
 }: ChatSidebarProps) {
@@ -42,8 +44,13 @@ export function ChatSidebar({
   const defaultGroupConversation = conversations.find(
     (conversation) => conversation.type === 'group' && conversation.key === 'all',
   )
-  const groupChatSelected =
-    defaultGroupConversation !== undefined && activeConversationId === defaultGroupConversation.id
+  const customGroupConversations = conversations
+    .filter((conversation) => conversation.type === 'group' && conversation.key !== 'all')
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+  const groupConversations =
+    defaultGroupConversation === undefined
+      ? customGroupConversations
+      : [defaultGroupConversation, ...customGroupConversations]
 
   return (
     <aside
@@ -79,32 +86,35 @@ export function ChatSidebar({
       <section className="grid gap-1 p-3" aria-labelledby="groups-heading">
         <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
           <h3 id="groups-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
-            Groups<span className={inlineCount}>({defaultGroupConversation ? 1 : 0})</span>
+            Groups<span className={inlineCount}>({groupConversations.length})</span>
           </h3>
           <button
             className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Add group"
+            onClick={onCreateGroup}
           >
             <Add className="block h-4 w-4" size={16} />
           </button>
         </div>
-        <button
-          className={`${sidebarButton} ${
-            groupChatSelected ? selectedListItem : transparentListItem
-          } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
-          type="button"
-          disabled={defaultGroupConversation === undefined}
-          aria-current={groupChatSelected ? 'page' : undefined}
-          onClick={() => {
-            if (defaultGroupConversation !== undefined) {
-              selectGroup(defaultGroupConversation.id)
-            }
-          }}
-        >
-          <span className="text-base text-[var(--cds-text-primary)]">#</span>
-          <span>all</span>
-        </button>
+        {groupConversations.map((conversation) => {
+          const groupChatSelected = activeConversationId === conversation.id
+
+          return (
+            <button
+              className={`${sidebarButton} ${
+                groupChatSelected ? selectedListItem : transparentListItem
+              } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
+              type="button"
+              key={conversation.id}
+              aria-current={groupChatSelected ? 'page' : undefined}
+              onClick={() => selectGroup(conversation.id)}
+            >
+              <span className="text-base text-[var(--cds-text-primary)]">#</span>
+              <span className="min-w-0 truncate">{conversation.title}</span>
+            </button>
+          )
+        })}
       </section>
 
       <section className="grid gap-1 p-3" aria-labelledby="agents-heading">

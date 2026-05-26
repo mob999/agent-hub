@@ -13,7 +13,9 @@ import {
   createLogger,
   createRunRecord,
   buildConversationRunPrompt,
+  createGroupConversation,
   createUserMessageAndRun,
+  defaultGroupConversationKey,
   enqueueAgentProvisioningJob,
   enqueueRunJob,
   ensureDefaultGroupConversation,
@@ -31,7 +33,10 @@ import {
   listDaemonDevicesWithRuntimes,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
+  groupConversationKeyFromTitle,
+  normalizeGroupConversationTitle,
   toAgentRun,
+  type RunnableAgent,
   type RunQueueJob,
 } from "@agent-hub/server";
 import { cors } from "hono/cors";
@@ -55,6 +60,8 @@ const runtimeKinds = new Set<RuntimeKind>([
   "opencode",
   "custom",
 ]);
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 await redis.connect();
 
@@ -75,6 +82,18 @@ function buildAgentInstructions(description: string | undefined): string | undef
     "",
     trimmedDescription,
   ].join("\n");
+}
+
+function isValidAgentIdList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 20 &&
+    value.every((agentId) =>
+      typeof agentId === "string" && uuidPattern.test(agentId)
+    ) &&
+    new Set(value).size === value.length
+  );
 }
 
 const healthRoute = createRoute({
@@ -381,6 +400,93 @@ app.post("/conversations/default-group", async (c) => {
   return c.json({ conversation }, 200);
 });
 
+app.post("/conversations/groups", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    title?: unknown;
+  };
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : "";
+  const key = groupConversationKeyFromTitle(title);
+
+  if (
+    title.length === 0 ||
+    title.length > 80 ||
+    key.length > 80 ||
+    !isValidAgentIdList(body.agentIds)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_GROUP_REQUEST",
+          message:
+            "title and 1-20 unique agentIds are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await createGroupConversation(db, {
+    ownerUserId: user.id,
+    title,
+    agentIds: body.agentIds,
+  });
+
+  if (result.status === "reserved-key") {
+    return c.json(
+      {
+        error: {
+          code: "RESERVED_GROUP_KEY",
+          message: "The all group is reserved.",
+        },
+      },
+      409,
+    );
+  }
+
+  if (result.status === "duplicate-key") {
+    return c.json(
+      {
+        error: {
+          code: "GROUP_ALREADY_EXISTS",
+          message: "A group with this name already exists.",
+        },
+      },
+      409,
+    );
+  }
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ conversation: result.conversation }, 201);
+});
+
 app.post("/conversations/direct", async (c) => {
   const user = c.get("user");
 
@@ -545,20 +651,58 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     typeof body.agentId === "string" && body.agentId.length > 0
       ? body.agentId
       : undefined;
-  const runAgent =
-    conversation.type === "direct"
-      ? conversation.directAgentId === undefined
-        ? null
-        : await getRunnableAgentForUser(db, {
-            agentId: conversation.directAgentId,
-            ownerUserId: user.id,
-          })
-      : requestedAgentId === undefined
-        ? await getFirstRunnableAgentForUser(db, { ownerUserId: user.id })
-        : await getRunnableAgentForUser(db, {
-            agentId: requestedAgentId,
-            ownerUserId: user.id,
-          });
+  let runAgent: RunnableAgent | null = null;
+
+  if (conversation.type === "direct") {
+    runAgent = conversation.directAgentId === undefined
+      ? null
+      : await getRunnableAgentForUser(db, {
+          agentId: conversation.directAgentId,
+          ownerUserId: user.id,
+        });
+  } else if (conversation.key === defaultGroupConversationKey) {
+    runAgent = requestedAgentId === undefined
+      ? await getFirstRunnableAgentForUser(db, { ownerUserId: user.id })
+      : await getRunnableAgentForUser(db, {
+          agentId: requestedAgentId,
+          ownerUserId: user.id,
+        });
+  } else {
+    const groupAgentIds = conversation.agentIds ?? [];
+
+    if (
+      requestedAgentId !== undefined &&
+      !groupAgentIds.includes(requestedAgentId)
+    ) {
+      return c.json(
+        {
+          error: {
+            code: "AGENT_NOT_IN_GROUP",
+            message: "Agent is not a member of this group.",
+          },
+        },
+        400,
+      );
+    }
+
+    if (requestedAgentId !== undefined) {
+      runAgent = await getRunnableAgentForUser(db, {
+        agentId: requestedAgentId,
+        ownerUserId: user.id,
+      });
+    } else {
+      for (const agentId of groupAgentIds) {
+        runAgent = await getRunnableAgentForUser(db, {
+          agentId,
+          ownerUserId: user.id,
+        });
+
+        if (runAgent !== null) {
+          break;
+        }
+      }
+    }
+  }
 
   if (runAgent === null) {
     return c.json(

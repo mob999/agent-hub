@@ -6,13 +6,14 @@ import type {
 } from "@agent-hub/core";
 import {
   agents,
+  conversationAgentMembers,
   conversationMessages,
   conversations,
   runEvents,
   runs,
   type Db,
 } from "@agent-hub/db";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
 
@@ -22,11 +23,28 @@ export const defaultGroupConversationTitle = "all";
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 
+export type CreateGroupConversationResult =
+  | { status: "created"; conversation: Conversation }
+  | { status: "reserved-key" }
+  | { status: "duplicate-key" }
+  | { status: "agents-not-found" };
+
 function optionalString(value: string | null): string | undefined {
   return value ?? undefined;
 }
 
-export function toConversation(row: ConversationRow): Conversation {
+export function normalizeGroupConversationTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ");
+}
+
+export function groupConversationKeyFromTitle(title: string): string {
+  return normalizeGroupConversationTitle(title).toLowerCase();
+}
+
+export function toConversation(
+  row: ConversationRow,
+  agentIds?: string[],
+): Conversation {
   return {
     id: row.id,
     ownerUserId: row.ownerUserId,
@@ -34,6 +52,7 @@ export function toConversation(row: ConversationRow): Conversation {
     key: optionalString(row.key),
     title: row.title,
     directAgentId: optionalString(row.directAgentId),
+    agentIds,
     status: row.status as Conversation["status"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -105,6 +124,83 @@ function getAssistantMessageContent(event: RunEvent): string | undefined {
   return undefined;
 }
 
+async function listAgentIdsForUser(
+  db: Db,
+  input: { ownerUserId: string },
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(eq(agents.ownerUserId, input.ownerUserId))
+    .orderBy(asc(agents.createdAt));
+
+  return rows.map((row) => row.id);
+}
+
+async function listConversationMemberAgentIds(
+  db: Db,
+  conversationIds: string[],
+): Promise<Map<string, string[]>> {
+  if (conversationIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db
+    .select({
+      conversationId: conversationAgentMembers.conversationId,
+      agentId: conversationAgentMembers.agentId,
+    })
+    .from(conversationAgentMembers)
+    .where(inArray(conversationAgentMembers.conversationId, conversationIds))
+    .orderBy(
+      asc(conversationAgentMembers.conversationId),
+      asc(conversationAgentMembers.position),
+    );
+  const membersByConversation = new Map<string, string[]>();
+
+  for (const row of rows) {
+    const members = membersByConversation.get(row.conversationId) ?? [];
+    members.push(row.agentId);
+    membersByConversation.set(row.conversationId, members);
+  }
+
+  return membersByConversation;
+}
+
+async function toConversationsWithAgentIds(
+  db: Db,
+  rows: ConversationRow[],
+  input: { ownerUserId: string },
+): Promise<Conversation[]> {
+  const groupRows = rows.filter((row) => row.type === "group");
+  const defaultGroupIds = groupRows
+    .filter((row) => row.key === defaultGroupConversationKey)
+    .map((row) => row.id);
+  const customGroupIds = groupRows
+    .filter((row) => row.key !== defaultGroupConversationKey)
+    .map((row) => row.id);
+  const allAgentIds =
+    defaultGroupIds.length === 0
+      ? []
+      : await listAgentIdsForUser(db, { ownerUserId: input.ownerUserId });
+  const customMemberIds = await listConversationMemberAgentIds(
+    db,
+    customGroupIds,
+  );
+
+  return rows.map((row) => {
+    if (row.type !== "group") {
+      return toConversation(row);
+    }
+
+    if (row.key === defaultGroupConversationKey) {
+      return toConversation(row, allAgentIds);
+    }
+
+    return toConversation(row, customMemberIds.get(row.id) ?? []);
+  });
+}
+
 export async function ensureDefaultGroupConversation(
   db: Db,
   input: { ownerUserId: string },
@@ -127,7 +223,11 @@ export async function ensureDefaultGroupConversation(
     .returning();
 
   if (created !== undefined) {
-    return toConversation(created);
+    const agentIds = await listAgentIdsForUser(db, {
+      ownerUserId: input.ownerUserId,
+    });
+
+    return toConversation(created, agentIds);
   }
 
   const [conversation] = await db
@@ -145,7 +245,74 @@ export async function ensureDefaultGroupConversation(
     throw new Error("Default group conversation was not created.");
   }
 
-  return toConversation(conversation);
+  const agentIds = await listAgentIdsForUser(db, {
+    ownerUserId: input.ownerUserId,
+  });
+
+  return toConversation(conversation, agentIds);
+}
+
+export async function createGroupConversation(
+  db: Db,
+  input: { ownerUserId: string; title: string; agentIds: string[] },
+): Promise<CreateGroupConversationResult> {
+  const title = normalizeGroupConversationTitle(input.title);
+  const key = groupConversationKeyFromTitle(title);
+
+  if (key === defaultGroupConversationKey) {
+    return { status: "reserved-key" };
+  }
+
+  return db.transaction(async (tx) => {
+    const agentRows = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.ownerUserId, input.ownerUserId),
+          inArray(agents.id, input.agentIds),
+        ),
+      );
+
+    if (agentRows.length !== input.agentIds.length) {
+      return { status: "agents-not-found" };
+    }
+
+    const now = new Date();
+    const [created] = await tx
+      .insert(conversations)
+      .values({
+        ownerUserId: input.ownerUserId,
+        type: "group",
+        key,
+        title,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({
+        target: [conversations.ownerUserId, conversations.key],
+      })
+      .returning();
+
+    if (created === undefined) {
+      return { status: "duplicate-key" };
+    }
+
+    await tx.insert(conversationAgentMembers).values(
+      input.agentIds.map((agentId, position) => ({
+        conversationId: created.id,
+        agentId,
+        position,
+        createdAt: now,
+      })),
+    );
+
+    return {
+      status: "created",
+      conversation: toConversation(created, input.agentIds),
+    };
+  });
 }
 
 export async function ensureDirectConversation(
@@ -212,7 +379,9 @@ export async function listConversationsForUser(
     .where(eq(conversations.ownerUserId, input.ownerUserId))
     .orderBy(desc(conversations.updatedAt));
 
-  return rows.map(toConversation);
+  return toConversationsWithAgentIds(db, rows, {
+    ownerUserId: input.ownerUserId,
+  });
 }
 
 export async function getConversationForUser(
@@ -230,7 +399,17 @@ export async function getConversationForUser(
     )
     .limit(1);
 
-  return conversation === undefined ? null : toConversation(conversation);
+  if (conversation === undefined) {
+    return null;
+  }
+
+  const [conversationWithAgentIds] = await toConversationsWithAgentIds(
+    db,
+    [conversation],
+    { ownerUserId: input.ownerUserId },
+  );
+
+  return conversationWithAgentIds ?? null;
 }
 
 export async function listConversationMessagesForUser(

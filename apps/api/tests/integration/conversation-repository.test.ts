@@ -14,10 +14,13 @@ import {
 import type { RunQueueJob } from "@agent-hub/server";
 import {
   appendRunEvent,
+  createGroupConversation,
   createUserMessageAndRun,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
+  getConversationForUser,
   listConversationMessagesForUser,
+  listConversationsForUser,
 } from "@agent-hub/server";
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -155,6 +158,7 @@ describeDb("conversation repository integration", () => {
     }
 
     expect(defaultConversationAgain.id).toBe(defaultConversation.id);
+    expect(defaultConversation.agentIds).toEqual([agentId]);
     expect(directConversationAgain?.id).toBe(directConversation?.id);
     expect(unauthorizedDirectConversation).toBeNull();
 
@@ -231,5 +235,65 @@ describeDb("conversation repository integration", () => {
       content: "hi there",
       status: "completed",
     });
+  });
+
+  it("creates custom group conversations with scoped agent members", async () => {
+    const ownerUserId = await createUser(
+      `conversation-group-owner-${randomUUID()}@example.com`,
+    );
+    const otherUserId = await createUser(
+      `conversation-group-other-${randomUUID()}@example.com`,
+    );
+    const firstAgentId = await createAgent(ownerUserId);
+    const secondAgentId = await createAgent(ownerUserId);
+    const otherAgentId = await createAgent(otherUserId);
+
+    const group = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Design Team",
+      agentIds: [firstAgentId, secondAgentId],
+    });
+
+    expect(group.status).toBe("created");
+    if (group.status !== "created") {
+      return;
+    }
+    conversationIds.push(group.conversation.id);
+    expect(group.conversation).toMatchObject({
+      type: "group",
+      key: "design team",
+      title: "Design Team",
+      agentIds: [firstAgentId, secondAgentId],
+    });
+
+    const duplicate = await createGroupConversation(db, {
+      ownerUserId,
+      title: "  design   team  ",
+      agentIds: [firstAgentId],
+    });
+    const reserved = await createGroupConversation(db, {
+      ownerUserId,
+      title: "all",
+      agentIds: [firstAgentId],
+    });
+    const unauthorizedMember = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Research",
+      agentIds: [otherAgentId],
+    });
+    const listed = await listConversationsForUser(db, { ownerUserId });
+    const fetched = await getConversationForUser(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+    });
+
+    expect(duplicate.status).toBe("duplicate-key");
+    expect(reserved.status).toBe("reserved-key");
+    expect(unauthorizedMember.status).toBe("agents-not-found");
+    expect(
+      listed.find((conversation) => conversation.id === group.conversation.id)
+        ?.agentIds,
+    ).toEqual([firstAgentId, secondAgentId]);
+    expect(fetched?.agentIds).toEqual([firstAgentId, secondAgentId]);
   });
 });

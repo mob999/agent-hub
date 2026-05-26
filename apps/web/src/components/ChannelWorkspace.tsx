@@ -50,9 +50,22 @@ export function ChannelWorkspace({
   const selectedAgent = isAgentDirectMessage
     ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
     : null
+  const groupAgentIds = activeConversation?.type === 'group'
+    ? activeConversation.agentIds ?? []
+    : []
+  const readyGroupAgentCount =
+    activeConversation?.type !== 'group'
+      ? 0
+      : activeConversation.key === 'all'
+        ? readyAgentCount
+        : agents.filter(
+            (agent) =>
+              groupAgentIds.includes(agent.agent.id) &&
+              isAgentReady(agent),
+          ).length
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
-    : hasSelectedConversation && readyAgentCount > 0
+    : hasSelectedConversation && readyGroupAgentCount > 0
   const createAgentLink = (
     <button className={inlineLink} type="button" onClick={openCreateAgent}>
       create an agent
@@ -87,8 +100,8 @@ export function ChannelWorkspace({
       ? selectedAgentReady && selectedAgent
         ? `Message ${selectedAgent.agent.name} to start a private run.`
         : 'This agent is not ready to receive messages yet.'
-      : readyAgentCount > 0
-        ? 'Message #all to start a group run.'
+      : readyGroupAgentCount > 0
+        ? `Message ${chatTitle} to start a group run.`
         : (
             <>
               First, {createAgentLink}; then message #all to start a run.
@@ -97,13 +110,13 @@ export function ChannelWorkspace({
   const warningTitle = isAgentDirectMessage ? 'Agent is not ready' : 'No ready agent available'
   const warningSubtitle = isAgentDirectMessage
     ? 'Wait for provisioning to finish, or choose another ready agent.'
-    : 'Create a ready agent before sending a group message.'
+    : 'Choose a group with a ready agent before sending a message.'
   const composerPlaceholder = !hasSelectedConversation
     ? 'Select a conversation first'
     : selectedAgentReady
       ? isAgentDirectMessage
         ? `Message ${selectedAgent?.agent.name ?? activeConversation.title}`
-        : 'Message #all'
+        : `Message ${chatTitle}`
       : isAgentDirectMessage
         ? 'Agent is not ready yet'
         : 'Create a ready agent first'
@@ -277,7 +290,7 @@ export function ChannelWorkspace({
         )}
         <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
           <label className="sr-only" htmlFor="run-prompt">
-            {isAgentDirectMessage ? `Message ${chatTitle}` : 'Message #all'}
+            {`Message ${chatTitle}`}
           </label>
           <textarea
             id="run-prompt"

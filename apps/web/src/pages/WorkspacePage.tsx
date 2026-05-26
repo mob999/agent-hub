@@ -5,6 +5,7 @@ import { AgentCreateModal } from '../components/AgentCreateModal'
 import { AppRail } from '../components/AppRail'
 import { ChannelWorkspace } from '../components/ChannelWorkspace'
 import { ChatSidebar } from '../components/ChatSidebar'
+import { GroupCreateModal } from '../components/GroupCreateModal'
 import {
   ApiRequestError,
   apiRequest,
@@ -14,6 +15,7 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationMessage,
+  type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
   type RuntimeKind,
@@ -68,6 +70,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [groupCreateError, setGroupCreateError] = useState<string | null>(null)
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false)
+  const [groupModalOpen, setGroupModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
@@ -532,6 +537,47 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setAgentCreateError(null)
     setAgentModalOpen(true)
   }
+  const openCreateGroup = () => {
+    setGroupCreateError(null)
+    setGroupModalOpen(true)
+  }
+  const createGroup = async (input: { title: string; agentIds: string[] }) => {
+    setIsCreatingGroup(true)
+    setGroupCreateError(null)
+
+    try {
+      const response = await apiRequest<CreateGroupConversationResponse>('/conversations/groups', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setMessagesByConversation((current) => ({
+        ...current,
+        [response.conversation.id]: [],
+      }))
+      setPrompt('')
+      setSelectedRunId(null)
+      setActiveConversationId(response.conversation.id)
+      setGroupModalOpen(false)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupCreateError(
+          error.code === 'GROUP_ALREADY_EXISTS'
+            ? 'A group with this name already exists.'
+            : error.message,
+        )
+      } else {
+        setGroupCreateError('Unable to create the group. Try again in a moment.')
+      }
+    } finally {
+      setIsCreatingGroup(false)
+    }
+  }
   const createAgent = async (input: {
     name: string
     description?: string
@@ -622,6 +668,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             agents={agents}
             activeConversationId={activeConversationId}
             onCreateAgent={() => openCreateAgent()}
+            onCreateGroup={openCreateGroup}
             selectGroup={selectConversation}
             selectAgent={(agentId) => {
               void selectAgentConversation(agentId)
@@ -666,6 +713,16 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           isCreating={isCreatingAgent}
           onClose={() => setAgentModalOpen(false)}
           onCreate={createAgent}
+        />
+      )}
+      {groupModalOpen && (
+        <GroupCreateModal
+          open={groupModalOpen}
+          agents={agents}
+          error={groupCreateError}
+          isCreating={isCreatingGroup}
+          onClose={() => setGroupModalOpen(false)}
+          onCreate={createGroup}
         />
       )}
     </main>

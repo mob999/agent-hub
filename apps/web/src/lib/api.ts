@@ -117,6 +117,7 @@ export interface Conversation {
   key?: string
   title: string
   directAgentId?: string
+  agentIds?: string[]
   status: ConversationStatus
   createdAt: string
   updatedAt: string
@@ -144,6 +145,15 @@ export interface SendConversationMessageResponse {
   }
   run: AgentRun
   queueMessageId: string
+}
+
+export interface CreateGroupConversationRequest {
+  title: string
+  agentIds: string[]
+}
+
+export interface CreateGroupConversationResponse {
+  conversation: Conversation
 }
 
 export interface RuntimeRawEvent {

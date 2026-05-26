@@ -21,6 +21,7 @@ import {
   getConversationForUser,
   listConversationMessagesForUser,
   listConversationsForUser,
+  updateGroupConversation,
 } from "@agent-hub/server";
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -251,6 +252,7 @@ describeDb("conversation repository integration", () => {
     const group = await createGroupConversation(db, {
       ownerUserId,
       title: "Design Team",
+      description: "Design planning",
       agentIds: [firstAgentId, secondAgentId],
     });
 
@@ -263,6 +265,7 @@ describeDb("conversation repository integration", () => {
       type: "group",
       key: "design team",
       title: "Design Team",
+      description: "Design planning",
       agentIds: [firstAgentId, secondAgentId],
     });
 
@@ -292,8 +295,39 @@ describeDb("conversation repository integration", () => {
     expect(unauthorizedMember.status).toBe("agents-not-found");
     expect(
       listed.find((conversation) => conversation.id === group.conversation.id)
+        ?.description,
+    ).toBe("Design planning");
+    expect(
+      listed.find((conversation) => conversation.id === group.conversation.id)
         ?.agentIds,
     ).toEqual([firstAgentId, secondAgentId]);
+    expect(fetched?.description).toBe("Design planning");
     expect(fetched?.agentIds).toEqual([firstAgentId, secondAgentId]);
+
+    const updated = await updateGroupConversation(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+      title: "Design Review",
+      agentIds: [secondAgentId],
+    });
+
+    expect(updated.status).toBe("updated");
+    if (updated.status !== "updated") {
+      return;
+    }
+    expect(updated.conversation).toMatchObject({
+      type: "group",
+      key: "design review",
+      title: "Design Review",
+      agentIds: [secondAgentId],
+    });
+    expect(updated.conversation.description).toBeUndefined();
+
+    const fetchedUpdated = await getConversationForUser(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+    });
+
+    expect(fetchedUpdated?.agentIds).toEqual([secondAgentId]);
   });
 });

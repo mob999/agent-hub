@@ -2,10 +2,12 @@ import { InlineNotification, SkeletonText } from '@carbon/react'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AgentCreateModal } from '../components/AgentCreateModal'
+import { AgentEditModal } from '../components/AgentEditModal'
 import { AppRail } from '../components/AppRail'
 import { ChannelWorkspace } from '../components/ChannelWorkspace'
 import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
+import { GroupEditModal } from '../components/GroupEditModal'
 import {
   ApiRequestError,
   apiRequest,
@@ -21,6 +23,8 @@ import {
   type RuntimeKind,
   type RunEvent,
   type SendConversationMessageResponse,
+  type UpdateAgentResponse,
+  type UpdateGroupConversationResponse,
   type User,
   type WorkspaceView,
 } from '../lib/api'
@@ -70,9 +74,15 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [agentEditError, setAgentEditError] = useState<string | null>(null)
+  const [isSavingAgent, setIsSavingAgent] = useState(false)
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [groupCreateError, setGroupCreateError] = useState<string | null>(null)
   const [isCreatingGroup, setIsCreatingGroup] = useState(false)
   const [groupModalOpen, setGroupModalOpen] = useState(false)
+  const [groupEditError, setGroupEditError] = useState<string | null>(null)
+  const [isSavingGroup, setIsSavingGroup] = useState(false)
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
@@ -98,6 +108,19 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   )
+  const editingAgent = useMemo(
+    () => agents.find((agent) => agent.agent.id === editingAgentId) ?? null,
+    [agents, editingAgentId],
+  )
+  const editingGroup = useMemo(
+    () => conversations.find((conversation) => conversation.id === editingGroupId) ?? null,
+    [conversations, editingGroupId],
+  )
+  const canEditActiveConversation =
+    activeConversation !== null &&
+    (activeConversation.type === 'direct'
+      ? activeConversation.directAgentId !== undefined
+      : activeConversation.key !== 'all')
   const activeConversationMessages = useMemo(
     () => (activeConversationId === null ? [] : messagesByConversation[activeConversationId] ?? []),
     [activeConversationId, messagesByConversation],
@@ -541,7 +564,23 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setGroupCreateError(null)
     setGroupModalOpen(true)
   }
-  const createGroup = async (input: { title: string; agentIds: string[] }) => {
+  const openEditActiveConversation = () => {
+    if (activeConversation === null) {
+      return
+    }
+
+    if (activeConversation.type === 'direct' && activeConversation.directAgentId) {
+      setAgentEditError(null)
+      setEditingAgentId(activeConversation.directAgentId)
+      return
+    }
+
+    if (activeConversation.type === 'group' && activeConversation.key !== 'all') {
+      setGroupEditError(null)
+      setEditingGroupId(activeConversation.id)
+    }
+  }
+  const createGroup = async (input: { title: string; description?: string; agentIds: string[] }) => {
     setIsCreatingGroup(true)
     setGroupCreateError(null)
 
@@ -576,6 +615,44 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       }
     } finally {
       setIsCreatingGroup(false)
+    }
+  }
+  const updateGroup = async (input: { title: string; description?: string; agentIds: string[] }) => {
+    if (editingGroup === null) {
+      return
+    }
+
+    setIsSavingGroup(true)
+    setGroupEditError(null)
+
+    try {
+      const response = await apiRequest<UpdateGroupConversationResponse>(
+        `/conversations/groups/${editingGroup.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        },
+      )
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setActiveConversationId(response.conversation.id)
+      setEditingGroupId(null)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupEditError(
+          error.code === 'GROUP_ALREADY_EXISTS'
+            ? 'A group with this name already exists.'
+            : error.message,
+        )
+      } else {
+        setGroupEditError('Unable to update the group. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingGroup(false)
     }
   }
   const createAgent = async (input: {
@@ -616,6 +693,52 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       }
     } finally {
       setIsCreatingAgent(false)
+    }
+  }
+  const updateAgent = async (input: { name: string; description?: string }) => {
+    if (editingAgent === null) {
+      return
+    }
+
+    setIsSavingAgent(true)
+    setAgentEditError(null)
+
+    try {
+      const response = await apiRequest<UpdateAgentResponse>(
+        `/agents/${editingAgent.agent.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        },
+      )
+
+      setAgents((current) =>
+        current.map((agent) =>
+          agent.agent.id === response.agent.agent.id ? response.agent : agent,
+        ),
+      )
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.directAgentId === response.agent.agent.id
+            ? {
+                ...conversation,
+                title: response.agent.agent.name,
+                updatedAt: response.agent.agent.updatedAt,
+              }
+            : conversation,
+        ),
+      )
+      setEditingAgentId(null)
+      void loadAgents()
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setAgentEditError(error.message)
+      } else {
+        setAgentEditError('Unable to update the agent. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingAgent(false)
     }
   }
 
@@ -683,9 +806,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             isCreatingRun={isCreatingRun}
             runError={runError ?? agentError}
             readyAgentCount={readyAgentCount}
+            canEditConversation={canEditActiveConversation}
             setPrompt={setPrompt}
             submitRun={submitRun}
             openCreateAgent={() => openCreateAgent()}
+            openEditConversation={openEditActiveConversation}
           />
         </>
       ) : activeView === 'daemon' ? (
@@ -723,6 +848,29 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           isCreating={isCreatingGroup}
           onClose={() => setGroupModalOpen(false)}
           onCreate={createGroup}
+        />
+      )}
+      {editingAgent && (
+        <AgentEditModal
+          key={editingAgent.agent.id}
+          open={editingAgent !== null}
+          agent={editingAgent}
+          error={agentEditError}
+          isSaving={isSavingAgent}
+          onClose={() => setEditingAgentId(null)}
+          onSave={updateAgent}
+        />
+      )}
+      {editingGroup && (
+        <GroupEditModal
+          key={editingGroup.id}
+          open={editingGroup !== null}
+          agents={agents}
+          conversation={editingGroup}
+          error={groupEditError}
+          isSaving={isSavingGroup}
+          onClose={() => setEditingGroupId(null)}
+          onSave={updateGroup}
         />
       )}
     </main>

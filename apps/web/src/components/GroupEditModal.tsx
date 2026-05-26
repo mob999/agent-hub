@@ -7,15 +7,16 @@ import {
   TextInput,
 } from '@carbon/react'
 import { useState } from 'react'
-import type { AgentDetails } from '../lib/api'
+import type { AgentDetails, Conversation } from '../lib/api'
 
-interface GroupCreateModalProps {
+interface GroupEditModalProps {
   agents: AgentDetails[]
+  conversation: Conversation
   error: string | null
-  isCreating: boolean
+  isSaving: boolean
   open: boolean
   onClose: () => void
-  onCreate: (input: { title: string; description?: string; agentIds: string[] }) => void
+  onSave: (input: { title: string; description?: string; agentIds: string[] }) => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -26,21 +27,22 @@ function isAgentPending(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
 }
 
-export function GroupCreateModal({
+export function GroupEditModal({
   agents,
+  conversation,
   error,
-  isCreating,
+  isSaving,
   open,
   onClose,
-  onCreate,
-}: GroupCreateModalProps) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
-  const canCreate =
+  onSave,
+}: GroupEditModalProps) {
+  const [title, setTitle] = useState(conversation.title)
+  const [description, setDescription] = useState(conversation.description ?? '')
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(conversation.agentIds ?? [])
+  const canSave =
     title.trim().length > 0 &&
     selectedAgentIds.length > 0 &&
-    !isCreating
+    !isSaving
 
   const toggleAgent = (agentId: string, checked: boolean) => {
     setSelectedAgentIds((current) =>
@@ -53,17 +55,17 @@ export function GroupCreateModal({
   return (
     <Modal
       open={open}
-      modalHeading="Create group"
-      primaryButtonText={isCreating ? 'Creating...' : 'Create'}
+      modalHeading="Edit group"
+      primaryButtonText={isSaving ? 'Saving...' : 'Save'}
       secondaryButtonText="Cancel"
-      primaryButtonDisabled={!canCreate}
+      primaryButtonDisabled={!canSave}
       onRequestClose={onClose}
       onRequestSubmit={() => {
-        if (!canCreate) {
+        if (!canSave) {
           return
         }
 
-        onCreate({
+        onSave({
           title: title.trim(),
           description: description.trim() || undefined,
           agentIds: selectedAgentIds,
@@ -74,35 +76,26 @@ export function GroupCreateModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Group was not created"
+            title="Group was not updated"
             subtitle={error}
             lowContrast
             hideCloseButton
           />
         )}
-        {agents.length === 0 && (
-          <InlineNotification
-            kind="warning"
-            title="No agents available"
-            subtitle="Create an agent before creating a group."
-            lowContrast
-            hideCloseButton
-          />
-        )}
         <TextInput
-          id="group-name"
+          id="edit-group-name"
           labelText="Group name"
           value={title}
-          disabled={isCreating}
+          disabled={isSaving}
           maxLength={80}
           onChange={(event) => setTitle(event.target.value)}
         />
         <TextArea
-          id="group-description"
+          id="edit-group-description"
           labelText="Description"
           rows={3}
           value={description}
-          disabled={isCreating}
+          disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
         />
         <div className="grid gap-2" aria-label="Agents">
@@ -116,10 +109,10 @@ export function GroupCreateModal({
                 key={agent.agent.id}
               >
                 <Checkbox
-                  id={`group-agent-${agent.agent.id}`}
+                  id={`edit-group-agent-${agent.agent.id}`}
                   labelText={agent.agent.name}
                   checked={selectedAgentIds.includes(agent.agent.id)}
-                  disabled={isCreating}
+                  disabled={isSaving}
                   onChange={(_, data) => toggleAgent(agent.agent.id, data.checked)}
                 />
                 {isAgentPending(agent) ? (

@@ -22,6 +22,7 @@ export const conversations = pgTable(
     type: varchar("type", { length: 32 }).notNull(),
     key: varchar("key", { length: 80 }),
     title: varchar("title", { length: 160 }).notNull(),
+    description: text("description"),
     directAgentId: uuid("direct_agent_id"),
     status: varchar("status", { length: 32 }).notNull().default("active"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),

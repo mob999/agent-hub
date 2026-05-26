@@ -36,6 +36,8 @@ import {
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   toAgentRun,
+  updateAgentProfileForUser,
+  updateGroupConversation,
   type RunnableAgent,
   type RunQueueJob,
 } from "@agent-hub/server";
@@ -356,6 +358,65 @@ app.get("/agents/:agentId", async (c) => {
   return c.json({ agent });
 });
 
+app.patch("/agents/:agentId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    description?: unknown;
+    name?: unknown;
+  };
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const description =
+    typeof body.description === "string" && body.description.trim().length > 0
+      ? body.description.trim()
+      : undefined;
+
+  if (name.length === 0 || name.length > 120) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_AGENT_REQUEST",
+          message: "name is required and must be 120 characters or fewer.",
+        },
+      },
+      400,
+    );
+  }
+
+  const agent = await updateAgentProfileForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+    name,
+    description,
+  });
+
+  if (agent === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ agent });
+});
+
 app.use("/conversations", requireAuth);
 app.use("/conversations/*", requireAuth);
 app.get("/conversations", async (c) => {
@@ -417,10 +478,14 @@ app.post("/conversations/groups", async (c) => {
 
   const body = (await c.req.json().catch(() => ({}))) as {
     agentIds?: unknown;
+    description?: unknown;
     title?: unknown;
   };
   const title = typeof body.title === "string"
     ? normalizeGroupConversationTitle(body.title)
+    : "";
+  const description = typeof body.description === "string"
+    ? body.description.trim()
     : "";
   const key = groupConversationKeyFromTitle(title);
 
@@ -445,6 +510,7 @@ app.post("/conversations/groups", async (c) => {
   const result = await createGroupConversation(db, {
     ownerUserId: user.id,
     title,
+    description: description.length > 0 ? description : undefined,
     agentIds: body.agentIds,
   });
 
@@ -485,6 +551,111 @@ app.post("/conversations/groups", async (c) => {
   }
 
   return c.json({ conversation: result.conversation }, 201);
+});
+
+app.patch("/conversations/groups/:conversationId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    description?: unknown;
+    title?: unknown;
+  };
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : "";
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+  const key = groupConversationKeyFromTitle(title);
+
+  if (
+    title.length === 0 ||
+    title.length > 80 ||
+    key.length > 80 ||
+    !isValidAgentIdList(body.agentIds)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_GROUP_REQUEST",
+          message:
+            "title and 1-20 unique agentIds are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await updateGroupConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    title,
+    description: description.length > 0 ? description : undefined,
+    agentIds: body.agentIds,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "reserved-key") {
+    return c.json(
+      {
+        error: {
+          code: "RESERVED_GROUP_KEY",
+          message: "The all group is reserved.",
+        },
+      },
+      409,
+    );
+  }
+
+  if (result.status === "duplicate-key") {
+    return c.json(
+      {
+        error: {
+          code: "GROUP_ALREADY_EXISTS",
+          message: "A group with this name already exists.",
+        },
+      },
+      409,
+    );
+  }
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
 });
 
 app.post("/conversations/direct", async (c) => {

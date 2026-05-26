@@ -116,6 +116,15 @@ export interface CreateAgentResponse {
   agent: AgentDetails;
 }
 
+export interface UpdateAgentRequest {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateAgentResponse {
+  agent: AgentDetails;
+}
+
 export const agentWorkspaceDirectoryNames = [
   ".agenthub",
   "memory",

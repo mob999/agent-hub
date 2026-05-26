@@ -10,6 +10,7 @@ import {
   agentRuntimeBindings,
   agents,
   agentWorkspaces,
+  conversations,
   daemonDevices,
   daemonRuntimes,
   type Db,
@@ -297,6 +298,53 @@ export async function getAgentForUser(
   return row === undefined
     ? null
     : toAgentDetails(row.agent, row.binding, row.workspace);
+}
+
+export async function updateAgentProfileForUser(
+  db: Db,
+  input: {
+    agentId: string;
+    ownerUserId: string;
+    name: string;
+    description?: string;
+  },
+): Promise<AgentDetails | null> {
+  const name = input.name.trim();
+  const description = input.description?.trim() || undefined;
+  const updatedAt = new Date();
+  const [updated] = await db
+    .update(agents)
+    .set({
+      name,
+      description: description ?? null,
+      updatedAt,
+    })
+    .where(
+      and(
+        eq(agents.id, input.agentId),
+        eq(agents.ownerUserId, input.ownerUserId),
+      ),
+    )
+    .returning({ id: agents.id });
+
+  if (updated === undefined) {
+    return null;
+  }
+
+  await db
+    .update(conversations)
+    .set({
+      title: name,
+      updatedAt,
+    })
+    .where(
+      and(
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.directAgentId, input.agentId),
+      ),
+    );
+
+  return getAgentForUser(db, input);
 }
 
 export async function getRunnableAgentForUser(

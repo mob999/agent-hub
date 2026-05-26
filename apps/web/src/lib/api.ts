@@ -90,6 +90,15 @@ export interface AgentDetails {
   workspace: AgentWorkspace
 }
 
+export interface UpdateAgentRequest {
+  name: string
+  description?: string
+}
+
+export interface UpdateAgentResponse {
+  agent: AgentDetails
+}
+
 export interface AgentRun {
   id: string
   agentId: string
@@ -116,6 +125,7 @@ export interface Conversation {
   type: ConversationType
   key?: string
   title: string
+  description?: string
   directAgentId?: string
   agentIds?: string[]
   status: ConversationStatus
@@ -149,10 +159,21 @@ export interface SendConversationMessageResponse {
 
 export interface CreateGroupConversationRequest {
   title: string
+  description?: string
   agentIds: string[]
 }
 
 export interface CreateGroupConversationResponse {
+  conversation: Conversation
+}
+
+export interface UpdateGroupConversationRequest {
+  title: string
+  description?: string
+  agentIds: string[]
+}
+
+export interface UpdateGroupConversationResponse {
   conversation: Conversation
 }
 

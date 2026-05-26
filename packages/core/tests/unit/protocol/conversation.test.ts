@@ -3,6 +3,8 @@ import type {
   CreateGroupConversationRequest,
   CreateGroupConversationResponse,
   ConversationMessage,
+  UpdateGroupConversationRequest,
+  UpdateGroupConversationResponse,
 } from "../../../src/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -26,6 +28,7 @@ describe("conversation protocol", () => {
   it("expresses custom group conversations with agent members", () => {
     const request: CreateGroupConversationRequest = {
       title: "Design",
+      description: "Design work",
       agentIds: [
         "00000000-0000-4000-8000-000000000003",
         "00000000-0000-4000-8000-000000000004",
@@ -38,6 +41,7 @@ describe("conversation protocol", () => {
         type: "group",
         key: "design",
         title: "Design",
+        description: request.description,
         agentIds: request.agentIds,
         status: "active",
         createdAt: "2026-05-26T00:00:00.000Z",
@@ -47,6 +51,32 @@ describe("conversation protocol", () => {
 
     expect(response.conversation.type).toBe("group");
     expect(response.conversation.key).toBe("design");
+    expect(response.conversation.description).toBe("Design work");
+    expect(response.conversation.agentIds).toEqual(request.agentIds);
+  });
+
+  it("expresses custom group conversation updates", () => {
+    const request: UpdateGroupConversationRequest = {
+      title: "Design Review",
+      description: "Review design work",
+      agentIds: ["00000000-0000-4000-8000-000000000004"],
+    };
+    const response: UpdateGroupConversationResponse = {
+      conversation: {
+        id: "00000000-0000-4000-8000-000000000001",
+        ownerUserId: "00000000-0000-4000-8000-000000000002",
+        type: "group",
+        key: "design review",
+        title: request.title,
+        description: request.description,
+        agentIds: request.agentIds,
+        status: "active",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:01.000Z",
+      },
+    };
+
+    expect(response.conversation.title).toBe("Design Review");
     expect(response.conversation.agentIds).toEqual(request.agentIds);
   });
 

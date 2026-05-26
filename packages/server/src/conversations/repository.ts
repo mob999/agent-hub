@@ -13,7 +13,7 @@ import {
   runs,
   type Db,
 } from "@agent-hub/db";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
 
@@ -25,6 +25,13 @@ type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 
 export type CreateGroupConversationResult =
   | { status: "created"; conversation: Conversation }
+  | { status: "reserved-key" }
+  | { status: "duplicate-key" }
+  | { status: "agents-not-found" };
+
+export type UpdateGroupConversationResult =
+  | { status: "updated"; conversation: Conversation }
+  | { status: "not-found" }
   | { status: "reserved-key" }
   | { status: "duplicate-key" }
   | { status: "agents-not-found" };
@@ -51,6 +58,7 @@ export function toConversation(
     type: row.type as Conversation["type"],
     key: optionalString(row.key),
     title: row.title,
+    description: optionalString(row.description),
     directAgentId: optionalString(row.directAgentId),
     agentIds,
     status: row.status as Conversation["status"],
@@ -254,10 +262,16 @@ export async function ensureDefaultGroupConversation(
 
 export async function createGroupConversation(
   db: Db,
-  input: { ownerUserId: string; title: string; agentIds: string[] },
+  input: {
+    ownerUserId: string;
+    title: string;
+    description?: string;
+    agentIds: string[];
+  },
 ): Promise<CreateGroupConversationResult> {
   const title = normalizeGroupConversationTitle(input.title);
   const key = groupConversationKeyFromTitle(title);
+  const description = input.description?.trim() || undefined;
 
   if (key === defaultGroupConversationKey) {
     return { status: "reserved-key" };
@@ -286,6 +300,7 @@ export async function createGroupConversation(
         type: "group",
         key,
         title,
+        description,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -311,6 +326,111 @@ export async function createGroupConversation(
     return {
       status: "created",
       conversation: toConversation(created, input.agentIds),
+    };
+  });
+}
+
+export async function updateGroupConversation(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    title: string;
+    description?: string;
+    agentIds: string[];
+  },
+): Promise<UpdateGroupConversationResult> {
+  const title = normalizeGroupConversationTitle(input.title);
+  const key = groupConversationKeyFromTitle(title);
+  const description = input.description?.trim() || undefined;
+
+  if (key === defaultGroupConversationKey) {
+    return { status: "reserved-key" };
+  }
+
+  return db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" };
+    }
+
+    if (conversation.key === defaultGroupConversationKey) {
+      return { status: "reserved-key" };
+    }
+
+    const [duplicate] = await tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.key, key),
+          ne(conversations.id, input.conversationId),
+        ),
+      )
+      .limit(1);
+
+    if (duplicate !== undefined) {
+      return { status: "duplicate-key" };
+    }
+
+    const agentRows = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.ownerUserId, input.ownerUserId),
+          inArray(agents.id, input.agentIds),
+        ),
+      );
+
+    if (agentRows.length !== input.agentIds.length) {
+      return { status: "agents-not-found" };
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        key,
+        title,
+        description: description ?? null,
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" };
+    }
+
+    await tx
+      .delete(conversationAgentMembers)
+      .where(eq(conversationAgentMembers.conversationId, input.conversationId));
+
+    await tx.insert(conversationAgentMembers).values(
+      input.agentIds.map((agentId, position) => ({
+        conversationId: input.conversationId,
+        agentId,
+        position,
+        createdAt: now,
+      })),
+    );
+
+    return {
+      status: "updated",
+      conversation: toConversation(updated, input.agentIds),
     };
   });
 }

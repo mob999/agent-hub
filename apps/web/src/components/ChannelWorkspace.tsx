@@ -1,5 +1,5 @@
 import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useState } from 'react'
 import type { AgentDetails, Conversation, ConversationMessage, User } from '../lib/api'
@@ -18,9 +18,11 @@ interface ChannelWorkspaceProps {
   isCreatingRun: boolean
   runError: string | null
   readyAgentCount: number
+  canEditConversation: boolean
   setPrompt: (value: string) => void
   submitRun: (event: FormEvent<HTMLFormElement>) => void
   openCreateAgent: () => void
+  openEditConversation: () => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -40,9 +42,11 @@ export function ChannelWorkspace({
   isCreatingRun,
   runError,
   readyAgentCount,
+  canEditConversation,
   setPrompt,
   submitRun,
   openCreateAgent,
+  openEditConversation,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const hasSelectedConversation = activeConversation !== null
@@ -75,12 +79,16 @@ export function ChannelWorkspace({
     ? 'Chat'
     : isAgentDirectMessage
       ? selectedAgent?.agent.name ?? activeConversation.title
-      : `#${activeConversation.title}`
+      : activeConversation.title
+  const chatDisplayName =
+    hasSelectedConversation && !isAgentDirectMessage ? `#${activeConversation.title}` : chatTitle
   const chatDescription = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
-      : 'General channel for members and agent runs'
+      : activeConversation.key === 'all'
+        ? 'General channel for members and agent runs'
+        : activeConversation.description?.trim() ?? ''
   const emptyTitle = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
@@ -101,7 +109,7 @@ export function ChannelWorkspace({
         ? `Message ${selectedAgent.agent.name} to start a private run.`
         : 'This agent is not ready to receive messages yet.'
       : readyGroupAgentCount > 0
-        ? `Message ${chatTitle} to start a group run.`
+        ? `Message ${chatDisplayName} to start a group run.`
         : (
             <>
               First, {createAgentLink}; then message #all to start a run.
@@ -116,7 +124,7 @@ export function ChannelWorkspace({
     : selectedAgentReady
       ? isAgentDirectMessage
         ? `Message ${selectedAgent?.agent.name ?? activeConversation.title}`
-        : `Message ${chatTitle}`
+        : `Message ${chatDisplayName}`
       : isAgentDirectMessage
         ? 'Agent is not ready yet'
         : 'Create a ready agent first'
@@ -124,10 +132,12 @@ export function ChannelWorkspace({
     ? 'Chat'
     : isAgentDirectMessage
       ? `Private chat ${chatTitle}`
-      : 'Channel all'
-  const isAgentTyping = messages.some(
-    (message) => message.senderType === 'agent' && message.status === 'streaming',
-  )
+      : `Group ${chatDisplayName}`
+  const isAgentTyping =
+    isAgentDirectMessage &&
+    messages.some(
+      (message) => message.senderType === 'agent' && message.status === 'streaming',
+    )
   const visibleMessages = messages.filter(
     (message) =>
       !(
@@ -140,6 +150,10 @@ export function ChannelWorkspace({
   const userDisplayName = user?.name?.trim() || user?.email || 'User'
   const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
+  const chatTitleClassName =
+    hasSelectedConversation && !isAgentDirectMessage
+      ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
+      : 'min-w-0 truncate text-xl font-semibold leading-tight'
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) {
       return
@@ -167,7 +181,7 @@ export function ChannelWorkspace({
           </span>
           <div className="grid min-w-0 gap-0.5">
             <div className="flex min-w-0 items-center gap-2">
-              <h1 className="min-w-0 truncate text-xl font-semibold leading-tight">{chatTitle}</h1>
+              <h1 className={chatTitleClassName}>{chatTitle}</h1>
               {isAgentTyping && (
                 <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-[var(--cds-text-primary)]">
                   <span
@@ -178,26 +192,45 @@ export function ChannelWorkspace({
                 </span>
               )}
             </div>
-            <p className="truncate text-sm leading-snug text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
-              {chatDescription}
-            </p>
+            {chatDescription.length > 0 && (
+              <p className="truncate text-sm leading-snug text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
+                {chatDescription}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex min-w-0 items-center gap-3">
-          <button
-            className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 border border-transparent bg-transparent px-2.5 font-semibold text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          <IconButton
+            kind="ghost"
+            label="Tasks"
+            size="md"
+            align="bottom"
             type="button"
           >
             <Task size={16} />
-            <span>Tasks</span>
-          </button>
-          <button
-            className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 border border-transparent bg-transparent px-2.5 font-semibold text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          </IconButton>
+          <IconButton
+            kind="ghost"
+            label="Files"
+            size="md"
+            align="bottom"
             type="button"
           >
             <Folder size={16} />
-            <span>Files</span>
-          </button>
+          </IconButton>
+          {hasSelectedConversation && (
+            <IconButton
+              kind="ghost"
+              label={canEditConversation ? 'Settings' : 'System group'}
+              size="md"
+              align="bottom-end"
+              type="button"
+              disabled={!canEditConversation}
+              onClick={openEditConversation}
+            >
+              <Settings size={16} />
+            </IconButton>
+          )}
         </div>
       </header>
 
@@ -290,7 +323,7 @@ export function ChannelWorkspace({
         )}
         <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
           <label className="sr-only" htmlFor="run-prompt">
-            {`Message ${chatTitle}`}
+            {`Message ${chatDisplayName}`}
           </label>
           <textarea
             id="run-prompt"

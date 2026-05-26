@@ -19,6 +19,7 @@ export interface Conversation {
   type: ConversationType;
   key?: string;
   title: string;
+  description?: string;
   directAgentId?: AgentId;
   agentIds?: AgentId[];
   status: ConversationStatus;
@@ -58,10 +59,21 @@ export interface EnsureDirectConversationResponse {
 
 export interface CreateGroupConversationRequest {
   title: string;
+  description?: string;
   agentIds: AgentId[];
 }
 
 export interface CreateGroupConversationResponse {
+  conversation: Conversation;
+}
+
+export interface UpdateGroupConversationRequest {
+  title: string;
+  description?: string;
+  agentIds: AgentId[];
+}
+
+export interface UpdateGroupConversationResponse {
   conversation: Conversation;
 }
 

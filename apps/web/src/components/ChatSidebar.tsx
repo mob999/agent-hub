@@ -104,14 +104,17 @@ export function ChatSidebar({
             <button
               className={`${sidebarButton} ${
                 groupChatSelected ? selectedListItem : transparentListItem
-              } min-h-10 grid-cols-[1rem_minmax(0,1fr)_auto] gap-1 px-3 font-semibold`}
+              } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
               type="button"
               key={conversation.id}
               aria-current={groupChatSelected ? 'page' : undefined}
               onClick={() => selectGroup(conversation.id)}
             >
-              <span className="text-base text-[var(--cds-text-primary)]">#</span>
-              <span className="min-w-0 truncate">{conversation.title}</span>
+              <span className="grid h-6 w-5 place-items-center text-base leading-5 text-[var(--cds-text-primary)]" aria-hidden="true">
+                #
+              </span>
+              <span className="min-w-0 truncate text-base leading-5 text-[var(--cds-text-primary)]">{conversation.title}</span>
+              <span aria-hidden="true" />
             </button>
           )
         })}

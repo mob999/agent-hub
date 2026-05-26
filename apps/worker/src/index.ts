@@ -76,17 +76,13 @@ const gateway = new DaemonGateway({
     persistConversationArtifactUpload(db, {
       contentBase64: message.contentBase64,
       filename: message.filename,
-      kind: message.kind,
-      metadata: message.metadata,
-      mimeType: message.mimeType,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       runId: message.runId,
       sizeBytes: message.sizeBytes,
+      sourcePath: message.sourcePath,
       storageRoot: env.AGENTHUB_STORAGE_ROOT,
       taskId: message.taskId,
       title: message.title,
-      targetPath: message.targetPath,
-      displayMode: message.displayMode,
     }),
   onArtifactActionCompleted: async (message) => {
     await completeConversationArtifactAction(db, {
@@ -265,9 +261,8 @@ while (!shuttingDown) {
         contentBase64: assignment.contentBase64,
         daemonDeviceId: assignment.daemonDeviceId,
         filename: assignment.filename,
-        metadata: assignment.metadata,
         sentAt: new Date().toISOString(),
-        targetPath: assignment.targetPath,
+        sourcePath: assignment.sourcePath,
         workspacePath: assignment.workspacePath,
       });
 

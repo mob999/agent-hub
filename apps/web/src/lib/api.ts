@@ -131,16 +131,6 @@ export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
 export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-export type ConversationArtifactKind =
-  | 'file'
-  | 'diff'
-  | 'web_preview'
-  | 'document'
-  | 'slide_deck'
-  | 'image'
-  | 'workflow_result'
-  | 'deployment'
-  | 'report'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
 export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
 export type ConversationArtifactActionStatus =
@@ -194,12 +184,9 @@ export interface ConversationArtifact {
   taskId?: string
   runId: string
   creatorAgentId: string
-  kind: ConversationArtifactKind
   status: ConversationArtifactStatus
   title: string
   filename: string
-  mimeType?: string
-  metadata?: Record<string, unknown>
   sizeBytes: number
   downloadUrl?: string
   latestRevisionId?: string

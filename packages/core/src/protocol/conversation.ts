@@ -21,16 +21,6 @@ export type ConversationTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
-export type ConversationArtifactKind =
-  | "file"
-  | "diff"
-  | "web_preview"
-  | "document"
-  | "slide_deck"
-  | "image"
-  | "workflow_result"
-  | "deployment"
-  | "report";
 export type ConversationArtifactStatus =
   | "pending"
   | "ready"
@@ -43,12 +33,6 @@ export type ConversationArtifactActionStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
-export type ConversationArtifactDisplayMode =
-  | "code"
-  | "diff"
-  | "markdown"
-  | "preview"
-  | "record";
 
 export interface Conversation {
   id: ConversationId;
@@ -86,13 +70,10 @@ export interface ConversationArtifact {
   taskId?: ConversationTaskId;
   runId: RunId;
   creatorAgentId: AgentId;
-  kind: ConversationArtifactKind;
   status: ConversationArtifactStatus;
   title: string;
   filename: string;
-  mimeType?: string;
   sizeBytes: number;
-  metadata?: Record<string, unknown>;
   latestRevisionId?: ConversationArtifactRevisionId;
   downloadUrl?: string;
   createdAt: IsoDateTime;

@@ -42,6 +42,33 @@ function displayNameInitial(name: string): string {
   return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
 }
 
+function artifactLabel(filename: string): string {
+  const extension = filename.split('.').pop()?.toLowerCase()
+
+  switch (extension) {
+    case 'html':
+    case 'htm':
+      return 'HTML'
+    case 'md':
+    case 'markdown':
+    case 'mdx':
+      return 'Markdown'
+    case 'diff':
+    case 'patch':
+      return 'Diff'
+    case 'avif':
+    case 'gif':
+    case 'jpeg':
+    case 'jpg':
+    case 'png':
+    case 'svg':
+    case 'webp':
+      return 'Image'
+    default:
+      return 'File'
+  }
+}
+
 function mentionSearchTerm(value: string): string | null {
   const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(value)
 
@@ -571,7 +598,7 @@ export function ChannelWorkspace({
                           </p>
                         </div>
                         <span className="shrink-0 border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
-                          {artifact.kind}
+                          {artifactLabel(artifact.filename)}
                         </span>
                       </div>
                       <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">

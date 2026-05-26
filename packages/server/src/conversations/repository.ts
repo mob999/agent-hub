@@ -20,6 +20,7 @@ import type {
 import {
   agentHubAllMcpTools,
   agentHubNonOrchestratorMcpTools,
+  inferArtifactFileInfo,
 } from "@agent-hub/core";
 import {
   agents,
@@ -106,17 +107,13 @@ export interface AppendRunEventOptions {
 export interface PersistConversationArtifactUploadInput {
   contentBase64: string;
   filename: string;
-  mimeType?: string;
   publicApiBaseUrl?: string;
   runId: string;
   sizeBytes: number;
+  sourcePath?: string;
   storageRoot: string;
   taskId: string;
   title: string;
-  kind?: ConversationArtifact["kind"];
-  metadata?: Record<string, unknown>;
-  targetPath?: string;
-  displayMode?: string;
 }
 
 export interface CreateConversationArtifactRevisionInput {
@@ -223,13 +220,10 @@ export function toConversationArtifact(
     taskId: optionalString(row.taskId),
     runId: row.runId,
     creatorAgentId: row.creatorAgentId,
-    kind: row.kind as ConversationArtifact["kind"],
     status: row.status as ConversationArtifact["status"],
     title: row.title,
     filename: row.filename,
-    mimeType: optionalString(row.mimeType),
     sizeBytes: row.sizeBytes,
-    metadata: row.metadata ?? undefined,
     latestRevisionId: optionalString(row.latestRevisionId),
     downloadUrl:
       input.publicApiBaseUrl === undefined
@@ -1129,7 +1123,7 @@ export async function getConversationArtifactForUser(
   db: Db,
   input: { artifactId: string; ownerUserId: string; publicApiBaseUrl?: string },
 ): Promise<
-  | { artifact: ConversationArtifact; storageKey: string; mimeType: string | null }
+  | { artifact: ConversationArtifact; storageKey: string; sourcePath: string | null }
   | null
 > {
   const [row] = await db
@@ -1152,7 +1146,7 @@ export async function getConversationArtifactForUser(
       publicApiBaseUrl: input.publicApiBaseUrl,
     }),
     storageKey: row.storageKey,
-    mimeType: row.mimeType,
+    sourcePath: row.sourcePath,
   };
 }
 
@@ -1163,21 +1157,18 @@ function availableArtifactActions(
     return [];
   }
 
-  switch (artifact.kind) {
-    case "diff":
-      return ["apply"];
-    case "file":
-    case "document":
-    case "report":
-      return ["apply", "preview", "publish"];
-    case "web_preview":
-      return ["preview"];
-    case "deployment":
-    case "workflow_result":
-    case "image":
-    case "slide_deck":
-      return [];
+  const fileInfo = inferArtifactFileInfo({ filename: artifact.filename });
+  const actions: ConversationArtifactActionType[] = [];
+
+  if (fileInfo.canApply) {
+    actions.push("apply");
   }
+
+  if (fileInfo.canPreview) {
+    actions.push("preview");
+  }
+
+  return actions;
 }
 
 export async function getConversationArtifactDetailsForUser(
@@ -1421,8 +1412,7 @@ export async function getArtifactActionAssignment(
       contentBase64: string;
       daemonDeviceId: string;
       filename: string;
-      metadata?: Record<string, unknown>;
-      targetPath?: string;
+      sourcePath?: string;
       workspacePath: string;
     }
   | null
@@ -1456,7 +1446,6 @@ export async function getArtifactActionAssignment(
     storageKey,
     storageRoot: input.storageRoot,
   });
-  const metadata = row.artifact.metadata ?? {};
 
   return {
     actionId: row.action.id,
@@ -1465,10 +1454,7 @@ export async function getArtifactActionAssignment(
     contentBase64: content.toString("base64"),
     daemonDeviceId: row.run.daemonDeviceId,
     filename: row.artifact.filename,
-    metadata,
-    targetPath: typeof metadata.targetPath === "string"
-      ? metadata.targetPath
-      : undefined,
+    sourcePath: optionalString(row.artifact.sourcePath),
     workspacePath: row.run.workspacePath,
   };
 }
@@ -1555,7 +1541,7 @@ export async function persistConversationArtifactUpload(
   });
 
   if (writtenBytes !== input.sizeBytes) {
-    throw new Error("Artifact content size did not match upload metadata.");
+    throw new Error("Artifact content size did not match upload size.");
   }
 
   const now = new Date();
@@ -1568,20 +1554,12 @@ export async function persistConversationArtifactUpload(
       taskId: task.id,
       runId: input.runId,
       creatorAgentId: run.agentId,
-      kind: input.kind ?? "report",
       status: "ready",
       title: input.title.trim(),
       filename,
-      mimeType: input.mimeType,
+      sourcePath: input.sourcePath,
       sizeBytes: writtenBytes,
       storageKey,
-      metadata: {
-        ...(input.metadata ?? {}),
-        ...(input.targetPath === undefined ? {} : { targetPath: input.targetPath }),
-        ...(input.displayMode === undefined
-          ? {}
-          : { displayMode: input.displayMode }),
-      },
       createdAt: now,
       updatedAt: now,
     })
@@ -1878,8 +1856,6 @@ function readUploadArtifactToolInput(
   const title = artifactInput.title.trim();
   const localPath = artifactInput.localPath.trim();
   const filename = artifactInput.filename?.trim();
-  const mimeType = artifactInput.mimeType?.trim();
-  const targetPath = artifactInput.targetPath?.trim();
 
   return title.length > 0 &&
     title.length <= 160 &&
@@ -1890,12 +1866,7 @@ function readUploadArtifactToolInput(
         taskId: artifactInput.taskId,
         title,
         localPath,
-        kind: artifactInput.kind,
         filename: filename && filename.length > 0 ? filename : undefined,
-        mimeType: mimeType && mimeType.length > 0 ? mimeType : undefined,
-        metadata: artifactInput.metadata,
-        targetPath: targetPath && targetPath.length > 0 ? targetPath : undefined,
-        displayMode: artifactInput.displayMode,
       }
     : null;
 }

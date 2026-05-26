@@ -97,11 +97,9 @@ describe("conversation protocol", () => {
       taskId: "00000000-0000-4000-8000-000000000010",
       runId: "00000000-0000-4000-8000-000000000016",
       creatorAgentId: "00000000-0000-4000-8000-000000000015",
-      kind: "report",
       status: "ready",
       title: "Implementation report",
       filename: "implementation-report.md",
-      mimeType: "text/markdown",
       sizeBytes: 2048,
       downloadUrl:
         "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000020/download",

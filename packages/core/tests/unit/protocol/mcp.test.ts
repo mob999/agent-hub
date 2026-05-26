@@ -97,13 +97,6 @@ describe("AgentHub MCP protocol", () => {
       title: "Research report",
       localPath: "artifacts/report.md",
       filename: "report.md",
-      kind: "diff",
-      metadata: {
-        targetPath: "src/page.tsx",
-      },
-      mimeType: "text/markdown",
-      targetPath: "src/page.tsx",
-      displayMode: "diff",
     };
     const uploadResult: AgentHubUploadArtifactToolResult = {
       accepted: true,
@@ -114,11 +107,9 @@ describe("AgentHub MCP protocol", () => {
         taskId: uploadInput.taskId,
         runId: "00000000-0000-4000-8000-000000000014",
         creatorAgentId: "00000000-0000-4000-8000-000000000015",
-        kind: uploadInput.kind,
         status: "ready",
         title: uploadInput.title,
         filename: "report.md",
-        mimeType: "text/markdown",
         sizeBytes: 128,
         downloadUrl:
           "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000011/download",
@@ -133,8 +124,7 @@ describe("AgentHub MCP protocol", () => {
     };
 
     expect(uploadInput.localPath).toBe("artifacts/report.md");
-    expect(uploadResult.artifact.kind).toBe("diff");
-    expect(uploadInput.targetPath).toBe("src/page.tsx");
+    expect(uploadResult.artifact.filename).toBe("report.md");
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
   });
 });

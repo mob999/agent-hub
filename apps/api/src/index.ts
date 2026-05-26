@@ -14,6 +14,7 @@ import type {
 import {
   agentHubAllMcpTools,
   agentHubNonOrchestratorMcpTools,
+  inferArtifactFileInfo,
 } from "@agent-hub/core";
 import {
   appendRunEvent,
@@ -248,51 +249,6 @@ function previewUnavailableResponse(input: {
       status,
     },
   );
-}
-
-function artifactPreviewContentType(input: {
-  filename: string;
-  mimeType?: string | null;
-}): string {
-  if (input.mimeType !== undefined && input.mimeType !== null) {
-    return input.mimeType;
-  }
-
-  const filename = input.filename.toLowerCase();
-
-  if (filename.endsWith(".html") || filename.endsWith(".htm")) {
-    return "text/html; charset=utf-8";
-  }
-
-  if (filename.endsWith(".css")) {
-    return "text/css; charset=utf-8";
-  }
-
-  if (filename.endsWith(".js") || filename.endsWith(".mjs")) {
-    return "text/javascript; charset=utf-8";
-  }
-
-  if (filename.endsWith(".json")) {
-    return "application/json; charset=utf-8";
-  }
-
-  if (filename.endsWith(".svg")) {
-    return "image/svg+xml";
-  }
-
-  if (filename.endsWith(".png")) {
-    return "image/png";
-  }
-
-  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
-    return "image/jpeg";
-  }
-
-  if (filename.endsWith(".webp")) {
-    return "image/webp";
-  }
-
-  return "application/octet-stream";
 }
 
 function groupChatMcpToolsForAgent(input: {
@@ -1997,151 +1953,58 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
     );
   }
 
-  const previewAction = details.actions.find(
-    (action) =>
-      action.type === "preview" &&
-      action.status === "succeeded" &&
-      typeof action.result?.previewUrl === "string",
-  );
-  const previewUrl =
-    typeof previewAction?.result?.previewUrl === "string"
-      ? previewAction.result.previewUrl
-      : typeof details.artifact.metadata?.previewUrl === "string"
-        ? details.artifact.metadata.previewUrl
-        : undefined;
   const suffix = c.req.param("*") ?? "";
+  const fileInfo = inferArtifactFileInfo({
+    filename: details.artifact.filename,
+  });
 
-  const serveStoredPreview = async (): Promise<Response> => {
-    if (details.artifact.kind !== "web_preview") {
-      return c.json(
-        {
-          error: {
-            code: "PREVIEW_NOT_READY",
-            message: "Preview is not ready.",
-          },
-        },
-        404,
-      );
-    }
-
-    if (suffix.length > 0) {
-      return previewUnavailableResponse({
-        message:
-          "This preview is a single uploaded file and does not include the requested asset path.",
-        status: 404,
-      });
-    }
-
-    const record = await getConversationArtifactForUser(db, {
-      artifactId: details.artifact.id,
-      ownerUserId: user.id,
-    });
-
-    if (record === null) {
-      return c.json(
-        {
-          error: {
-            code: "ARTIFACT_NOT_FOUND",
-            message: "Artifact was not found.",
-          },
-        },
-        404,
-      );
-    }
-
-    const body = await readArtifactContent({
-      storageKey: record.storageKey,
-      storageRoot: env.AGENTHUB_STORAGE_ROOT,
-    });
-    const arrayBuffer = body.buffer.slice(
-      body.byteOffset,
-      body.byteOffset + body.byteLength,
-    ) as ArrayBuffer;
-
-    return new Response(arrayBuffer, {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": artifactPreviewContentType({
-          filename: record.artifact.filename,
-          mimeType: record.mimeType,
-        }),
-      },
-      status: 200,
-    });
-  };
-
-  if (previewUrl === undefined) {
-    return serveStoredPreview();
-  }
-
-  let targetUrl: URL;
-  try {
-    targetUrl = new URL(previewUrl);
-  } catch {
+  if (!fileInfo.canPreview) {
     return previewUnavailableResponse({
-      message: "The preview URL is invalid.",
-      previewUrl,
-      status: 400,
-    });
-  }
-
-  if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
-    return previewUnavailableResponse({
-      message: "Only HTTP and HTTPS preview URLs are supported.",
-      previewUrl,
-      status: 400,
+      message: "This artifact type does not support inline preview.",
+      status: 404,
     });
   }
 
   if (suffix.length > 0) {
-    targetUrl.pathname = `${targetUrl.pathname.replace(/\/$/, "")}/${suffix}`;
-  }
-  targetUrl.search = new URL(c.req.url).search;
-
-  let response: Response;
-  try {
-    response = await fetch(targetUrl);
-  } catch (error) {
-    logger.warn(
-      {
-        artifactId: details.artifact.id,
-        err: error,
-        previewUrl: targetUrl.toString(),
-      },
-      "Artifact preview proxy target is unavailable",
-    );
-
-    if (details.artifact.kind === "web_preview" && suffix.length === 0) {
-      return serveStoredPreview();
-    }
-
     return previewUnavailableResponse({
       message:
-        "The local preview server is not reachable. Start the preview command and try again.",
-      previewUrl: targetUrl.toString(),
-      status: 502,
+        "This preview is a single uploaded file and does not include the requested asset path.",
+      status: 404,
     });
   }
 
-  const body = await response.arrayBuffer();
-  const headers = new Headers();
-  for (const headerName of [
-    "content-type",
-    "cache-control",
-    "etag",
-    "last-modified",
-  ]) {
-    const value = response.headers.get(headerName);
+  const record = await getConversationArtifactForUser(db, {
+    artifactId: details.artifact.id,
+    ownerUserId: user.id,
+  });
 
-    if (value !== null) {
-      headers.set(headerName, value);
-    }
+  if (record === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact was not found.",
+        },
+      },
+      404,
+    );
   }
 
-  return new Response(body, {
-    headers,
-    status: response.status,
-    statusText: response.statusText,
+  const body = await readArtifactContent({
+    storageKey: record.storageKey,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  });
+  const arrayBuffer = body.buffer.slice(
+    body.byteOffset,
+    body.byteOffset + body.byteLength,
+  ) as ArrayBuffer;
+
+  return new Response(arrayBuffer, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": fileInfo.mimeType,
+    },
+    status: 200,
   });
 });
 
@@ -2292,7 +2155,9 @@ app.get("/artifacts/:artifactId/download", async (c) => {
       "content-disposition":
         `attachment; filename="${record.artifact.filename.replace(/"/g, "_")}"`,
       "content-length": String(content.byteLength),
-      "content-type": record.mimeType ?? "application/octet-stream",
+      "content-type": inferArtifactFileInfo({
+        filename: record.artifact.filename,
+      }).mimeType,
     },
   });
 });

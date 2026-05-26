@@ -1,11 +1,10 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
-import Editor, { DiffEditor } from '@monaco-editor/react'
+import Editor from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ConversationArtifact,
-  ConversationArtifactAction,
   ConversationArtifactActionType,
   ConversationArtifactDetails,
   CreateConversationArtifactActionResponse,
@@ -23,55 +22,123 @@ interface ArtifactWorkspaceProps {
   onRefreshArtifacts?: () => void
 }
 
-function languageFromFilename(filename: string): string {
+type ArtifactFileCategory = 'html' | 'markdown' | 'diff' | 'image' | 'text' | 'binary'
+
+interface ArtifactFileInfo {
+  category: ArtifactFileCategory
+  label: string
+  language: string
+  canEdit: boolean
+  canPreview: boolean
+}
+
+const imageExtensions = new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp'])
+const textLanguages: Record<string, string> = {
+  bash: 'shell',
+  c: 'c',
+  cc: 'cpp',
+  cjs: 'javascript',
+  cpp: 'cpp',
+  cs: 'csharp',
+  css: 'css',
+  csv: 'plaintext',
+  env: 'plaintext',
+  go: 'go',
+  h: 'c',
+  hpp: 'cpp',
+  ini: 'ini',
+  java: 'java',
+  js: 'javascript',
+  json: 'json',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  py: 'python',
+  rs: 'rust',
+  sh: 'shell',
+  sql: 'sql',
+  toml: 'toml',
+  ts: 'typescript',
+  tsx: 'typescript',
+  txt: 'plaintext',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  zsh: 'shell',
+}
+
+function extensionFromFilename(filename: string): string {
   const extension = filename.split('.').pop()?.toLowerCase()
 
+  return extension && extension !== filename.toLowerCase() ? extension : ''
+}
+
+function inferArtifactFileInfo(filename: string): ArtifactFileInfo {
+  const extension = extensionFromFilename(filename)
+
   switch (extension) {
-    case 'css':
-      return 'css'
     case 'html':
-      return 'html'
-    case 'js':
-    case 'mjs':
-    case 'cjs':
-      return 'javascript'
-    case 'json':
-      return 'json'
+    case 'htm':
+      return {
+        category: 'html',
+        label: 'HTML',
+        language: 'html',
+        canEdit: false,
+        canPreview: true,
+      }
     case 'md':
     case 'markdown':
-      return 'markdown'
-    case 'ts':
-      return 'typescript'
-    case 'tsx':
-      return 'typescript'
-    case 'jsx':
-      return 'javascript'
-    case 'yml':
-    case 'yaml':
-      return 'yaml'
-    default:
-      return 'plaintext'
+    case 'mdx':
+      return {
+        category: 'markdown',
+        label: 'Markdown',
+        language: 'markdown',
+        canEdit: true,
+        canPreview: true,
+      }
+    case 'diff':
+    case 'patch':
+      return {
+        category: 'diff',
+        label: 'Diff',
+        language: 'diff',
+        canEdit: false,
+        canPreview: false,
+      }
   }
+
+  if (imageExtensions.has(extension)) {
+    return {
+      category: 'image',
+      label: 'Image',
+      language: 'plaintext',
+      canEdit: false,
+      canPreview: true,
+    }
+  }
+
+  const language = textLanguages[extension]
+
+  return language === undefined
+    ? {
+        category: 'binary',
+        label: 'File',
+        language: 'plaintext',
+        canEdit: false,
+        canPreview: false,
+      }
+    : {
+        category: 'text',
+        label: 'File',
+        language,
+        canEdit: true,
+        canPreview: false,
+      }
 }
 
-function readMetadataString(
-  metadata: Record<string, unknown> | undefined,
-  key: string,
-): string | undefined {
-  const value = metadata?.[key]
+function shouldLoadArtifactContent(filename: string): boolean {
+  const fileInfo = inferArtifactFileInfo(filename)
 
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-function previewUrlFromActions(actions: ConversationArtifactAction[]): string | undefined {
-  const action = actions.find(
-    (candidate) =>
-      candidate.type === 'preview' &&
-      candidate.status === 'succeeded' &&
-      typeof candidate.result?.previewUrl === 'string',
-  )
-
-  return action?.result?.previewUrl as string | undefined
+  return fileInfo.category === 'markdown' || fileInfo.category === 'diff' || fileInfo.category === 'text'
 }
 
 export function ArtifactWorkspace({
@@ -91,7 +158,7 @@ export function ArtifactWorkspace({
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [runningAction, setRunningAction] = useState<ConversationArtifactActionType | null>(null)
-  const [leftInfoPanel, setLeftInfoPanel] = useState<'metadata' | 'history' | null>(null)
+  const [leftInfoPanel, setLeftInfoPanel] = useState<'details' | 'history' | null>(null)
   const markdownEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const markdownScrollDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const markdownContentDisposableRef = useRef<{ dispose: () => void } | null>(null)
@@ -104,9 +171,13 @@ export function ArtifactWorkspace({
 
     let cancelled = false
 
+    const contentRequest = shouldLoadArtifactContent(selectedArtifact.filename)
+      ? apiRequest<GetConversationArtifactContentResponse>(`/artifacts/${selectedArtifact.id}/content`)
+      : Promise.resolve({ content: '' })
+
     Promise.all([
       apiRequest<ConversationArtifactDetails>(`/artifacts/${selectedArtifact.id}`),
-      apiRequest<GetConversationArtifactContentResponse>(`/artifacts/${selectedArtifact.id}/content`),
+      contentRequest,
     ])
       .then(([detailsResponse, contentResponse]) => {
         if (cancelled) {
@@ -134,17 +205,12 @@ export function ArtifactWorkspace({
   const isLoading = selectedArtifact !== null && details?.artifact.id !== selectedArtifact.id && error === null
   const artifact = isLoading ? selectedArtifact : details?.artifact ?? selectedArtifact
   const availableActions = details?.availableActions ?? []
-  const rawPreviewUrl =
-    previewUrlFromActions(details?.actions ?? []) ??
-    readMetadataString(artifact?.metadata, 'previewUrl')
-  const previewUrl = artifact !== null && (artifact.kind === 'web_preview' || rawPreviewUrl !== undefined)
+  const fileInfo = inferArtifactFileInfo(artifact?.filename ?? '')
+  const previewUrl = artifact !== null && fileInfo.canPreview
     ? apiUrl(`/artifacts/${artifact.id}/preview/`)
     : undefined
-  const canEdit =
-    artifact !== null &&
-    (artifact.kind === 'file' || artifact.kind === 'report' || artifact.kind === 'document')
-  const isMarkdown = artifact?.kind === 'report' || artifact?.kind === 'document' || languageFromFilename(artifact?.filename ?? '') === 'markdown'
-  const originalDiff = readMetadataString(artifact?.metadata, 'originalContent') ?? ''
+  const canEdit = artifact !== null && fileInfo.canEdit
+  const isMarkdown = fileInfo.category === 'markdown'
 
   const syncMarkdownPreviewScroll = useCallback(() => {
     const editor = markdownEditorRef.current
@@ -289,6 +355,7 @@ export function ArtifactWorkspace({
         <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
+            const itemFileInfo = inferArtifactFileInfo(item.filename)
 
             return (
               <button
@@ -304,17 +371,18 @@ export function ArtifactWorkspace({
                 <span className="truncate font-semibold">{item.title}</span>
                 <span className="truncate text-xs">{item.filename}</span>
                 <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-[0.7rem] uppercase">
-                  {item.kind}
+                  {itemFileInfo.label}
                 </span>
               </button>
             )
           })}
         </div>
         <div className="grid self-end border-t border-[var(--cds-border-subtle-01)]">
-          {leftInfoPanel === 'metadata' && (
+          {leftInfoPanel === 'details' && (
             <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3 text-sm">
-              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Metadata</h3>
-              <p className="truncate text-[var(--cds-text-primary)]">{artifact?.kind}</p>
+              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Details</h3>
+              <p className="truncate text-[var(--cds-text-primary)]">{fileInfo.label}</p>
+              <p className="truncate text-[var(--cds-text-secondary)]">{artifact?.filename}</p>
               <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil(artifact.sizeBytes / 1024)) : 0} KB</p>
               {artifact && <p className="text-[var(--cds-text-secondary)]">Updated {formatTime(artifact.updatedAt)}</p>}
             </section>
@@ -343,7 +411,7 @@ export function ArtifactWorkspace({
             </section>
           )}
           <div className="grid grid-cols-2">
-            {(['metadata', 'history'] as const).map((panel) => (
+            {(['details', 'history'] as const).map((panel) => (
               <button
                 key={panel}
                 type="button"
@@ -445,7 +513,11 @@ export function ArtifactWorkspace({
             <div className="grid h-full place-items-center">
               <InlineLoading description="Loading artifact..." status="active" />
             </div>
-          ) : artifact?.kind === 'web_preview' ? (
+          ) : artifact === null ? (
+            <div className="grid h-full min-h-0 place-items-center text-[var(--cds-text-secondary)]">
+              Select an artifact.
+            </div>
+          ) : fileInfo.category === 'html' ? (
             previewUrl ? (
               <iframe
                 className="h-full min-h-0 w-full border-0 bg-white"
@@ -457,12 +529,25 @@ export function ArtifactWorkspace({
                 Start Preview to create a preview URL.
               </div>
             )
-          ) : artifact?.kind === 'diff' ? (
-            <DiffEditor
+          ) : fileInfo.category === 'image' ? (
+            previewUrl ? (
+              <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[var(--cds-layer-01)] p-3">
+                <img
+                  alt={artifact.title}
+                  className="max-h-full max-w-full object-contain"
+                  src={previewUrl}
+                />
+              </div>
+            ) : (
+              <div className="grid h-full min-h-0 place-items-center text-[var(--cds-text-secondary)]">
+                Preview is not available.
+              </div>
+            )
+          ) : fileInfo.category === 'diff' ? (
+            <Editor
               height="100%"
-              original={originalDiff}
-              modified={draft}
-              language={languageFromFilename(artifact.filename)}
+              language="diff"
+              value={draft}
               options={{ readOnly: true, minimap: { enabled: false } }}
             />
           ) : isMarkdown ? (
@@ -484,13 +569,20 @@ export function ArtifactWorkspace({
               </div>
             </div>
           ) : (
-            <Editor
-              height="100%"
-              language={languageFromFilename(artifact?.filename ?? '')}
-              value={draft}
-              options={{ minimap: { enabled: false }, readOnly: !canEdit, wordWrap: 'on' }}
-              onChange={(value) => setDraft(value ?? '')}
-            />
+            fileInfo.category === 'text' ? (
+              <Editor
+                height="100%"
+                language={fileInfo.language}
+                value={draft}
+                options={{ minimap: { enabled: false }, readOnly: !canEdit, wordWrap: 'on' }}
+                onChange={(value) => setDraft(value ?? '')}
+              />
+            ) : (
+              <div className="grid h-full min-h-0 place-items-center content-center gap-2 text-center text-[var(--cds-text-secondary)]">
+                <Download size={32} />
+                <p>This file cannot be previewed inline.</p>
+              </div>
+            )
           )}
         </div>
       </main>

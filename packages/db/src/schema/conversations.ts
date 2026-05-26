@@ -163,14 +163,12 @@ export const conversationArtifacts = pgTable(
     creatorAgentId: uuid("creator_agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
-    kind: varchar("kind", { length: 32 }).notNull(),
     status: varchar("status", { length: 32 }).notNull().default("ready"),
     title: varchar("title", { length: 160 }).notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
-    mimeType: varchar("mime_type", { length: 160 }),
+    sourcePath: text("source_path"),
     sizeBytes: integer("size_bytes").notNull(),
     storageKey: text("storage_key").notNull(),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     latestRevisionId: uuid("latest_revision_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -260,4 +258,3 @@ export const conversationArtifactActions = pgTable(
     ).on(table.status),
   }),
 );
-

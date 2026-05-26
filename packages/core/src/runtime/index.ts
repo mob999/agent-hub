@@ -10,6 +10,7 @@ import type { AgentRun, RunEvent } from "../protocol/index.js";
 
 export interface AgentRunArtifactUpload extends AgentHubUploadArtifactToolInput {
   filename: string;
+  sourcePath?: string;
   sizeBytes: number;
   contentBase64: string;
 }

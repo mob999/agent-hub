@@ -64,6 +64,13 @@
       "when": 1779790764096,
       "tag": "0008_new_runaways",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779811886322,
+      "tag": "0009_premium_roland_deschain",
+      "breakpoints": true
     }
   ]
 }

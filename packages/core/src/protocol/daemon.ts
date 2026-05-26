@@ -66,13 +66,9 @@ export type DaemonClientMessage =
       taskId: ConversationTaskId;
       title: string;
       filename: string;
-      mimeType?: string;
       sizeBytes: number;
       contentBase64: string;
-      kind?: ConversationArtifact["kind"];
-      metadata?: Record<string, unknown>;
-      targetPath?: string;
-      displayMode?: string;
+      sourcePath?: string;
       sentAt: IsoDateTime;
     }
   | {
@@ -130,8 +126,7 @@ export type DaemonServerMessage =
       filename: string;
       workspacePath: string;
       contentBase64: string;
-      metadata?: Record<string, unknown>;
-      targetPath?: string;
+      sourcePath?: string;
       sentAt: IsoDateTime;
     }
   | {

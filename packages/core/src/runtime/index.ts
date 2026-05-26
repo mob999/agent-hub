@@ -1,9 +1,17 @@
 import type {
+  AgentHubUploadArtifactToolInput,
+  AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
   AgentHubMcpToolName,
   DaemonRuntime,
 } from "../protocol/index.js";
 import type { AgentRun, RunEvent } from "../protocol/index.js";
+
+export interface AgentRunArtifactUpload extends AgentHubUploadArtifactToolInput {
+  filename: string;
+  sizeBytes: number;
+  contentBase64: string;
+}
 
 export interface AgentRunInput {
   run: AgentRun;
@@ -12,6 +20,9 @@ export interface AgentRunInput {
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
+  uploadArtifact?(
+    upload: AgentRunArtifactUpload,
+  ): Promise<AgentHubUploadArtifactToolResult>;
   abortSignal?: AbortSignal;
 }
 

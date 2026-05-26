@@ -1,8 +1,17 @@
 import type { AgentId, IsoDateTime } from "./agent.js";
-import type { ConversationMention, ConversationTaskId } from "./conversation.js";
+import type {
+  ConversationArtifact,
+  ConversationArtifactId,
+  ConversationMention,
+  ConversationTaskId,
+} from "./conversation.js";
 import type { RunId } from "./run.js";
 
-export type AgentHubMcpToolName = "send_message" | "create_task";
+export type AgentHubMcpToolName =
+  | "send_message"
+  | "create_task"
+  | "upload_artifact"
+  | "complete_task";
 
 export interface AgentHubSendMessageToolInput {
   content: string;
@@ -30,12 +39,39 @@ export interface AgentHubCreateTaskToolResult {
   };
 }
 
+export interface AgentHubUploadArtifactToolInput {
+  taskId: ConversationTaskId;
+  title: string;
+  localPath: string;
+  filename?: string;
+  mimeType?: string;
+}
+
+export interface AgentHubUploadArtifactToolResult {
+  accepted: true;
+  artifact: ConversationArtifact;
+}
+
+export interface AgentHubCompleteTaskToolInput {
+  taskId: ConversationTaskId;
+  summary: string;
+  artifactIds?: ConversationArtifactId[];
+}
+
+export interface AgentHubCompleteTaskToolResult {
+  accepted: true;
+}
+
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
-  | AgentHubCreateTaskToolInput;
+  | AgentHubCreateTaskToolInput
+  | AgentHubUploadArtifactToolInput
+  | AgentHubCompleteTaskToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
-  | AgentHubCreateTaskToolResult;
+  | AgentHubCreateTaskToolResult
+  | AgentHubUploadArtifactToolResult
+  | AgentHubCompleteTaskToolResult;
 
 export interface AgentHubMcpToolCall {
   runId: RunId;

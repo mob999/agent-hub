@@ -22,9 +22,11 @@ import {
   ensureDirectConversation,
   getAgentForUser,
   getConversationForUser,
+  getConversationArtifactForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
+  listConversationArtifactsForUser,
   listConversationTasksForUser,
   listConversationsForUser,
   getRunEventsForUser,
@@ -35,6 +37,7 @@ import {
   listRunningRunIdsByDaemonDevice,
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
+  readArtifactContent,
   toAgentRun,
   updateConversationOrchestrator,
   updateAgentProfileForUser,
@@ -1017,6 +1020,7 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
   const tasks = await listConversationTasksForUser(db, {
     conversationId: c.req.param("conversationId"),
     ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
   });
 
   if (tasks === null) {
@@ -1032,6 +1036,42 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
   }
 
   return c.json({ tasks });
+});
+
+app.get("/conversations/:conversationId/artifacts", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const artifacts = await listConversationArtifactsForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (artifacts === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ artifacts });
 });
 
 app.post("/conversations/:conversationId/messages", async (c) => {
@@ -1412,6 +1452,55 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     },
     202,
   );
+});
+
+app.use("/artifacts/*", requireAuth);
+app.get("/artifacts/:artifactId/download", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const record = await getConversationArtifactForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (record === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Artifact was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const content = await readArtifactContent({
+    storageKey: record.storageKey,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  });
+
+  return new Response(new Uint8Array(content), {
+    headers: {
+      "content-disposition":
+        `attachment; filename="${record.artifact.filename.replace(/"/g, "_")}"`,
+      "content-length": String(content.byteLength),
+      "content-type": record.mimeType ?? "application/octet-stream",
+    },
+  });
 });
 
 app.use("/runs", requireAuth);

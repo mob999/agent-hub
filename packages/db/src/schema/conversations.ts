@@ -1,6 +1,7 @@
 import {
   integer,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -122,6 +123,10 @@ export const conversationTasks = pgTable(
     title: varchar("title", { length: 160 }).notNull(),
     description: text("description"),
     status: varchar("status", { length: 32 }).notNull(),
+    summary: text("summary"),
+    resultArtifactIds: jsonb("result_artifact_ids").$type<string[]>(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    finalizerRunId: uuid("finalizer_run_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -138,6 +143,48 @@ export const conversationTasks = pgTable(
     conversationTasksAssigneeAgentIdIdx: index(
       "conversation_tasks_assignee_agent_id_idx",
     ).on(table.assigneeAgentId),
+  }),
+);
+
+export const conversationArtifacts = pgTable(
+  "conversation_artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => conversationTasks.id, {
+      onDelete: "set null",
+    }),
+    runId: uuid("run_id").notNull(),
+    creatorAgentId: uuid("creator_agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    title: varchar("title", { length: 160 }).notNull(),
+    filename: varchar("filename", { length: 255 }).notNull(),
+    mimeType: varchar("mime_type", { length: 160 }),
+    sizeBytes: integer("size_bytes").notNull(),
+    storageKey: text("storage_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationArtifactsConversationCreatedAtIdx: index(
+      "conversation_artifacts_conversation_created_at_idx",
+    ).on(table.conversationId, table.createdAt),
+    conversationArtifactsTaskIdIdx: index(
+      "conversation_artifacts_task_id_idx",
+    ).on(table.taskId),
+    conversationArtifactsRunIdIdx: index("conversation_artifacts_run_id_idx").on(
+      table.runId,
+    ),
+    conversationArtifactsCreatorAgentIdIdx: index(
+      "conversation_artifacts_creator_agent_id_idx",
+    ).on(table.creatorAgentId),
   }),
 );
 

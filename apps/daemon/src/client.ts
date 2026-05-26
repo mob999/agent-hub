@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { loadDaemonEnv } from "@agent-hub/config";
@@ -5,6 +6,8 @@ import type {
   DaemonRuntime,
   DaemonClientMessage,
   DaemonServerMessage,
+  AgentHubUploadArtifactToolResult,
+  AgentRunArtifactUpload,
   RunId,
 } from "@agent-hub/core";
 import { createLogger } from "@agent-hub/server";
@@ -46,6 +49,7 @@ function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | unde
 
 const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
+const artifactUploadTimeoutMs = 30_000;
 
 export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
@@ -62,6 +66,14 @@ export async function startDaemon(): Promise<void> {
     },
   });
   const abortControllers = new Map<RunId, AbortController>();
+  const pendingArtifactUploads = new Map<
+    string,
+    {
+      resolve(result: AgentHubUploadArtifactToolResult): void;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   let reconnectDelayMs = initialReconnectDelayMs;
 
   const handleMessage = (ws: WebSocket, data: WebSocket.RawData): void => {
@@ -79,6 +91,30 @@ export async function startDaemon(): Promise<void> {
     if (message.type === "run.cancel") {
       abortControllers.get(message.runId)?.abort();
       logger.info({ runId: message.runId }, "Run cancellation requested");
+      return;
+    }
+
+    if (
+      message.type === "artifact.upload.ack" ||
+      message.type === "artifact.upload.rejected"
+    ) {
+      const pending = pendingArtifactUploads.get(message.uploadId);
+
+      if (pending === undefined) {
+        return;
+      }
+
+      clearTimeout(pending.timer);
+      pendingArtifactUploads.delete(message.uploadId);
+
+      if (message.type === "artifact.upload.ack") {
+        pending.resolve({
+          accepted: true,
+          artifact: message.artifact,
+        });
+      } else {
+        pending.reject(new Error(message.reason));
+      }
       return;
     }
 
@@ -173,6 +209,37 @@ export async function startDaemon(): Promise<void> {
       "Accepted daemon run",
     );
 
+    const uploadArtifact = (
+      upload: AgentRunArtifactUpload,
+    ): Promise<AgentHubUploadArtifactToolResult> => {
+      const uploadId = randomUUID();
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingArtifactUploads.delete(uploadId);
+          reject(new Error("Artifact upload timed out."));
+        }, artifactUploadTimeoutMs);
+
+        pendingArtifactUploads.set(uploadId, {
+          resolve,
+          reject,
+          timer,
+        });
+        send(ws, {
+          type: "artifact.upload",
+          uploadId,
+          runId: message.run.id,
+          taskId: upload.taskId,
+          title: upload.title,
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+          sizeBytes: upload.sizeBytes,
+          contentBase64: upload.contentBase64,
+          sentAt: nowIsoDateTime(),
+        });
+      });
+    };
+
     void (async () => {
       try {
         for await (const event of adapter.run({
@@ -182,6 +249,7 @@ export async function startDaemon(): Promise<void> {
           workspacePath: message.workspacePath,
           runtime: message.runtime,
           agentHubMcpTools: message.agentHubMcpTools,
+          uploadArtifact,
           abortSignal: abortController.signal,
         })) {
           send(ws, {
@@ -261,6 +329,11 @@ export async function startDaemon(): Promise<void> {
       clearInterval(heartbeat);
       for (const abortController of abortControllers.values()) {
         abortController.abort();
+      }
+      for (const [uploadId, pending] of pendingArtifactUploads) {
+        clearTimeout(pending.timer);
+        pendingArtifactUploads.delete(uploadId);
+        pending.reject(new Error("Daemon websocket closed during artifact upload."));
       }
 
       const nextReconnectDelayMs = reconnectDelayMs;

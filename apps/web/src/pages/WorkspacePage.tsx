@@ -17,6 +17,7 @@ import {
   type AgentRunSummary,
   type AuthResponse,
   type Conversation,
+  type ConversationArtifact,
   type ConversationMessage,
   type ConversationTask,
   type CreateGroupConversationResponse,
@@ -91,6 +92,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
+  const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [runs, setRuns] = useState<LocalRun[]>([])
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
@@ -133,6 +135,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const activeConversationTasks = useMemo(
     () => (activeConversationId === null ? [] : tasksByConversation[activeConversationId] ?? []),
     [activeConversationId, tasksByConversation],
+  )
+  const activeConversationArtifacts = useMemo(
+    () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
+    [activeConversationId, artifactsByConversation],
   )
 
   const loadDevices = useCallback(async () => {
@@ -216,6 +222,22 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setTasksByConversation((current) => ({
         ...current,
         [conversationId]: response.tasks,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadArtifacts = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ artifacts: ConversationArtifact[] }>(
+        `/conversations/${conversationId}/artifacts`,
+      )
+      setArtifactsByConversation((current) => ({
+        ...current,
+        [conversationId]: response.artifacts,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -383,10 +405,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     const timer = window.setTimeout(() => {
       void loadMessages(activeConversationId)
       void loadTasks(activeConversationId)
+      void loadArtifacts(activeConversationId)
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [activeConversationId, loadMessages, loadTasks])
+  }, [activeConversationId, loadArtifacts, loadMessages, loadTasks])
 
   useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
@@ -450,10 +473,11 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     const timer = window.setInterval(() => {
       void loadMessages(activeConversationId)
       void loadTasks(activeConversationId)
+      void loadArtifacts(activeConversationId)
     }, 2000)
 
     return () => window.clearInterval(timer)
-  }, [activeConversationId, activeConversationMessages, loadMessages, loadTasks, runs])
+  }, [activeConversationId, activeConversationMessages, loadArtifacts, loadMessages, loadTasks, runs])
 
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
@@ -566,6 +590,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       })
       void loadMessages(activeConversation.id)
       void loadTasks(activeConversation.id)
+      void loadArtifacts(activeConversation.id)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
@@ -590,6 +615,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     if (activeConversationId !== null) {
       void loadMessages(activeConversationId)
       void loadTasks(activeConversationId)
+      void loadArtifacts(activeConversationId)
     }
     runs.forEach((localRun) => {
       void refreshRun(localRun.run.id)
@@ -607,6 +633,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setActiveConversationId(conversationId)
     void loadMessages(conversationId)
     void loadTasks(conversationId)
+    void loadArtifacts(conversationId)
   }
   const selectAgentConversation = async (agentId: string) => {
     try {
@@ -908,6 +935,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             activeConversation={activeConversation}
             messages={activeConversationMessages}
             tasks={activeConversationTasks}
+            artifacts={activeConversationArtifacts}
             agents={agents}
             user={user}
             prompt={prompt}

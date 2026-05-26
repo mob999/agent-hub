@@ -1,5 +1,6 @@
 import type {
   Conversation,
+  ConversationArtifact,
   CreateGroupConversationRequest,
   CreateGroupConversationResponse,
   ConversationMessage,
@@ -87,6 +88,23 @@ describe("conversation protocol", () => {
   });
 
   it("expresses conversation tasks", () => {
+    const artifact: ConversationArtifact = {
+      id: "00000000-0000-4000-8000-000000000020",
+      ownerUserId: "00000000-0000-4000-8000-000000000011",
+      conversationId: "00000000-0000-4000-8000-000000000012",
+      taskId: "00000000-0000-4000-8000-000000000010",
+      runId: "00000000-0000-4000-8000-000000000016",
+      creatorAgentId: "00000000-0000-4000-8000-000000000015",
+      kind: "report",
+      title: "Implementation report",
+      filename: "implementation-report.md",
+      mimeType: "text/markdown",
+      sizeBytes: 2048,
+      downloadUrl:
+        "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000020/download",
+      createdAt: "2026-05-26T00:00:01.000Z",
+      updatedAt: "2026-05-26T00:00:01.000Z",
+    };
     const task: ConversationTask = {
       id: "00000000-0000-4000-8000-000000000010",
       ownerUserId: "00000000-0000-4000-8000-000000000011",
@@ -98,13 +116,19 @@ describe("conversation protocol", () => {
       dispatchMessageId: "00000000-0000-4000-8000-000000000017",
       title: "Build the page",
       description: "Implement the task.",
-      status: "running",
+      status: "succeeded",
+      summary: "Built the page and uploaded a report.",
+      resultArtifactIds: [artifact.id],
+      artifacts: [artifact],
+      completedAt: "2026-05-26T00:00:02.000Z",
+      finalizerRunId: "00000000-0000-4000-8000-000000000021",
       createdAt: "2026-05-26T00:00:00.000Z",
       updatedAt: "2026-05-26T00:00:01.000Z",
     };
 
-    expect(task.status).toBe("running");
+    expect(task.status).toBe("succeeded");
     expect(task.assigneeRunId).toBeDefined();
+    expect(task.artifacts?.[0]?.downloadUrl).toContain("/download");
   });
 
   it("expresses streaming agent messages linked to runs", () => {

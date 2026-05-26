@@ -13,6 +13,7 @@ import {
   ensureRunQueueGroup,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
+  persistConversationArtifactUpload,
   readAgentProvisioningQueueMessages,
   readRunQueueMessages,
   setDaemonRuntimesStatus,
@@ -60,9 +61,23 @@ const gateway = new DaemonGateway({
     });
   },
   onRunEvent: async (event) => {
-    const result = await appendRunEvent(db, event);
+    const result = await appendRunEvent(db, event, {
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    });
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
   },
+  onArtifactUpload: async (message) =>
+    persistConversationArtifactUpload(db, {
+      contentBase64: message.contentBase64,
+      filename: message.filename,
+      mimeType: message.mimeType,
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      runId: message.runId,
+      sizeBytes: message.sizeBytes,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+      taskId: message.taskId,
+      title: message.title,
+    }),
 });
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
@@ -166,13 +181,18 @@ while (!shuttingDown) {
     const assigned = gateway.assignRun(message.job);
 
     if (!assigned) {
-      await appendRunEvent(db, {
-        type: "run.completed",
-        runId: message.job.run.id,
-        status: "failed",
-        error: `Daemon ${message.job.daemonDeviceId} is not connected.`,
-        createdAt: new Date().toISOString(),
-      });
+      const result = await appendRunEvent(
+        db,
+        {
+          type: "run.completed",
+          runId: message.job.run.id,
+          status: "failed",
+          error: `Daemon ${message.job.daemonDeviceId} is not connected.`,
+          createdAt: new Date().toISOString(),
+        },
+        { publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL },
+      );
+      await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
     }
 
     await ackRunQueueMessage(redis, message.id);

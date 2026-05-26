@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHubMcpRelay } from "../../src/mcp";
@@ -135,5 +139,96 @@ describe("AgentHubMcpRelay", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it("uploads artifacts only from inside the run workspace", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-relay-"));
+    await mkdir(path.join(workspacePath, "artifacts"), { recursive: true });
+    await writeFile(path.join(workspacePath, "artifacts", "report.md"), "# Report\n");
+    const uploaded: unknown[] = [];
+    const calls: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["upload_artifact"],
+      onArtifactUpload: (upload) => {
+        uploaded.push(upload);
+        return Promise.resolve({
+          accepted: true,
+          artifact: {
+            id: "artifact_1",
+            ownerUserId: "user_1",
+            conversationId: "conversation_1",
+            taskId: upload.taskId,
+            runId: "run_1",
+            creatorAgentId: "agent_1",
+            kind: "report",
+            title: upload.title,
+            filename: upload.filename,
+            sizeBytes: upload.sizeBytes,
+            createdAt: "2026-05-26T00:00:00.000Z",
+            updatedAt: "2026-05-26T00:00:00.000Z",
+          },
+        });
+      },
+      onToolCall: (call) => {
+        calls.push(call);
+        return { accepted: true };
+      },
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/upload_artifact`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_3",
+          input: {
+            taskId: "task_1",
+            title: "Report",
+            localPath: "artifacts/report.md",
+            mimeType: "text/markdown",
+          },
+        }),
+      },
+    );
+    const rejected = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/upload_artifact`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: {
+            taskId: "task_1",
+            title: "Report",
+            localPath: "../outside.md",
+          },
+        }),
+      },
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      artifact: {
+        id: "artifact_1",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(rejected.status).toBe(500);
+    expect(uploaded).toEqual([
+      expect.objectContaining({
+        taskId: "task_1",
+        filename: "report.md",
+        contentBase64: expect.any(String),
+      }),
+    ]);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        name: "upload_artifact",
+        toolCallId: "tool_3",
+      }),
+    ]);
   });
 });

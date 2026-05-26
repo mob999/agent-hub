@@ -4,6 +4,10 @@ import path from "node:path";
 import { z } from "zod";
 
 export const defaultAgentHubWorkspaceRoot = path.join(homedir(), ".agent-hub");
+export const defaultAgentHubStorageRoot = path.join(
+  defaultAgentHubWorkspaceRoot,
+  "storage",
+);
 
 const nodeEnvSchema = z
   .enum(["development", "test", "production"])
@@ -65,6 +69,14 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
+  AGENTHUB_STORAGE_ROOT: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim().length > 0
+        ? value
+        : defaultAgentHubStorageRoot,
+    z.string().min(1),
+  ),
+  AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -80,6 +92,14 @@ export const workerEnvSchema = z.object({
   REDIS_URL: z.string().min(1),
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_WORKER_CONSUMER_NAME: z.string().min(1).default("worker-local"),
+  AGENTHUB_STORAGE_ROOT: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim().length > 0
+        ? value
+        : defaultAgentHubStorageRoot,
+    z.string().min(1),
+  ),
+  AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
 });
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

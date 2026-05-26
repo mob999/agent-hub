@@ -1,8 +1,11 @@
 import type {
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubCompleteTaskToolInput,
   AgentHubMcpToolCall,
   AgentHubSendMessageToolInput,
+  AgentHubUploadArtifactToolInput,
+  AgentHubUploadArtifactToolResult,
 } from "../../../src/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -49,5 +52,44 @@ describe("AgentHub MCP protocol", () => {
 
     expect(call.name).toBe("create_task");
     expect(result.task.id).toBe(input.taskId);
+  });
+
+  it("expresses upload_artifact and complete_task tool calls", () => {
+    const uploadInput: AgentHubUploadArtifactToolInput = {
+      taskId: "00000000-0000-4000-8000-000000000010",
+      title: "Research report",
+      localPath: "artifacts/report.md",
+      filename: "report.md",
+      mimeType: "text/markdown",
+    };
+    const uploadResult: AgentHubUploadArtifactToolResult = {
+      accepted: true,
+      artifact: {
+        id: "00000000-0000-4000-8000-000000000011",
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        taskId: uploadInput.taskId,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        kind: "report",
+        title: uploadInput.title,
+        filename: "report.md",
+        mimeType: "text/markdown",
+        sizeBytes: 128,
+        downloadUrl:
+          "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000011/download",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    };
+    const completeInput: AgentHubCompleteTaskToolInput = {
+      taskId: uploadInput.taskId,
+      summary: "Report uploaded.",
+      artifactIds: [uploadResult.artifact.id],
+    };
+
+    expect(uploadInput.localPath).toBe("artifacts/report.md");
+    expect(uploadResult.artifact.kind).toBe("report");
+    expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
   });
 });

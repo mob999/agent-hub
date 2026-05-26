@@ -10,15 +10,26 @@ import {
 import type {
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubCompleteTaskToolInput,
+  AgentHubCompleteTaskToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
   AgentHubSendMessageToolInput,
   AgentHubSendMessageToolResult,
+  AgentHubUploadArtifactToolInput,
+  AgentHubUploadArtifactToolResult,
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
-const agentHubMcpToolNames = [sendMessageToolName, createTaskToolName] as const;
+const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
+const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
+const agentHubMcpToolNames = [
+  sendMessageToolName,
+  createTaskToolName,
+  uploadArtifactToolName,
+  completeTaskToolName,
+] as const;
 
 export async function startAgentHubMcpStdioServer(
   env: NodeJS.ProcessEnv = process.env,
@@ -121,6 +132,54 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
+      ...(enabledTools.has(uploadArtifactToolName)
+        ? [
+            {
+              name: uploadArtifactToolName,
+              description:
+                "Upload a report or result file from the current run workspace to the AgentHub group workspace.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  taskId: { type: "string", minLength: 1 },
+                  title: { type: "string", minLength: 1, maxLength: 160 },
+                  localPath: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Path to a file inside the current run workspace.",
+                  },
+                  filename: { type: "string" },
+                  mimeType: { type: "string" },
+                },
+                required: ["taskId", "title", "localPath"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(completeTaskToolName)
+        ? [
+            {
+              name: completeTaskToolName,
+              description:
+                "Mark the current assigned AgentHub task complete with a summary and optional uploaded artifact ids.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  taskId: { type: "string", minLength: 1 },
+                  summary: { type: "string", minLength: 1 },
+                  artifactIds: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                  },
+                },
+                required: ["taskId", "summary"],
+              },
+            },
+          ]
+        : []),
     ],
   }));
 
@@ -136,6 +195,10 @@ export async function startAgentHubMcpStdioServer(
         ? readSendMessageInput(request.params.arguments)
         : toolName === createTaskToolName
           ? readCreateTaskInput(request.params.arguments)
+          : toolName === uploadArtifactToolName
+            ? readUploadArtifactInput(request.params.arguments)
+            : toolName === completeTaskToolName
+              ? readCompleteTaskInput(request.params.arguments)
           : undefined;
 
     if (input === undefined) {
@@ -252,8 +315,80 @@ function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
   };
 }
 
+function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("upload_artifact arguments must be an object.");
+  }
+
+  const input = value as Record<string, unknown>;
+  const taskId = input.taskId;
+  const title = input.title;
+  const localPath = input.localPath;
+  const filename = input.filename;
+  const mimeType = input.mimeType;
+
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    throw new Error("upload_artifact.taskId is required.");
+  }
+
+  if (typeof title !== "string" || title.trim().length === 0) {
+    throw new Error("upload_artifact.title is required.");
+  }
+
+  if (typeof localPath !== "string" || localPath.trim().length === 0) {
+    throw new Error("upload_artifact.localPath is required.");
+  }
+
+  return {
+    taskId,
+    title: title.trim(),
+    localPath: localPath.trim(),
+    filename:
+      typeof filename === "string" && filename.trim().length > 0
+        ? filename.trim()
+        : undefined,
+    mimeType:
+      typeof mimeType === "string" && mimeType.trim().length > 0
+        ? mimeType.trim()
+        : undefined,
+  };
+}
+
+function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("complete_task arguments must be an object.");
+  }
+
+  const input = value as Record<string, unknown>;
+  const taskId = input.taskId;
+  const summary = input.summary;
+  const artifactIds = Array.isArray(input.artifactIds)
+    ? input.artifactIds.filter((artifactId): artifactId is string =>
+        typeof artifactId === "string" && artifactId.length > 0,
+      )
+    : undefined;
+
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    throw new Error("complete_task.taskId is required.");
+  }
+
+  if (typeof summary !== "string" || summary.trim().length === 0) {
+    throw new Error("complete_task.summary is required.");
+  }
+
+  return {
+    taskId,
+    summary: summary.trim(),
+    artifactIds: artifactIds && artifactIds.length > 0 ? artifactIds : undefined,
+  };
+}
+
 async function callRelayTool(input: {
-  input: AgentHubCreateTaskToolInput | AgentHubSendMessageToolInput;
+  input:
+    | AgentHubCreateTaskToolInput
+    | AgentHubSendMessageToolInput
+    | AgentHubUploadArtifactToolInput
+    | AgentHubCompleteTaskToolInput;
   relayUrl: string;
   sessionToken: string;
   toolCallId: string;
@@ -277,7 +412,11 @@ async function callRelayTool(input: {
     throw new Error(`AgentHub MCP relay rejected ${input.toolName}.`);
   }
 
-  return (await response.json()) as AgentHubCreateTaskToolResult | AgentHubSendMessageToolResult;
+  return (await response.json()) as
+    | AgentHubCreateTaskToolResult
+    | AgentHubSendMessageToolResult
+    | AgentHubUploadArtifactToolResult
+    | AgentHubCompleteTaskToolResult;
 }
 
 if (

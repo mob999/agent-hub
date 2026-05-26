@@ -90,6 +90,7 @@ export async function listRunsForUser(
 export async function appendRunEvent(
   db: Db,
   event: RunEvent,
+  options: Parameters<typeof appendRunEventToConversationMessage>[2] = {},
 ): Promise<AppendRunEventResult> {
   await db.insert(runEvents).values({
     runId: event.runId,
@@ -113,7 +114,7 @@ export async function appendRunEvent(
     })
     .where(eq(runs.id, event.runId));
 
-  return appendRunEventToConversationMessage(db, event);
+  return appendRunEventToConversationMessage(db, event, options);
 }
 
 export async function upsertDaemonDevice(

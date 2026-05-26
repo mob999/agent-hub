@@ -1,3 +1,4 @@
+export * from "./artifacts/index.js";
 export * from "./agents/index.js";
 export * from "./conversations/index.js";
 export * from "./logger/index.js";

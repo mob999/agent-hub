@@ -7,6 +7,7 @@ import type {
   DaemonDeviceId,
   DaemonServerMessage,
   DaemonRuntime,
+  ConversationArtifact,
   RunEvent,
   RunId,
 } from "@agent-hub/core";
@@ -26,6 +27,9 @@ export interface DaemonGatewayOptions {
   ): void | Promise<void>;
   onDaemonDisconnected?(deviceId: DaemonDeviceId): void | Promise<void>;
   onRunEvent(event: RunEvent): void | Promise<void>;
+  onArtifactUpload?(
+    message: Extract<DaemonClientMessage, { type: "artifact.upload" }>,
+  ): ConversationArtifact | Promise<ConversationArtifact>;
 }
 
 interface DaemonConnection {
@@ -170,6 +174,36 @@ export class DaemonGateway {
               );
             },
           );
+          return;
+        }
+
+        if (message.type === "artifact.upload") {
+          void Promise.resolve(this.#options.onArtifactUpload?.(message))
+            .then((artifact) => {
+              if (artifact === undefined) {
+                throw new Error("Artifact upload handler is not configured.");
+              }
+
+              send(ws, {
+                type: "artifact.upload.ack",
+                uploadId: message.uploadId,
+                artifact,
+                sentAt: nowIsoDateTime(),
+              });
+            })
+            .catch((error) => {
+              const err = toError(error);
+              send(ws, {
+                type: "artifact.upload.rejected",
+                uploadId: message.uploadId,
+                reason: err.message,
+                sentAt: nowIsoDateTime(),
+              });
+              this.#options.logger?.error(
+                { err, runId: message.runId, uploadId: message.uploadId },
+                "Failed to persist artifact upload",
+              );
+            });
           return;
         }
 

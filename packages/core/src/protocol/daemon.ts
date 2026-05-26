@@ -8,6 +8,7 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
+import type { ConversationArtifact, ConversationTaskId } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
 export interface DaemonRunAssignment {
@@ -51,6 +52,18 @@ export type DaemonClientMessage =
       sentAt: IsoDateTime;
     }
   | {
+      type: "artifact.upload";
+      uploadId: string;
+      runId: RunId;
+      taskId: ConversationTaskId;
+      title: string;
+      filename: string;
+      mimeType?: string;
+      sizeBytes: number;
+      contentBase64: string;
+      sentAt: IsoDateTime;
+    }
+  | {
       type: "agent.created";
       agentId: AgentId;
       daemonDeviceId: DaemonDeviceId;
@@ -88,4 +101,16 @@ export type DaemonServerMessage =
       type: "run.cancel";
       runId: RunId;
       reason?: string;
+    }
+  | {
+      type: "artifact.upload.ack";
+      uploadId: string;
+      artifact: ConversationArtifact;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "artifact.upload.rejected";
+      uploadId: string;
+      reason: string;
+      sentAt: IsoDateTime;
     };

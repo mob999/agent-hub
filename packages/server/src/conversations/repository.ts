@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AgentHubCreateTaskToolInput,
+  AgentHubCompleteTaskToolInput,
+  AgentHubUploadArtifactToolInput,
   AgentHubSendMessageToolInput,
   Conversation,
+  ConversationArtifact,
   ConversationId,
   ConversationMessage,
   ConversationTask,
@@ -12,6 +15,7 @@ import type {
 import {
   agents,
   conversationAgentMembers,
+  conversationArtifacts,
   conversationMessages,
   conversationTasks,
   conversations,
@@ -22,6 +26,12 @@ import {
 import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import { getRunnableAgentForUser } from "../agents/repository.js";
+import {
+  buildArtifactDownloadUrl,
+  conversationArtifactStorageKey,
+  sanitizeArtifactFilename,
+  writeArtifactContent,
+} from "../artifacts/index.js";
 import type { RunQueueJob } from "../queue/index.js";
 
 export const defaultGroupConversationKey = "all";
@@ -30,6 +40,7 @@ export const defaultGroupConversationTitle = "all";
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 type ConversationTaskRow = typeof conversationTasks.$inferSelect;
+type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
 
 export type CreateGroupConversationResult =
   | { status: "created"; conversation: Conversation }
@@ -54,6 +65,22 @@ export type UpdateConversationOrchestratorResult =
 
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
+}
+
+export interface AppendRunEventOptions {
+  publicApiBaseUrl?: string;
+}
+
+export interface PersistConversationArtifactUploadInput {
+  contentBase64: string;
+  filename: string;
+  mimeType?: string;
+  publicApiBaseUrl?: string;
+  runId: string;
+  sizeBytes: number;
+  storageRoot: string;
+  taskId: string;
+  title: string;
 }
 
 function optionalString(value: string | null): string | undefined {
@@ -106,7 +133,38 @@ export function toConversationMessage(
   };
 }
 
-export function toConversationTask(row: ConversationTaskRow): ConversationTask {
+export function toConversationArtifact(
+  row: ConversationArtifactRow,
+  input: { publicApiBaseUrl?: string } = {},
+): ConversationArtifact {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    taskId: optionalString(row.taskId),
+    runId: row.runId,
+    creatorAgentId: row.creatorAgentId,
+    kind: row.kind as ConversationArtifact["kind"],
+    title: row.title,
+    filename: row.filename,
+    mimeType: optionalString(row.mimeType),
+    sizeBytes: row.sizeBytes,
+    downloadUrl:
+      input.publicApiBaseUrl === undefined
+        ? undefined
+        : buildArtifactDownloadUrl({
+            artifactId: row.id,
+            publicApiBaseUrl: input.publicApiBaseUrl,
+          }),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toConversationTask(
+  row: ConversationTaskRow,
+  artifacts: ConversationArtifact[] = [],
+): ConversationTask {
   return {
     id: row.id,
     ownerUserId: row.ownerUserId,
@@ -119,6 +177,11 @@ export function toConversationTask(row: ConversationTaskRow): ConversationTask {
     title: row.title,
     description: optionalString(row.description),
     status: row.status as ConversationTask["status"],
+    summary: optionalString(row.summary),
+    resultArtifactIds: row.resultArtifactIds ?? undefined,
+    artifacts: artifacts.length > 0 ? artifacts : undefined,
+    completedAt: row.completedAt?.toISOString(),
+    finalizerRunId: optionalString(row.finalizerRunId),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -726,6 +789,7 @@ export async function listConversationTasksForUser(
   input: {
     conversationId: ConversationId;
     ownerUserId: string;
+    publicApiBaseUrl?: string;
   },
 ): Promise<ConversationTask[] | null> {
   const conversation = await getConversationForUser(db, input);
@@ -740,7 +804,168 @@ export async function listConversationTasksForUser(
     .where(eq(conversationTasks.conversationId, input.conversationId))
     .orderBy(desc(conversationTasks.createdAt));
 
-  return rows.map(toConversationTask);
+  const artifactRows = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(eq(conversationArtifacts.conversationId, input.conversationId))
+    .orderBy(desc(conversationArtifacts.createdAt));
+  const artifactsByTask = new Map<string, ConversationArtifact[]>();
+
+  for (const artifactRow of artifactRows) {
+    if (artifactRow.taskId === null) {
+      continue;
+    }
+
+    const artifacts = artifactsByTask.get(artifactRow.taskId) ?? [];
+    artifacts.push(
+      toConversationArtifact(artifactRow, {
+        publicApiBaseUrl: input.publicApiBaseUrl,
+      }),
+    );
+    artifactsByTask.set(artifactRow.taskId, artifacts);
+  }
+
+  return rows.map((row) => toConversationTask(row, artifactsByTask.get(row.id)));
+}
+
+export async function listConversationArtifactsForUser(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<ConversationArtifact[] | null> {
+  const conversation = await getConversationForUser(db, input);
+
+  if (conversation === null) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(eq(conversationArtifacts.conversationId, input.conversationId))
+    .orderBy(desc(conversationArtifacts.createdAt));
+
+  return rows.map((row) =>
+    toConversationArtifact(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    }),
+  );
+}
+
+export async function getConversationArtifactForUser(
+  db: Db,
+  input: { artifactId: string; ownerUserId: string; publicApiBaseUrl?: string },
+): Promise<
+  | { artifact: ConversationArtifact; storageKey: string; mimeType: string | null }
+  | null
+> {
+  const [row] = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(
+      and(
+        eq(conversationArtifacts.id, input.artifactId),
+        eq(conversationArtifacts.ownerUserId, input.ownerUserId),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  return {
+    artifact: toConversationArtifact(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    }),
+    storageKey: row.storageKey,
+    mimeType: row.mimeType,
+  };
+}
+
+export async function persistConversationArtifactUpload(
+  db: Db,
+  input: PersistConversationArtifactUploadInput,
+): Promise<ConversationArtifact> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      conversationId: runs.conversationId,
+      ownerUserId: runs.ownerUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, input.runId))
+    .limit(1);
+
+  if (run === undefined || run.conversationId === null) {
+    throw new Error("Artifact upload run was not found.");
+  }
+
+  const [task] = await db
+    .select()
+    .from(conversationTasks)
+    .where(
+      and(
+        eq(conversationTasks.id, input.taskId),
+        eq(conversationTasks.conversationId, run.conversationId),
+        eq(conversationTasks.assigneeRunId, input.runId),
+        eq(conversationTasks.assigneeAgentId, run.agentId),
+      ),
+    )
+    .limit(1);
+
+  if (task === undefined) {
+    throw new Error("Artifact task does not belong to this run.");
+  }
+
+  const artifactId = randomUUID();
+  const filename = sanitizeArtifactFilename(input.filename);
+  const storageKey = conversationArtifactStorageKey({
+    artifactId,
+    conversationId: run.conversationId,
+    filename,
+  });
+  const writtenBytes = await writeArtifactContent({
+    contentBase64: input.contentBase64,
+    storageKey,
+    storageRoot: input.storageRoot,
+  });
+
+  if (writtenBytes !== input.sizeBytes) {
+    throw new Error("Artifact content size did not match upload metadata.");
+  }
+
+  const now = new Date();
+  const [artifact] = await db
+    .insert(conversationArtifacts)
+    .values({
+      id: artifactId,
+      ownerUserId: run.ownerUserId,
+      conversationId: run.conversationId,
+      taskId: task.id,
+      runId: input.runId,
+      creatorAgentId: run.agentId,
+      kind: "report",
+      title: input.title.trim(),
+      filename,
+      mimeType: input.mimeType,
+      sizeBytes: writtenBytes,
+      storageKey,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (artifact === undefined) {
+    throw new Error("Artifact upload could not be persisted.");
+  }
+
+  return toConversationArtifact(artifact, {
+    publicApiBaseUrl: input.publicApiBaseUrl,
+  });
 }
 
 export async function createUserMessageAndRun(
@@ -999,6 +1224,71 @@ function readCreateTaskToolInput(
     : null;
 }
 
+function readUploadArtifactToolInput(
+  input: unknown,
+): AgentHubUploadArtifactToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("taskId" in input) ||
+    !("title" in input) ||
+    !("localPath" in input)
+  ) {
+    return null;
+  }
+
+  const artifactInput = input as AgentHubUploadArtifactToolInput;
+  const title = artifactInput.title.trim();
+  const localPath = artifactInput.localPath.trim();
+  const filename = artifactInput.filename?.trim();
+  const mimeType = artifactInput.mimeType?.trim();
+
+  return title.length > 0 &&
+    title.length <= 160 &&
+    typeof artifactInput.taskId === "string" &&
+    artifactInput.taskId.length > 0 &&
+    localPath.length > 0
+    ? {
+        taskId: artifactInput.taskId,
+        title,
+        localPath,
+        filename: filename && filename.length > 0 ? filename : undefined,
+        mimeType: mimeType && mimeType.length > 0 ? mimeType : undefined,
+      }
+    : null;
+}
+
+function readCompleteTaskToolInput(
+  input: unknown,
+): AgentHubCompleteTaskToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("taskId" in input) ||
+    !("summary" in input)
+  ) {
+    return null;
+  }
+
+  const taskInput = input as AgentHubCompleteTaskToolInput;
+  const summary = taskInput.summary.trim();
+  const artifactIds = Array.isArray(taskInput.artifactIds)
+    ? compactUniqueStrings(taskInput.artifactIds)
+    : undefined;
+
+  return typeof taskInput.taskId === "string" &&
+    taskInput.taskId.length > 0 &&
+    summary.length > 0
+    ? {
+        taskId: taskInput.taskId,
+        summary,
+        artifactIds,
+      }
+    : null;
+}
+
 function mentionAgentIds(input: AgentHubSendMessageToolInput): string[] {
   return compactUniqueStrings(
     input.mentions
@@ -1064,8 +1354,9 @@ function buildAssignedTaskPrompt(input: {
     input.taskDescription ? `Description: ${input.taskDescription}` : undefined,
     "",
     "You were assigned this task by the group orchestrator.",
-    "Use the AgentHub MCP tool send_message to post visible progress or the final answer back to the group.",
-    "Do not use normal assistant text as the visible group reply.",
+    "Create the requested report or result file in your current workspace.",
+    "Upload the report with AgentHub MCP upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
+    "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
     "<orchestrator_dispatch_message>",
@@ -1090,29 +1381,241 @@ function buildAssignedTaskInstructions(input: {
           input.agentDescription.trim(),
         ].join("\n"),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
-    "Visible task updates and final responses must be sent with the AgentHub MCP tool send_message.",
+    "Visible task updates must be sent with send_message. Completed work must be reported with upload_artifact and complete_task.",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
 }
 
+function isTerminalTaskStatus(status: string): boolean {
+  return status === "succeeded" ||
+    status === "failed" ||
+    status === "cancelled";
+}
+
+async function maybeCreateFinalizationRun(
+  db: Db,
+  input: {
+    creatorRunId: string;
+    createdAt: Date;
+    dispatchJobs: RunQueueJob[];
+    publicApiBaseUrl?: string;
+  },
+): Promise<void> {
+  const taskRows = await db
+    .select()
+    .from(conversationTasks)
+    .where(eq(conversationTasks.creatorRunId, input.creatorRunId))
+    .orderBy(asc(conversationTasks.createdAt));
+
+  if (
+    taskRows.length === 0 ||
+    taskRows.some((task) => task.finalizerRunId !== null) ||
+    taskRows.some((task) => !isTerminalTaskStatus(task.status))
+  ) {
+    return;
+  }
+
+  const firstTask = taskRows[0];
+  const [conversation] = await db
+    .select()
+    .from(conversations)
+    .where(eq(conversations.id, firstTask.conversationId))
+    .limit(1);
+
+  if (
+    conversation === undefined ||
+    conversation.orchestratorAgentId === null
+  ) {
+    return;
+  }
+
+  const runAgent = await getRunnableAgentForUser(db, {
+    agentId: conversation.orchestratorAgentId,
+    ownerUserId: firstTask.ownerUserId,
+  });
+
+  if (runAgent === null) {
+    return;
+  }
+
+  const artifactRows = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(inArray(conversationArtifacts.taskId, taskRows.map((task) => task.id)))
+    .orderBy(asc(conversationArtifacts.createdAt));
+  const artifactsByTask = new Map<string, ConversationArtifact[]>();
+
+  for (const artifactRow of artifactRows) {
+    if (artifactRow.taskId === null) {
+      continue;
+    }
+
+    const artifacts = artifactsByTask.get(artifactRow.taskId) ?? [];
+    artifacts.push(
+      toConversationArtifact(artifactRow, {
+        publicApiBaseUrl: input.publicApiBaseUrl,
+      }),
+    );
+    artifactsByTask.set(artifactRow.taskId, artifacts);
+  }
+
+  const [creatorRun] = await db
+    .select({ prompt: runs.prompt })
+    .from(runs)
+    .where(eq(runs.id, input.creatorRunId))
+    .limit(1);
+  const runId = randomUUID();
+  const createdAtIso = input.createdAt.toISOString();
+  const taskSummaries = taskRows.map((task, index) => {
+    const artifacts = artifactsByTask.get(task.id) ?? [];
+    const artifactLines = artifacts.length === 0
+      ? ["Artifacts: none"]
+      : [
+          "Artifacts:",
+          ...artifacts.map(
+            (artifact) =>
+              `- ${artifact.title}: ${artifact.downloadUrl ?? `/artifacts/${artifact.id}/download`}`,
+          ),
+        ];
+
+    return [
+      `Task ${index + 1}: ${task.title}`,
+      `Assignee agent id: ${task.assigneeAgentId}`,
+      `Status: ${task.status}`,
+      task.summary ? `Summary: ${task.summary}` : "Summary: none",
+      ...artifactLines,
+    ].join("\n");
+  });
+  const prompt = [
+    "<agenthub_task_finalization>",
+    `Group: #${conversation.title}`,
+    "All tasks created by this Orchestrator run reached a terminal state.",
+    "Send one final Markdown summary to the user with the AgentHub MCP send_message tool.",
+    "Include any report download links listed below.",
+    "</agenthub_task_finalization>",
+    "",
+    "<original_user_request>",
+    creatorRun?.prompt ?? "",
+    "</original_user_request>",
+    "",
+    "<task_results>",
+    taskSummaries.join("\n\n"),
+    "</task_results>",
+  ].join("\n");
+  const job: RunQueueJob = {
+    conversationId: conversation.id,
+    daemonDeviceId: runAgent.daemonDeviceId,
+    prompt,
+    agentInstructions: [
+      runAgent.agent.description?.trim()
+        ? `AgentHub agent profile:\n${runAgent.agent.description.trim()}`
+        : undefined,
+      "You are the Orchestrator finalizing a completed group Task mode workflow.",
+      "Use only AgentHub MCP send_message for the visible final response.",
+    ].filter((line): line is string => line !== undefined).join("\n\n"),
+    agentHubMcpTools: ["send_message"],
+    workspacePath: runAgent.workspacePath,
+    run: {
+      id: runId,
+      agentId: runAgent.agent.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      status: "queued",
+      createdAt: createdAtIso,
+      updatedAt: createdAtIso,
+    },
+    runtime: runAgent.runtime,
+  };
+  const queuedEvent: RunEvent = {
+    type: "run.queued",
+    runId,
+    agentId: runAgent.agent.id,
+    daemonDeviceId: runAgent.daemonDeviceId,
+    createdAt: createdAtIso,
+  };
+
+  await db.transaction(async (tx) => {
+    const lockedTasks = await tx
+      .select()
+      .from(conversationTasks)
+      .where(eq(conversationTasks.creatorRunId, input.creatorRunId));
+
+    if (
+      lockedTasks.some((task) => task.finalizerRunId !== null) ||
+      lockedTasks.some((task) => !isTerminalTaskStatus(task.status))
+    ) {
+      return;
+    }
+
+    await tx.insert(runs).values({
+      id: runId,
+      ownerUserId: firstTask.ownerUserId,
+      conversationId: conversation.id,
+      agentId: runAgent.agent.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      status: "queued",
+      prompt,
+      workspacePath: runAgent.workspacePath,
+      runtime: runAgent.runtime,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    });
+
+    await tx.insert(runEvents).values({
+      runId,
+      eventType: queuedEvent.type,
+      payload: queuedEvent,
+      createdAt: input.createdAt,
+    });
+
+    await tx
+      .update(conversationTasks)
+      .set({
+        finalizerRunId: runId,
+        updatedAt: input.createdAt,
+      })
+      .where(eq(conversationTasks.creatorRunId, input.creatorRunId));
+
+    input.dispatchJobs.push(job);
+  });
+}
+
 export async function appendRunEventToConversationMessage(
   db: Db,
   event: RunEvent,
+  options: AppendRunEventOptions = {},
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
 
   if (event.type === "run.started" || event.type === "run.completed") {
     const updatedAt = new Date(event.createdAt);
-    await db
+    const updatedTasks = await db
       .update(conversationTasks)
       .set({
         status: event.type === "run.started"
           ? "running"
-          : event.status,
+          : event.status === "succeeded"
+            ? sql`case when ${conversationTasks.status} = 'succeeded' then 'succeeded' else 'failed' end`
+            : event.status,
         updatedAt,
       })
-      .where(eq(conversationTasks.assigneeRunId, event.runId));
+      .where(eq(conversationTasks.assigneeRunId, event.runId))
+      .returning({
+        creatorRunId: conversationTasks.creatorRunId,
+      });
+
+    if (event.type === "run.completed") {
+      for (const creatorRunId of compactUniqueStrings(
+        updatedTasks.map((task) => task.creatorRunId),
+      )) {
+        await maybeCreateFinalizationRun(db, {
+          creatorRunId,
+          createdAt: updatedAt,
+          dispatchJobs,
+          publicApiBaseUrl: options.publicApiBaseUrl,
+        });
+      }
+    }
   }
 
   if (event.type === "agenthub.tool.call") {
@@ -1177,6 +1680,96 @@ export async function appendRunEventToConversationMessage(
           updatedAt: createdAt,
         })
         .onConflictDoNothing();
+
+      return { dispatchJobs };
+    }
+
+    if (event.name === "upload_artifact") {
+      const input = readUploadArtifactToolInput(event.input);
+
+      if (input === null) {
+        return { dispatchJobs };
+      }
+
+      return { dispatchJobs };
+    }
+
+    if (event.name === "complete_task") {
+      const input = readCompleteTaskToolInput(event.input);
+
+      if (input === null) {
+        return { dispatchJobs };
+      }
+
+      const [run] = await db
+        .select({
+          agentId: runs.agentId,
+          conversationId: runs.conversationId,
+          ownerUserId: runs.ownerUserId,
+        })
+        .from(runs)
+        .where(eq(runs.id, event.runId))
+        .limit(1);
+
+      if (run === undefined || run.conversationId === null) {
+        return { dispatchJobs };
+      }
+
+      const updatedAt = new Date(event.createdAt);
+      const [task] = await db
+        .select()
+        .from(conversationTasks)
+        .where(
+          and(
+            eq(conversationTasks.id, input.taskId),
+            eq(conversationTasks.conversationId, run.conversationId),
+            eq(conversationTasks.assigneeRunId, event.runId),
+            eq(conversationTasks.assigneeAgentId, run.agentId),
+          ),
+        )
+        .limit(1);
+
+      if (task === undefined) {
+        return { dispatchJobs };
+      }
+
+      const artifactIds = input.artifactIds ?? [];
+
+      if (artifactIds.length > 0) {
+        const artifactRows = await db
+          .select({ id: conversationArtifacts.id })
+          .from(conversationArtifacts)
+          .where(
+            and(
+              eq(conversationArtifacts.conversationId, run.conversationId),
+              eq(conversationArtifacts.taskId, task.id),
+              eq(conversationArtifacts.runId, event.runId),
+              inArray(conversationArtifacts.id, artifactIds),
+            ),
+          );
+
+        if (artifactRows.length !== artifactIds.length) {
+          return { dispatchJobs };
+        }
+      }
+
+      await db
+        .update(conversationTasks)
+        .set({
+          status: "succeeded",
+          summary: input.summary,
+          resultArtifactIds: artifactIds,
+          completedAt: updatedAt,
+          updatedAt,
+        })
+        .where(eq(conversationTasks.id, task.id));
+
+      await maybeCreateFinalizationRun(db, {
+        creatorRunId: task.creatorRunId,
+        createdAt: updatedAt,
+        dispatchJobs,
+        publicApiBaseUrl: options.publicApiBaseUrl,
+      });
 
       return { dispatchJobs };
     }
@@ -1278,7 +1871,11 @@ export async function appendRunEventToConversationMessage(
               agentDescription: runAgent.agent.description,
               conversationTitle: conversation.title,
             }),
-            agentHubMcpTools: ["send_message"],
+            agentHubMcpTools: [
+              "send_message",
+              "upload_artifact",
+              "complete_task",
+            ],
             workspacePath: runAgent.workspacePath,
             run: {
               id: runId,

@@ -1,20 +1,34 @@
 import { randomUUID } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import path from "node:path";
 
 import type {
+  AgentRunArtifactUpload,
   AgentHubCreateTaskToolInput,
+  AgentHubCompleteTaskToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolName,
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
   AgentHubSendMessageToolInput,
+  AgentHubUploadArtifactToolInput,
+  AgentHubUploadArtifactToolResult,
   RunId,
 } from "@agent-hub/core";
 
+import { isPathInsideWorkspace } from "../workspace";
+
+const maxArtifactUploadBytes = 5 * 1024 * 1024;
+
 interface AgentHubMcpSession {
   enabledTools: Set<AgentHubMcpToolName>;
+  onArtifactUpload?(
+    upload: AgentRunArtifactUpload,
+  ): Promise<AgentHubUploadArtifactToolResult>;
   onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
   runId: RunId;
+  workspacePath: string;
 }
 
 export interface AgentHubMcpSessionHandle {
@@ -83,16 +97,22 @@ export class AgentHubMcpRelay {
 
   createSession(input: {
     enabledTools: AgentHubMcpToolName[];
+    onArtifactUpload?(
+      upload: AgentRunArtifactUpload,
+    ): Promise<AgentHubUploadArtifactToolResult>;
     onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
     runId: RunId;
+    workspacePath: string;
   }): AgentHubMcpSessionHandle {
     const token = randomUUID();
     const enabledTools = [...new Set(input.enabledTools)];
 
     this.#sessions.set(token, {
       enabledTools: new Set(enabledTools),
+      onArtifactUpload: input.onArtifactUpload,
       onToolCall: input.onToolCall,
       runId: input.runId,
+      workspacePath: input.workspacePath,
     });
 
     return {
@@ -140,9 +160,34 @@ export class AgentHubMcpRelay {
         return;
       }
 
+      const toolCallId = readToolCallId(body) ?? randomUUID();
+
+      if (toolName === "upload_artifact") {
+        if (session.onArtifactUpload === undefined) {
+          writeJson(response, 404, { error: "Artifact upload is not available." });
+          return;
+        }
+
+        const upload = await readArtifactUpload({
+          input: input as AgentHubUploadArtifactToolInput,
+          runId: session.runId,
+          workspacePath: session.workspacePath,
+        });
+        const result = await session.onArtifactUpload(upload);
+        await session.onToolCall({
+          runId: session.runId,
+          toolCallId,
+          name: toolName,
+          input,
+          createdAt: new Date().toISOString(),
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
       const result = await session.onToolCall({
         runId: session.runId,
-        toolCallId: readToolCallId(body) ?? randomUUID(),
+        toolCallId,
         name: toolName,
         input,
         createdAt: new Date().toISOString(),
@@ -191,7 +236,109 @@ function readToolInput(
     return readCreateTaskInput(input);
   }
 
+  if (toolName === "upload_artifact") {
+    return readUploadArtifactInput(input);
+  }
+
+  if (toolName === "complete_task") {
+    return readCompleteTaskInput(input);
+  }
+
   return null;
+}
+
+async function readArtifactUpload(input: {
+  input: AgentHubUploadArtifactToolInput;
+  runId: RunId;
+  workspacePath: string;
+}): Promise<AgentRunArtifactUpload> {
+  const resolvedPath = path.resolve(input.workspacePath, input.input.localPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, resolvedPath)) {
+    throw new Error("upload_artifact.localPath must stay inside this run workspace.");
+  }
+
+  const info = await stat(resolvedPath);
+
+  if (!info.isFile()) {
+    throw new Error("upload_artifact.localPath must point to a file.");
+  }
+
+  if (info.size > maxArtifactUploadBytes) {
+    throw new Error("upload_artifact file is too large.");
+  }
+
+  const content = await readFile(resolvedPath);
+
+  return {
+    ...input.input,
+    filename: input.input.filename ?? path.basename(resolvedPath),
+    sizeBytes: content.byteLength,
+    contentBase64: content.toString("base64"),
+  };
+}
+
+function readUploadArtifactInput(
+  input: unknown,
+): AgentHubUploadArtifactToolInput | null {
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const title = record.title;
+  const localPath = record.localPath;
+  const filename = record.filename;
+  const mimeType = record.mimeType;
+
+  if (
+    typeof taskId !== "string" ||
+    taskId.length === 0 ||
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    title.trim().length > 160 ||
+    typeof localPath !== "string" ||
+    localPath.trim().length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    taskId,
+    title: title.trim(),
+    localPath: localPath.trim(),
+    filename:
+      typeof filename === "string" && filename.trim().length > 0
+        ? filename.trim()
+        : undefined,
+    mimeType:
+      typeof mimeType === "string" && mimeType.trim().length > 0
+        ? mimeType.trim()
+        : undefined,
+  };
+}
+
+function readCompleteTaskInput(input: unknown): AgentHubCompleteTaskToolInput | null {
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const summary = record.summary;
+  const artifactIds = Array.isArray(record.artifactIds)
+    ? record.artifactIds.filter((artifactId): artifactId is string =>
+        typeof artifactId === "string" && artifactId.length > 0,
+      )
+    : undefined;
+
+  if (
+    typeof taskId !== "string" ||
+    taskId.length === 0 ||
+    typeof summary !== "string" ||
+    summary.trim().length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    taskId,
+    summary: summary.trim(),
+    artifactIds: artifactIds && artifactIds.length > 0 ? artifactIds : undefined,
+  };
 }
 
 function readSendMessageInput(input: unknown): AgentHubSendMessageToolInput | null {

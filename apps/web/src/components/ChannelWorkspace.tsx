@@ -2,7 +2,7 @@ import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/rea
 import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useMemo, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
 import { formatTime } from '../lib/format'
 import { MessageContent } from './MessageContent'
 
@@ -14,6 +14,7 @@ interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
   tasks: ConversationTask[]
+  artifacts: ConversationArtifact[]
   agents: AgentDetails[]
   user: User | null
   prompt: string
@@ -57,6 +58,7 @@ export function ChannelWorkspace({
   activeConversation,
   messages,
   tasks,
+  artifacts,
   agents,
   user,
   prompt,
@@ -71,7 +73,7 @@ export function ChannelWorkspace({
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [mentions, setMentions] = useState<ConversationMention[]>([])
-  const [taskPanelConversationId, setTaskPanelConversationId] = useState<string | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -199,7 +201,7 @@ export function ChannelWorkspace({
   const userDisplayName = user?.name?.trim() || user?.email || 'User'
   const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
-  const canOpenTasks = hasSelectedConversation && !isAgentDirectMessage
+  const canOpenWorkspacePanel = hasSelectedConversation && !isAgentDirectMessage
   const chatTitleClassName =
     hasSelectedConversation && !isAgentDirectMessage
       ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
@@ -247,8 +249,13 @@ export function ChannelWorkspace({
     }
   }
 
-  const showTasks = taskPanelConversationId === activeConversation?.id
-  const showTaskPage = showTasks && canOpenTasks
+  const showTasks =
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'tasks'
+  const showFiles =
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'files'
+  const showWorkspacePage = (showTasks || showFiles) && canOpenWorkspacePanel
 
   return (
     <section
@@ -286,28 +293,40 @@ export function ChannelWorkspace({
         </div>
         <div className="flex min-w-0 items-center gap-3">
           <IconButton
-            kind={showTaskPage ? 'secondary' : 'ghost'}
+            kind={showTasks ? 'secondary' : 'ghost'}
             label="Tasks"
             size="md"
             align="bottom"
             type="button"
-            disabled={!canOpenTasks}
+            disabled={!canOpenWorkspacePanel}
             onClick={() =>
-              setTaskPanelConversationId((conversationId) =>
-                conversationId === activeConversation?.id
+              setWorkspacePanel((panel) =>
+                panel?.conversationId === activeConversation?.id && panel?.view === 'tasks'
                   ? null
-                  : activeConversation?.id ?? null,
+                  : activeConversation
+                    ? { conversationId: activeConversation.id, view: 'tasks' }
+                    : null,
               )
             }
           >
             <Task size={16} />
           </IconButton>
           <IconButton
-            kind="ghost"
+            kind={showFiles ? 'secondary' : 'ghost'}
             label="Files"
             size="md"
             align="bottom"
             type="button"
+            disabled={!canOpenWorkspacePanel}
+            onClick={() =>
+              setWorkspacePanel((panel) =>
+                panel?.conversationId === activeConversation?.id && panel?.view === 'files'
+                  ? null
+                  : activeConversation
+                    ? { conversationId: activeConversation.id, view: 'files' }
+                    : null,
+              )
+            }
           >
             <Folder size={16} />
           </IconButton>
@@ -340,7 +359,7 @@ export function ChannelWorkspace({
       </div>
 
       <div className="min-h-0 overflow-y-auto px-6 py-4 max-[1055px]:px-4" aria-live="polite">
-        {showTaskPage ? (
+        {showWorkspacePage && showTasks ? (
           <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
               <div>
@@ -397,6 +416,93 @@ export function ChannelWorkspace({
                         <div>
                           <dt className="font-semibold uppercase">Run</dt>
                           <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
+                        </div>
+                      </dl>
+                      {task.summary && (
+                        <div className="border-t border-[var(--cds-border-subtle-01)] pt-3">
+                          <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h4>
+                          <MessageContent className="mt-1 block text-sm leading-5" content={task.summary} />
+                        </div>
+                      )}
+                      {task.artifacts && task.artifacts.length > 0 && (
+                        <div className="grid gap-1 border-t border-[var(--cds-border-subtle-01)] pt-3">
+                          <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h4>
+                          {task.artifacts.map((artifact) => (
+                            <a
+                              key={artifact.id}
+                              className="w-fit text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline"
+                              href={artifact.downloadUrl ?? '#'}
+                            >
+                              {artifact.title}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ) : showWorkspacePage && showFiles ? (
+          <div className="mx-auto grid w-full max-w-[68rem] content-start gap-4">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Files</h2>
+                <p className="text-sm text-[var(--cds-text-secondary)]">
+                  Reports uploaded to the {chatDisplayName} workspace.
+                </p>
+              </div>
+              <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
+                {artifacts.length}
+              </span>
+            </div>
+            {artifacts.length === 0 ? (
+              <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+                <Folder size={32} />
+                <h2 className="cds--type-heading-compact-02">No files yet</h2>
+                <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
+                  Assigned agents can upload report files after completing tasks.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {artifacts.map((artifact) => {
+                  const creator = agents.find((agent) => agent.agent.id === artifact.creatorAgentId)
+
+                  return (
+                    <article
+                      key={artifact.id}
+                      className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-sm text-[var(--cds-text-primary)]"
+                    >
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <a
+                            className="block truncate text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline"
+                            href={artifact.downloadUrl ?? '#'}
+                          >
+                            {artifact.title}
+                          </a>
+                          <p className="truncate text-sm text-[var(--cds-text-secondary)]">
+                            {artifact.filename}
+                          </p>
+                        </div>
+                        <span className="shrink-0 border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+                          {artifact.kind}
+                        </span>
+                      </div>
+                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
+                        <div>
+                          <dt className="font-semibold uppercase">Creator</dt>
+                          <dd className="truncate">{creator?.agent.name ?? artifact.creatorAgentId}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Size</dt>
+                          <dd>{Math.max(1, Math.ceil(artifact.sizeBytes / 1024))} KB</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Created</dt>
+                          <dd>{formatTime(artifact.createdAt)}</dd>
                         </div>
                       </dl>
                     </article>
@@ -467,7 +573,7 @@ export function ChannelWorkspace({
         )}
       </div>
 
-      {!showTaskPage && (
+      {!showWorkspacePage && (
       <Form
         className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
         aria-label="Create run"

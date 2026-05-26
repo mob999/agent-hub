@@ -5,10 +5,14 @@ import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import type {
+  AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
 } from "@agent-hub/core/runtime";
 import type {
+  AgentHubMcpToolInput,
+  AgentHubMcpToolResult,
+  AgentHubUploadArtifactToolResult,
   AgentHubMcpToolName,
   AgentRuntimeConfig,
   DaemonRuntime,
@@ -47,14 +51,18 @@ export interface AgentHubMcpServerCommand {
 export interface AgentHubMcpRelayLike {
   createSession(input: {
     enabledTools: AgentHubMcpToolName[];
+    onArtifactUpload?(
+      upload: AgentRunArtifactUpload,
+    ): Promise<AgentHubUploadArtifactToolResult>;
     onToolCall(call: {
       createdAt: string;
-      input: { content: string };
+      input: AgentHubMcpToolInput;
       name: AgentHubMcpToolName;
       runId: RunId;
       toolCallId: string;
-    }): { accepted: true } | Promise<{ accepted: true }>;
+    }): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
     runId: RunId;
+    workspacePath: string;
   }): AgentHubMcpSessionHandle;
 }
 
@@ -461,6 +469,8 @@ export class CodexAdapter implements AgentAdapter {
     const mcpSession = this.#mcpRelay?.createSession({
       enabledTools: input.agentHubMcpTools ?? [],
       runId: input.run.id,
+      workspacePath: input.workspacePath,
+      onArtifactUpload: input.uploadArtifact,
       onToolCall: (call) => {
         queue.push({
           type: "agenthub.tool.call",

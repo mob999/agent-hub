@@ -119,6 +119,7 @@ export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
 export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type ConversationArtifactKind = 'report' | 'file'
 
 export interface Conversation {
   id: string
@@ -148,6 +149,28 @@ export interface ConversationTask {
   title: string
   description?: string
   status: ConversationTaskStatus
+  summary?: string
+  resultArtifactIds?: string[]
+  artifacts?: ConversationArtifact[]
+  completedAt?: string
+  finalizerRunId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationArtifact {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  taskId?: string
+  runId: string
+  creatorAgentId: string
+  kind: ConversationArtifactKind
+  title: string
+  filename: string
+  mimeType?: string
+  sizeBytes: number
+  downloadUrl?: string
   createdAt: string
   updatedAt: string
 }

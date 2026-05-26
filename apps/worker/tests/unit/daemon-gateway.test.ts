@@ -189,6 +189,59 @@ describe("DaemonGateway", () => {
     expect(events).toEqual([event]);
   });
 
+  it("acks persisted artifact uploads", async () => {
+    const gateway = new DaemonGateway({
+      daemonToken: token,
+      onRunEvent: () => undefined,
+      onArtifactUpload: (message) => ({
+        id: "artifact_1",
+        ownerUserId: "user_1",
+        conversationId: "conversation_1",
+        taskId: message.taskId,
+        runId: message.runId,
+        creatorAgentId: "agent_1",
+        kind: "report",
+        title: message.title,
+        filename: message.filename,
+        mimeType: message.mimeType,
+        sizeBytes: message.sizeBytes,
+        downloadUrl: "http://localhost:3000/artifacts/artifact_1/download",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      }),
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+    ws = new WebSocket(listening.url);
+
+    await waitForOpen(ws);
+    sendHello(ws);
+    await waitForJsonMessage(ws);
+
+    const ack = waitForJsonMessage<{ type: string; artifact: { id: string } }>(ws);
+    ws.send(
+      JSON.stringify({
+        type: "artifact.upload",
+        uploadId: "upload_1",
+        runId: "00000000-0000-4000-8000-000000000001",
+        taskId: "00000000-0000-4000-8000-000000000002",
+        title: "Report",
+        filename: "report.md",
+        mimeType: "text/markdown",
+        sizeBytes: 12,
+        contentBase64: Buffer.from("hello").toString("base64"),
+        sentAt: "2026-05-26T00:00:00.000Z",
+      }),
+    );
+
+    await expect(ack).resolves.toMatchObject({
+      type: "artifact.upload.ack",
+      artifact: {
+        id: "artifact_1",
+      },
+    });
+  });
+
   it("provisions agents through a connected daemon", async () => {
     const gateway = new DaemonGateway({
       daemonToken: token,

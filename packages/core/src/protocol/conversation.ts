@@ -4,6 +4,7 @@ import type { AgentRun, RunId } from "./run.js";
 export type ConversationId = string;
 export type ConversationMessageId = string;
 export type ConversationTaskId = string;
+export type ConversationArtifactId = string;
 
 export type ConversationType = "group" | "direct";
 export type ConversationStatus = "active" | "archived";
@@ -20,6 +21,7 @@ export type ConversationTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type ConversationArtifactKind = "report" | "file";
 
 export interface Conversation {
   id: ConversationId;
@@ -50,6 +52,23 @@ export interface ConversationMessage {
   updatedAt: IsoDateTime;
 }
 
+export interface ConversationArtifact {
+  id: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  taskId?: ConversationTaskId;
+  runId: RunId;
+  creatorAgentId: AgentId;
+  kind: ConversationArtifactKind;
+  title: string;
+  filename: string;
+  mimeType?: string;
+  sizeBytes: number;
+  downloadUrl?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
 export interface ConversationTask {
   id: ConversationTaskId;
   ownerUserId: UserId;
@@ -62,6 +81,11 @@ export interface ConversationTask {
   title: string;
   description?: string;
   status: ConversationTaskStatus;
+  summary?: string;
+  resultArtifactIds?: ConversationArtifactId[];
+  artifacts?: ConversationArtifact[];
+  completedAt?: IsoDateTime;
+  finalizerRunId?: RunId;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -110,6 +134,10 @@ export interface ListConversationMessagesResponse {
 
 export interface ListConversationTasksResponse {
   tasks: ConversationTask[];
+}
+
+export interface ListConversationArtifactsResponse {
+  artifacts: ConversationArtifact[];
 }
 
 export type SendConversationMessageMode = "chat" | "task";

@@ -1,5 +1,6 @@
 import type {
   AgentDetails,
+  AgentStatus,
   AgentRuntimeBinding,
   AgentWorkspace,
   DaemonRuntime,
@@ -38,6 +39,16 @@ export interface RunnableAgent {
     updatedAt: string;
   };
 }
+
+export type AgentStatusFilter = AgentStatus | "all";
+
+export type ArchiveAgentResult =
+  | { status: "archived"; agent: AgentDetails }
+  | { status: "not-found" };
+
+export type RestoreAgentResult =
+  | { status: "restored"; agent: AgentDetails }
+  | { status: "not-found" };
 
 type AgentRow = typeof agents.$inferSelect;
 type BindingRow = typeof agentRuntimeBindings.$inferSelect;
@@ -249,8 +260,15 @@ export async function createAgentProvisioningRecords(
 
 export async function listAgentsForUser(
   db: Db,
-  input: { ownerUserId: string },
+  input: { ownerUserId: string; status?: AgentStatusFilter },
 ): Promise<AgentDetails[]> {
+  const status = input.status ?? "active";
+  const conditions = [eq(agents.ownerUserId, input.ownerUserId)];
+
+  if (status !== "all") {
+    conditions.push(eq(agents.status, status));
+  }
+
   const rows = await db
     .select({
       agent: agents,
@@ -263,12 +281,130 @@ export async function listAgentsForUser(
       eq(agentRuntimeBindings.agentId, agents.id),
     )
     .innerJoin(agentWorkspaces, eq(agentWorkspaces.agentId, agents.id))
-    .where(eq(agents.ownerUserId, input.ownerUserId))
+    .where(and(...conditions))
     .orderBy(asc(agents.createdAt));
 
   return rows.map((row) =>
     toAgentDetails(row.agent, row.binding, row.workspace),
   );
+}
+
+export async function archiveAgentForUser(
+  db: Db,
+  input: { agentId: string; ownerUserId: string },
+): Promise<ArchiveAgentResult> {
+  const result = await db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select()
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (agent === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    const updatedAt = new Date();
+
+    await tx
+      .update(agents)
+      .set({
+        status: "archived",
+        updatedAt,
+      })
+      .where(eq(agents.id, input.agentId));
+
+    await tx
+      .update(conversations)
+      .set({
+        status: "archived",
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.directAgentId, input.agentId),
+        ),
+      );
+
+    return { status: "archived" as const };
+  });
+
+  if (result.status !== "archived") {
+    return result;
+  }
+
+  const agent = await getAgentForUser(db, input);
+
+  if (agent === null) {
+    return { status: "not-found" };
+  }
+
+  return { status: "archived", agent };
+}
+
+export async function restoreAgentForUser(
+  db: Db,
+  input: { agentId: string; ownerUserId: string },
+): Promise<RestoreAgentResult> {
+  const result = await db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (agent === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    const updatedAt = new Date();
+
+    await tx
+      .update(agents)
+      .set({
+        status: "active",
+        updatedAt,
+      })
+      .where(eq(agents.id, input.agentId));
+
+    await tx
+      .update(conversations)
+      .set({
+        status: "active",
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.directAgentId, input.agentId),
+        ),
+      );
+
+    return { status: "restored" as const };
+  });
+
+  if (result.status !== "restored") {
+    return result;
+  }
+
+  const agent = await getAgentForUser(db, input);
+
+  if (agent === null) {
+    return { status: "not-found" };
+  }
+
+  return { status: "restored", agent };
 }
 
 export async function getAgentForUser(

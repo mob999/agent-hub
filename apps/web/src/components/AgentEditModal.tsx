@@ -1,4 +1,5 @@
 import {
+  Button,
   InlineNotification,
   Modal,
   TextArea,
@@ -13,6 +14,7 @@ interface AgentEditModalProps {
   isSaving: boolean
   open: boolean
   onClose: () => void
+  onArchive: () => void
   onSave: (input: { name: string; description?: string }) => void
 }
 
@@ -22,6 +24,7 @@ export function AgentEditModal({
   isSaving,
   open,
   onClose,
+  onArchive,
   onSave,
 }: AgentEditModalProps) {
   const [name, setName] = useState(agent.agent.name)
@@ -74,6 +77,23 @@ export function AgentEditModal({
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
         />
+        <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
+          <Button
+            kind="danger--tertiary"
+            size="sm"
+            type="button"
+            disabled={isSaving}
+            onClick={() => {
+              if (isSaving) {
+                return
+              }
+
+              onArchive()
+            }}
+          >
+            Archive agent
+          </Button>
+        </div>
       </div>
     </Modal>
   )

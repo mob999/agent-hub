@@ -193,6 +193,14 @@ export interface UpdateGroupConversationResponse {
   conversation: Conversation;
 }
 
+export interface ArchiveGroupConversationResponse {
+  conversation: Conversation;
+}
+
+export interface RestoreGroupConversationResponse {
+  conversation: Conversation;
+}
+
 export interface ListConversationMessagesResponse {
   messages: ConversationMessage[];
 }
@@ -253,4 +261,3 @@ export interface SendConversationMessageResponse {
   queueMessageId?: string;
   queueMessageIds: string[];
 }
-

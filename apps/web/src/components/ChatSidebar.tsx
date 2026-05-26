@@ -1,14 +1,21 @@
 import { Activity, Add, Bookmark, ChatBot, Search } from '@carbon/react/icons'
-import { Loading, Tag } from '@carbon/react'
+import { Tag } from '@carbon/react'
+import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
 
 interface ChatSidebarProps {
   conversations: Conversation[]
+  archivedAgents: AgentDetails[]
+  archivedConversations: Conversation[]
   activeRunCount: number
   agents: AgentDetails[]
   activeConversationId: string | null
+  savedOpen: boolean
   onCreateAgent: () => void
   onCreateGroup: () => void
+  onRestoreAgent: (agentId: string) => void
+  onRestoreGroup: (conversationId: string) => void
+  onToggleSaved: () => void
   selectGroup: (conversationId: string) => void
   selectAgent: (agentId: string) => void
 }
@@ -22,21 +29,19 @@ const selectedListItem =
 const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 
-function isAgentReady(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
-}
-
-function isAgentPending(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
-}
-
 export function ChatSidebar({
   conversations,
+  archivedAgents,
+  archivedConversations,
   activeRunCount,
   agents,
   activeConversationId,
+  savedOpen,
   onCreateAgent,
   onCreateGroup,
+  onRestoreAgent,
+  onRestoreGroup,
+  onToggleSaved,
   selectGroup,
   selectAgent,
 }: ChatSidebarProps) {
@@ -51,6 +56,10 @@ export function ChatSidebar({
     defaultGroupConversation === undefined
       ? customGroupConversations
       : [defaultGroupConversation, ...customGroupConversations]
+  const archivedGroupConversations = archivedConversations
+    .filter((conversation) => conversation.type === 'group' && conversation.key !== 'all')
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+  const savedCount = archivedAgents.length + archivedGroupConversations.length
 
   return (
     <aside
@@ -77,10 +86,62 @@ export function ChatSidebar({
             {activeRunCount}
           </span>
         </button>
-        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)] gap-3 px-3 py-2`} type="button">
+        <button
+          className={`${sidebarButton} ${
+            savedOpen ? selectedListItem : transparentListItem
+          } grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          type="button"
+          aria-expanded={savedOpen}
+          onClick={onToggleSaved}
+        >
           <Bookmark size={16} />
           <span>Saved</span>
+          <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
+            {savedCount}
+          </span>
         </button>
+        {savedOpen && (
+          <div className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] p-2">
+            {savedCount === 0 ? (
+              <p className="px-1 py-2 text-sm text-[var(--cds-text-secondary)]">No archived items.</p>
+            ) : (
+              <>
+                {archivedGroupConversations.map((conversation) => (
+                  <div
+                    className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                    key={conversation.id}
+                  >
+                    <span aria-hidden="true">#</span>
+                    <span className="min-w-0 truncate">{conversation.title}</span>
+                    <button
+                      className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      type="button"
+                      onClick={() => onRestoreGroup(conversation.id)}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+                {archivedAgents.map((agent) => (
+                  <div
+                    className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                    key={agent.agent.id}
+                  >
+                    <ChatBot size={14} />
+                    <span className="min-w-0 truncate">{agent.agent.name}</span>
+                    <button
+                      className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      type="button"
+                      onClick={() => onRestoreAgent(agent.agent.id)}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="grid gap-1 p-3" aria-labelledby="groups-heading">
@@ -159,24 +220,7 @@ export function ChatSidebar({
                     <ChatBot size={16} />
                   </span>
                   <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
-                  {isAgentPending(agent) ? (
-                    <Loading
-                      small
-                      withOverlay={false}
-                      description="Creating agent"
-                      className="justify-self-end"
-                    />
-                  ) : isAgentReady(agent) ? (
-                    <span className="grid h-6 w-6 place-items-center justify-self-end" title="Ready">
-                      <span
-                        className="h-2 w-2 rounded-full bg-[var(--cds-support-success)]"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Ready</span>
-                    </span>
-                  ) : (
-                    <span aria-hidden="true" />
-                  )}
+                  <AgentStatusIndicator agent={agent} />
                 </button>
               )
             })}

@@ -1,7 +1,6 @@
 import {
   Checkbox,
   InlineNotification,
-  Loading,
   Modal,
   Select,
   SelectItem,
@@ -9,6 +8,7 @@ import {
   TextInput,
 } from '@carbon/react'
 import { useState } from 'react'
+import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails } from '../lib/api'
 
 interface GroupCreateModalProps {
@@ -18,14 +18,6 @@ interface GroupCreateModalProps {
   open: boolean
   onClose: () => void
   onCreate: (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => void
-}
-
-function isAgentReady(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
-}
-
-function isAgentPending(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
 }
 
 export function GroupCreateModal({
@@ -144,24 +136,7 @@ export function GroupCreateModal({
                   disabled={isCreating}
                   onChange={(_, data) => toggleAgent(agent.agent.id, data.checked)}
                 />
-                {isAgentPending(agent) ? (
-                  <Loading
-                    small
-                    withOverlay={false}
-                    description="Agent is being created"
-                    className="justify-self-end"
-                  />
-                ) : isAgentReady(agent) ? (
-                  <span className="grid h-6 w-6 place-items-center justify-self-end" title="Ready">
-                    <span
-                      className="h-2 w-2 rounded-full bg-[var(--cds-support-success)]"
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">Ready</span>
-                  </span>
-                ) : (
-                  <span aria-hidden="true" />
-                )}
+                <AgentStatusIndicator agent={agent} />
               </div>
             ))}
           </div>

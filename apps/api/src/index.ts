@@ -17,6 +17,8 @@ import {
 } from "@agent-hub/core";
 import {
   appendRunEvent,
+  archiveAgentForUser,
+  archiveGroupConversationForUser,
   createAgentProvisioningRecords,
   createAgentHubRedisClient,
   createLogger,
@@ -52,6 +54,8 @@ import {
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   readArtifactContent,
+  restoreAgentForUser,
+  restoreGroupConversationForUser,
   toAgentRun,
   updateConversationOrchestrator,
   updateAgentProfileForUser,
@@ -146,6 +150,104 @@ function parseOptionalAgentId(value: unknown): string | undefined {
   return typeof value === "string" && uuidPattern.test(value)
     ? value
     : undefined;
+}
+
+function parseRecordStatusFilter(
+  value: unknown,
+): "active" | "archived" | "all" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "active" || value === "archived" || value === "all"
+    ? value
+    : null;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "\"":
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return character;
+    }
+  });
+}
+
+function previewUnavailableResponse(input: {
+  message: string;
+  previewUrl?: string;
+  status?: number;
+}): Response {
+  const status = input.status ?? 502;
+  const previewLine = input.previewUrl === undefined
+    ? ""
+    : `<p class="url">${escapeHtml(input.previewUrl)}</p>`;
+
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Preview unavailable</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+        color: #161616;
+        font-family: IBM Plex Sans, Inter, system-ui, sans-serif;
+      }
+      main {
+        max-width: 36rem;
+        padding: 1rem;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1rem;
+        line-height: 1.4;
+      }
+      p {
+        margin: 0;
+        color: #525252;
+        line-height: 1.5;
+      }
+      .url {
+        margin-top: 0.75rem;
+        overflow-wrap: anywhere;
+        font-family: IBM Plex Mono, ui-monospace, monospace;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Preview unavailable</h1>
+      <p>${escapeHtml(input.message)}</p>
+      ${previewLine}
+    </main>
+  </body>
+</html>`,
+    {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "text/html; charset=utf-8",
+      },
+      status,
+    },
+  );
 }
 
 function groupChatMcpToolsForAgent(input: {
@@ -394,8 +496,25 @@ app.get("/agents", async (c) => {
     );
   }
 
+  const status = parseRecordStatusFilter(c.req.query("status"));
+
+  if (status === null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_STATUS_FILTER",
+          message: "status must be active, archived, or all.",
+        },
+      },
+      400,
+    );
+  }
+
   return c.json({
-    agents: await listAgentsForUser(db, { ownerUserId: user.id }),
+    agents: await listAgentsForUser(db, {
+      ownerUserId: user.id,
+      status,
+    }),
   });
 });
 
@@ -580,6 +699,76 @@ app.patch("/agents/:agentId", async (c) => {
   return c.json({ agent });
 });
 
+app.patch("/agents/:agentId/archive", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await archiveAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ agent: result.agent });
+});
+
+app.patch("/agents/:agentId/restore", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await restoreAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ agent: result.agent });
+});
+
 app.use("/conversations", requireAuth);
 app.use("/conversations/*", requireAuth);
 app.get("/conversations", async (c) => {
@@ -597,8 +786,25 @@ app.get("/conversations", async (c) => {
     );
   }
 
+  const status = parseRecordStatusFilter(c.req.query("status"));
+
+  if (status === null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_STATUS_FILTER",
+          message: "status must be active, archived, or all.",
+        },
+      },
+      400,
+    );
+  }
+
   return c.json({
-    conversations: await listConversationsForUser(db, { ownerUserId: user.id }),
+    conversations: await listConversationsForUser(db, {
+      ownerUserId: user.id,
+      status,
+    }),
   });
 });
 
@@ -847,6 +1053,100 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
         },
       },
       400,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
+});
+
+app.patch("/conversations/groups/:conversationId/archive", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await archiveGroupConversationForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "reserved-key") {
+    return c.json(
+      {
+        error: {
+          code: "RESERVED_GROUP_KEY",
+          message: "The all group cannot be archived.",
+        },
+      },
+      409,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
+});
+
+app.patch("/conversations/groups/:conversationId/restore", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await restoreGroupConversationForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "reserved-key") {
+    return c.json(
+      {
+        error: {
+          code: "RESERVED_GROUP_KEY",
+          message: "The all group cannot be restored from Saved.",
+        },
+      },
+      409,
     );
   }
 
@@ -1169,6 +1469,18 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         },
       },
       404,
+    );
+  }
+
+  if (conversation.status !== "active") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_ARCHIVED",
+          message: "Restore this conversation before sending a message.",
+        },
+      },
+      400,
     );
   }
 
@@ -1665,14 +1977,52 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
     );
   }
 
-  const targetUrl = new URL(previewUrl);
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(previewUrl);
+  } catch {
+    return previewUnavailableResponse({
+      message: "The preview URL is invalid.",
+      previewUrl,
+      status: 400,
+    });
+  }
+
+  if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
+    return previewUnavailableResponse({
+      message: "Only HTTP and HTTPS preview URLs are supported.",
+      previewUrl,
+      status: 400,
+    });
+  }
+
   const suffix = c.req.param("*") ?? "";
   if (suffix.length > 0) {
     targetUrl.pathname = `${targetUrl.pathname.replace(/\/$/, "")}/${suffix}`;
   }
   targetUrl.search = new URL(c.req.url).search;
 
-  const response = await fetch(targetUrl);
+  let response: Response;
+  try {
+    response = await fetch(targetUrl);
+  } catch (error) {
+    logger.warn(
+      {
+        artifactId: details.artifact.id,
+        err: error,
+        previewUrl: targetUrl.toString(),
+      },
+      "Artifact preview proxy target is unavailable",
+    );
+
+    return previewUnavailableResponse({
+      message:
+        "The local preview server is not reachable. Start the preview command and try again.",
+      previewUrl: targetUrl.toString(),
+      status: 502,
+    });
+  }
+
   const body = await response.arrayBuffer();
   const headers = new Headers();
   for (const headerName of [

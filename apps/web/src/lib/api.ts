@@ -103,6 +103,14 @@ export interface UpdateAgentResponse {
   agent: AgentDetails
 }
 
+export interface ArchiveAgentResponse {
+  agent: AgentDetails
+}
+
+export interface RestoreAgentResponse {
+  agent: AgentDetails
+}
+
 export interface AgentRun {
   id: string
   agentId: string
@@ -304,6 +312,14 @@ export interface UpdateGroupConversationRequest {
 }
 
 export interface UpdateGroupConversationResponse {
+  conversation: Conversation
+}
+
+export interface ArchiveGroupConversationResponse {
+  conversation: Conversation
+}
+
+export interface RestoreGroupConversationResponse {
   conversation: Conversation
 }
 

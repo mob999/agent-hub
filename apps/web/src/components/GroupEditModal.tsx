@@ -1,7 +1,7 @@
 import {
+  Button,
   Checkbox,
   InlineNotification,
-  Loading,
   Modal,
   Select,
   SelectItem,
@@ -9,6 +9,7 @@ import {
   TextInput,
 } from '@carbon/react'
 import { useState } from 'react'
+import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
 
 interface GroupEditModalProps {
@@ -18,15 +19,8 @@ interface GroupEditModalProps {
   isSaving: boolean
   open: boolean
   onClose: () => void
+  onArchive: () => void
   onSave: (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => void
-}
-
-function isAgentReady(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
-}
-
-function isAgentPending(agent: AgentDetails): boolean {
-  return agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending'
 }
 
 export function GroupEditModal({
@@ -36,6 +30,7 @@ export function GroupEditModal({
   isSaving,
   open,
   onClose,
+  onArchive,
   onSave,
 }: GroupEditModalProps) {
   const [title, setTitle] = useState(conversation.title)
@@ -137,27 +132,27 @@ export function GroupEditModal({
                   disabled={isSaving}
                   onChange={(_, data) => toggleAgent(agent.agent.id, data.checked)}
                 />
-                {isAgentPending(agent) ? (
-                  <Loading
-                    small
-                    withOverlay={false}
-                    description="Agent is being created"
-                    className="justify-self-end"
-                  />
-                ) : isAgentReady(agent) ? (
-                  <span className="grid h-6 w-6 place-items-center justify-self-end" title="Ready">
-                    <span
-                      className="h-2 w-2 rounded-full bg-[var(--cds-support-success)]"
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">Ready</span>
-                  </span>
-                ) : (
-                  <span aria-hidden="true" />
-                )}
+                <AgentStatusIndicator agent={agent} />
               </div>
             ))}
           </div>
+        </div>
+        <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
+          <Button
+            kind="danger--tertiary"
+            size="sm"
+            type="button"
+            disabled={isSaving}
+            onClick={() => {
+              if (isSaving) {
+                return
+              }
+
+              onArchive()
+            }}
+          >
+            Archive group
+          </Button>
         </div>
       </div>
     </Modal>

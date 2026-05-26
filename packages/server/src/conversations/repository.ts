@@ -83,6 +83,18 @@ export type UpdateConversationOrchestratorResult =
   | { status: "agents-not-found" }
   | { status: "orchestrator-not-in-group" };
 
+export type ConversationStatusFilter = Conversation["status"] | "all";
+
+export type ArchiveGroupConversationResult =
+  | { status: "archived"; conversation: Conversation }
+  | { status: "not-found" }
+  | { status: "reserved-key" };
+
+export type RestoreGroupConversationResult =
+  | { status: "restored"; conversation: Conversation }
+  | { status: "not-found" }
+  | { status: "reserved-key" };
+
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
 }
@@ -359,12 +371,19 @@ function getAssistantMessageContent(event: RunEvent): string | undefined {
 
 async function listAgentIdsForUser(
   db: Db,
-  input: { ownerUserId: string },
+  input: { ownerUserId: string; status?: "active" | "all" },
 ): Promise<string[]> {
+  const status = input.status ?? "active";
+  const conditions = [eq(agents.ownerUserId, input.ownerUserId)];
+
+  if (status !== "all") {
+    conditions.push(eq(agents.status, status));
+  }
+
   const rows = await db
     .select({ id: agents.id })
     .from(agents)
-    .where(eq(agents.ownerUserId, input.ownerUserId))
+    .where(and(...conditions))
     .orderBy(asc(agents.createdAt));
 
   return rows.map((row) => row.id);
@@ -535,6 +554,7 @@ export async function createGroupConversation(
       .where(
         and(
           eq(agents.ownerUserId, input.ownerUserId),
+          eq(agents.status, "active"),
           inArray(agents.id, input.agentIds),
         ),
       );
@@ -614,6 +634,7 @@ export async function updateGroupConversation(
           eq(conversations.id, input.conversationId),
           eq(conversations.ownerUserId, input.ownerUserId),
           eq(conversations.type, "group"),
+          eq(conversations.status, "active"),
         ),
       )
       .limit(1);
@@ -648,6 +669,7 @@ export async function updateGroupConversation(
       .where(
         and(
           eq(agents.ownerUserId, input.ownerUserId),
+          eq(agents.status, "active"),
           inArray(agents.id, input.agentIds),
         ),
       );
@@ -710,6 +732,7 @@ export async function updateConversationOrchestrator(
           eq(conversations.id, input.conversationId),
           eq(conversations.ownerUserId, input.ownerUserId),
           eq(conversations.type, "group"),
+          eq(conversations.status, "active"),
         ),
       )
       .limit(1);
@@ -726,6 +749,7 @@ export async function updateConversationOrchestrator(
           and(
             eq(agents.id, input.orchestratorAgentId),
             eq(agents.ownerUserId, input.ownerUserId),
+            eq(agents.status, "active"),
           ),
         )
         .limit(1);
@@ -790,6 +814,7 @@ export async function ensureDirectConversation(
       and(
         eq(agents.id, input.agentId),
         eq(agents.ownerUserId, input.ownerUserId),
+        eq(agents.status, "active"),
       ),
     )
     .limit(1);
@@ -830,22 +855,144 @@ export async function ensureDirectConversation(
     )
     .limit(1);
 
-  return conversation === undefined ? null : toConversation(conversation);
+  if (conversation === undefined) {
+    return null;
+  }
+
+  if (conversation.status === "archived") {
+    const [restored] = await db
+      .update(conversations)
+      .set({
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(eq(conversations.id, conversation.id))
+      .returning();
+
+    return restored === undefined ? null : toConversation(restored);
+  }
+
+  return toConversation(conversation);
 }
 
 export async function listConversationsForUser(
   db: Db,
-  input: { ownerUserId: string },
+  input: { ownerUserId: string; status?: ConversationStatusFilter },
 ): Promise<Conversation[]> {
+  const status = input.status ?? "active";
+  const conditions = [eq(conversations.ownerUserId, input.ownerUserId)];
+
+  if (status !== "all") {
+    conditions.push(eq(conversations.status, status));
+  }
+
   const rows = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.ownerUserId, input.ownerUserId))
+    .where(and(...conditions))
     .orderBy(desc(conversations.updatedAt));
 
   return toConversationsWithAgentIds(db, rows, {
     ownerUserId: input.ownerUserId,
   });
+}
+
+export async function archiveGroupConversationForUser(
+  db: Db,
+  input: { conversationId: ConversationId; ownerUserId: string },
+): Promise<ArchiveGroupConversationResult> {
+  const result = await db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    if (conversation.key === defaultGroupConversationKey) {
+      return { status: "reserved-key" as const };
+    }
+
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        status: "archived",
+        updatedAt: new Date(),
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    const agentIds = await getConversationAgentIdsForRow(tx, updated);
+
+    return {
+      status: "archived" as const,
+      conversation: toConversation(updated, agentIds),
+    };
+  });
+
+  return result;
+}
+
+export async function restoreGroupConversationForUser(
+  db: Db,
+  input: { conversationId: ConversationId; ownerUserId: string },
+): Promise<RestoreGroupConversationResult> {
+  const result = await db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    if (conversation.key === defaultGroupConversationKey) {
+      return { status: "reserved-key" as const };
+    }
+
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    const agentIds = await getConversationAgentIdsForRow(tx, updated);
+
+    return {
+      status: "restored" as const,
+      conversation: toConversation(updated, agentIds),
+    };
+  });
+
+  return result;
 }
 
 export async function getConversationForUser(
@@ -1472,6 +1619,7 @@ export async function createUserMessageAndRun(
         and(
           eq(conversations.id, input.conversationId),
           eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.status, "active"),
         ),
       )
       .limit(1);
@@ -1582,6 +1730,7 @@ export async function createUserMessageAndRuns(
         and(
           eq(conversations.id, input.conversationId),
           eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.status, "active"),
         ),
       )
       .limit(1);

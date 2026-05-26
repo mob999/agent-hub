@@ -12,6 +12,8 @@ import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import {
   ApiRequestError,
   apiRequest,
+  type ArchiveAgentResponse,
+  type ArchiveGroupConversationResponse,
   type AgentDetails,
   type AgentRun,
   type AgentRunSummary,
@@ -28,6 +30,8 @@ import {
   type RunEvent,
   type SendConversationMessageMode,
   type SendConversationMessageResponse,
+  type RestoreAgentResponse,
+  type RestoreGroupConversationResponse,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
   type User,
@@ -64,6 +68,12 @@ function writeSelectedConversationId(userId: string, conversationId: string): vo
   window.localStorage.setItem(
     userScopedStorageKey(selectedConversationStoragePrefix, userId),
     conversationId,
+  )
+}
+
+function clearSelectedConversationId(userId: string): void {
+  window.localStorage.removeItem(
+    userScopedStorageKey(selectedConversationStoragePrefix, userId),
   )
 }
 
@@ -141,6 +151,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [devices, setDevices] = useState<DaemonDevice[]>([])
   const [deviceError, setDeviceError] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDetails[]>([])
+  const [archivedAgents, setArchivedAgents] = useState<AgentDetails[]>([])
   const [agentError, setAgentError] = useState<string | null>(null)
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
@@ -156,6 +167,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
@@ -167,6 +179,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const [isCreatingRun, setIsCreatingRun] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
+  const [savedOpen, setSavedOpen] = useState(false)
 
   const activeView = workspaceViewByRoute[route]
   const activeRunCount = useMemo(
@@ -218,6 +231,16 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
     setActiveConversationId(conversationId)
   }, [user])
 
+  const clearActiveConversation = useCallback(() => {
+    if (user) {
+      clearSelectedConversationId(user.id)
+    }
+
+    setPrompt('')
+    setSelectedRunId(null)
+    setActiveConversationId(null)
+  }, [user])
+
   const updatePrompt = useCallback((value: string) => {
     setPrompt(value)
 
@@ -250,6 +273,19 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         setAgentError(error.message)
       } else {
         setAgentError('Unable to load agents.')
+      }
+    }
+  }, [])
+
+  const loadArchivedAgents = useCallback(async () => {
+    try {
+      const response = await apiRequest<{ agents: AgentDetails[] }>('/agents?status=archived')
+      setArchivedAgents(response.agents)
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setAgentError(error.message)
+      } else {
+        setAgentError('Unable to load archived agents.')
       }
     }
   }, [])
@@ -292,6 +328,19 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       }
     }
   }, [activateConversation, activeConversationId, user])
+
+  const loadArchivedConversations = useCallback(async () => {
+    try {
+      const response = await apiRequest<{ conversations: Conversation[] }>('/conversations?status=archived')
+      setArchivedConversations(response.conversations)
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to load archived conversations.')
+      }
+    }
+  }, [])
 
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
@@ -451,16 +500,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
 
     const initialTimer = window.setTimeout(() => {
       void loadAgents()
+      void loadArchivedAgents()
     }, 0)
     const timer = window.setInterval(() => {
       void loadAgents()
+      void loadArchivedAgents()
     }, 10000)
 
     return () => {
       window.clearTimeout(initialTimer)
       window.clearInterval(timer)
     }
-  }, [loadAgents, user])
+  }, [loadAgents, loadArchivedAgents, user])
 
   useEffect(() => {
     if (!user) {
@@ -469,16 +520,18 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
 
     const initialTimer = window.setTimeout(() => {
       void loadConversations()
+      void loadArchivedConversations()
     }, 0)
     const timer = window.setInterval(() => {
       void loadConversations()
+      void loadArchivedConversations()
     }, 10000)
 
     return () => {
       window.clearTimeout(initialTimer)
       window.clearInterval(timer)
     }
-  }, [loadConversations, user])
+  }, [loadArchivedConversations, loadConversations, user])
 
   useEffect(() => {
     if (!user) {
@@ -708,7 +761,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   const refreshWorkspace = () => {
     void loadDevices()
     void loadAgents()
+    void loadArchivedAgents()
     void loadConversations()
+    void loadArchivedConversations()
     void loadRuns()
     if (activeConversationId !== null) {
       void loadMessages(activeConversationId)
@@ -898,6 +953,70 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setIsSavingGroup(false)
     }
   }
+  const archiveGroup = async () => {
+    if (editingGroup === null || editingGroup.key === 'all') {
+      return
+    }
+
+    const archivedGroupId = editingGroup.id
+    setIsSavingGroup(true)
+    setGroupEditError(null)
+
+    try {
+      const response = await apiRequest<ArchiveGroupConversationResponse>(
+        `/conversations/groups/${archivedGroupId}/archive`,
+        { method: 'PATCH' },
+      )
+
+      setConversations((current) =>
+        current.filter((conversation) => conversation.id !== archivedGroupId),
+      )
+      setArchivedConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== archivedGroupId),
+      ])
+      if (activeConversationId === archivedGroupId) {
+        clearActiveConversation()
+      }
+      setEditingGroupId(null)
+      void loadConversations()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupEditError(error.message)
+      } else {
+        setGroupEditError('Unable to archive the group. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingGroup(false)
+    }
+  }
+  const restoreGroup = async (conversationId: string) => {
+    setRunError(null)
+
+    try {
+      const response = await apiRequest<RestoreGroupConversationResponse>(
+        `/conversations/groups/${conversationId}/restore`,
+        { method: 'PATCH' },
+      )
+
+      setArchivedConversations((current) =>
+        current.filter((conversation) => conversation.id !== conversationId),
+      )
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== conversationId),
+      ])
+      void loadConversations()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to restore the group. Try again in a moment.')
+      }
+    }
+  }
   const createAgent = async (input: {
     name: string
     description?: string
@@ -986,6 +1105,73 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
       setIsSavingAgent(false)
     }
   }
+  const archiveAgent = async () => {
+    if (editingAgent === null) {
+      return
+    }
+
+    const archivedAgentId = editingAgent.agent.id
+    setIsSavingAgent(true)
+    setAgentEditError(null)
+
+    try {
+      const response = await apiRequest<ArchiveAgentResponse>(
+        `/agents/${archivedAgentId}/archive`,
+        { method: 'PATCH' },
+      )
+
+      setAgents((current) => current.filter((agent) => agent.agent.id !== archivedAgentId))
+      setArchivedAgents((current) => [
+        response.agent,
+        ...current.filter((agent) => agent.agent.id !== archivedAgentId),
+      ])
+      setConversations((current) =>
+        current.filter((conversation) => conversation.directAgentId !== archivedAgentId),
+      )
+      if (activeConversation?.directAgentId === archivedAgentId) {
+        clearActiveConversation()
+      }
+      setEditingAgentId(null)
+      void loadAgents()
+      void loadArchivedAgents()
+      void loadConversations()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setAgentEditError(error.message)
+      } else {
+        setAgentEditError('Unable to archive the agent. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingAgent(false)
+    }
+  }
+  const restoreAgent = async (agentId: string) => {
+    setRunError(null)
+
+    try {
+      const response = await apiRequest<RestoreAgentResponse>(
+        `/agents/${agentId}/restore`,
+        { method: 'PATCH' },
+      )
+
+      setArchivedAgents((current) => current.filter((agent) => agent.agent.id !== agentId))
+      setAgents((current) => [
+        response.agent,
+        ...current.filter((agent) => agent.agent.id !== agentId),
+      ])
+      void loadAgents()
+      void loadArchivedAgents()
+      void loadConversations()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to restore the agent. Try again in a moment.')
+      }
+    }
+  }
 
   if (authLoading) {
     return (
@@ -1032,11 +1218,21 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         <>
           <ChatSidebar
             conversations={conversations}
+            archivedAgents={archivedAgents}
+            archivedConversations={archivedConversations}
             activeRunCount={activeRunCount}
             agents={agents}
             activeConversationId={activeConversationId}
+            savedOpen={savedOpen}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onRestoreAgent={(agentId) => {
+              void restoreAgent(agentId)
+            }}
+            onRestoreGroup={(conversationId) => {
+              void restoreGroup(conversationId)
+            }}
+            onToggleSaved={() => setSavedOpen((open) => !open)}
             selectGroup={selectConversation}
             selectAgent={(agentId) => {
               void selectAgentConversation(agentId)
@@ -1110,6 +1306,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           error={agentEditError}
           isSaving={isSavingAgent}
           onClose={() => setEditingAgentId(null)}
+          onArchive={archiveAgent}
           onSave={updateAgent}
         />
       )}
@@ -1134,6 +1331,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             error={groupEditError}
             isSaving={isSavingGroup}
             onClose={() => setEditingGroupId(null)}
+            onArchive={archiveGroup}
             onSave={updateGroup}
           />
         )

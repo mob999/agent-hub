@@ -1,7 +1,7 @@
 import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
 import { formatTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
@@ -78,6 +78,8 @@ export function ChannelWorkspace({
   const [mentions, setMentions] = useState<ConversationMention[]>([])
   const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' | 'editor' } | null>(null)
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -263,6 +265,31 @@ export function ChannelWorkspace({
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'editor'
   const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
+  const lastVisibleMessage = visibleMessages.at(-1)
+
+  useEffect(() => {
+    if (showWorkspacePage) {
+      return
+    }
+
+    const scrollContainer = scrollContainerRef.current
+    const messagesEnd = messagesEndRef.current
+
+    if (scrollContainer === null || messagesEnd === null) {
+      return
+    }
+
+    requestAnimationFrame(() => {
+      messagesEnd.scrollIntoView({ block: 'end' })
+    })
+  }, [
+    activeConversation?.id,
+    lastVisibleMessage?.content,
+    lastVisibleMessage?.id,
+    lastVisibleMessage?.status,
+    showWorkspacePage,
+    visibleMessages.length,
+  ])
 
   return (
     <section
@@ -385,6 +412,7 @@ export function ChannelWorkspace({
       </div>
 
       <div
+        ref={scrollContainerRef}
         className={`min-h-0 px-6 py-4 max-[1055px]:px-4 ${
           showEditor ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
@@ -618,6 +646,7 @@ export function ChannelWorkspace({
                 </article>
               )
             })}
+            <div ref={messagesEndRef} aria-hidden="true" />
           </div>
         )}
       </div>

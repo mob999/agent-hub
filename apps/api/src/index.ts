@@ -250,6 +250,51 @@ function previewUnavailableResponse(input: {
   );
 }
 
+function artifactPreviewContentType(input: {
+  filename: string;
+  mimeType?: string | null;
+}): string {
+  if (input.mimeType !== undefined && input.mimeType !== null) {
+    return input.mimeType;
+  }
+
+  const filename = input.filename.toLowerCase();
+
+  if (filename.endsWith(".html") || filename.endsWith(".htm")) {
+    return "text/html; charset=utf-8";
+  }
+
+  if (filename.endsWith(".css")) {
+    return "text/css; charset=utf-8";
+  }
+
+  if (filename.endsWith(".js") || filename.endsWith(".mjs")) {
+    return "text/javascript; charset=utf-8";
+  }
+
+  if (filename.endsWith(".json")) {
+    return "application/json; charset=utf-8";
+  }
+
+  if (filename.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
+  if (filename.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (filename.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  return "application/octet-stream";
+}
+
 function groupChatMcpToolsForAgent(input: {
   agentId: string;
   orchestratorAgentId?: string;
@@ -1964,17 +2009,69 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
       : typeof details.artifact.metadata?.previewUrl === "string"
         ? details.artifact.metadata.previewUrl
         : undefined;
+  const suffix = c.req.param("*") ?? "";
+
+  const serveStoredPreview = async (): Promise<Response> => {
+    if (details.artifact.kind !== "web_preview") {
+      return c.json(
+        {
+          error: {
+            code: "PREVIEW_NOT_READY",
+            message: "Preview is not ready.",
+          },
+        },
+        404,
+      );
+    }
+
+    if (suffix.length > 0) {
+      return previewUnavailableResponse({
+        message:
+          "This preview is a single uploaded file and does not include the requested asset path.",
+        status: 404,
+      });
+    }
+
+    const record = await getConversationArtifactForUser(db, {
+      artifactId: details.artifact.id,
+      ownerUserId: user.id,
+    });
+
+    if (record === null) {
+      return c.json(
+        {
+          error: {
+            code: "ARTIFACT_NOT_FOUND",
+            message: "Artifact was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    const body = await readArtifactContent({
+      storageKey: record.storageKey,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    });
+    const arrayBuffer = body.buffer.slice(
+      body.byteOffset,
+      body.byteOffset + body.byteLength,
+    ) as ArrayBuffer;
+
+    return new Response(arrayBuffer, {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": artifactPreviewContentType({
+          filename: record.artifact.filename,
+          mimeType: record.mimeType,
+        }),
+      },
+      status: 200,
+    });
+  };
 
   if (previewUrl === undefined) {
-    return c.json(
-      {
-        error: {
-          code: "PREVIEW_NOT_READY",
-          message: "Preview is not ready.",
-        },
-      },
-      404,
-    );
+    return serveStoredPreview();
   }
 
   let targetUrl: URL;
@@ -1996,7 +2093,6 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
     });
   }
 
-  const suffix = c.req.param("*") ?? "";
   if (suffix.length > 0) {
     targetUrl.pathname = `${targetUrl.pathname.replace(/\/$/, "")}/${suffix}`;
   }
@@ -2014,6 +2110,10 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
       },
       "Artifact preview proxy target is unavailable",
     );
+
+    if (details.artifact.kind === "web_preview" && suffix.length === 0) {
+      return serveStoredPreview();
+    }
 
     return previewUnavailableResponse({
       message:

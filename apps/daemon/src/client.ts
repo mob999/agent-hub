@@ -100,9 +100,11 @@ async function handleArtifactAction(input: {
 
   if (message.actionType === "preview") {
     const previewCommand = readStringMetadata(message.metadata, "previewCommand");
-    const previewUrl =
-      readStringMetadata(message.metadata, "previewUrl") ??
-      `http://127.0.0.1:${readNumberMetadata(message.metadata, "port") ?? 5173}`;
+    const configuredPreviewUrl = readStringMetadata(message.metadata, "previewUrl");
+    const previewUrl = configuredPreviewUrl ??
+      (previewCommand === undefined
+        ? undefined
+        : `http://127.0.0.1:${readNumberMetadata(message.metadata, "port") ?? 5173}`);
 
     if (previewCommand !== undefined) {
       const child = spawn(previewCommand, {
@@ -123,7 +125,7 @@ async function handleArtifactAction(input: {
     }
 
     return {
-      previewUrl,
+      ...(previewUrl === undefined ? {} : { previewUrl }),
       started: previewCommand !== undefined,
     };
   }

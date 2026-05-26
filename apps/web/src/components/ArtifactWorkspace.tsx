@@ -137,7 +137,7 @@ export function ArtifactWorkspace({
   const rawPreviewUrl =
     previewUrlFromActions(details?.actions ?? []) ??
     readMetadataString(artifact?.metadata, 'previewUrl')
-  const previewUrl = artifact !== null && rawPreviewUrl !== undefined
+  const previewUrl = artifact !== null && (artifact.kind === 'web_preview' || rawPreviewUrl !== undefined)
     ? apiUrl(`/artifacts/${artifact.id}/preview/`)
     : undefined
   const canEdit =

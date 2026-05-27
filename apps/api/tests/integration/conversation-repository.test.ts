@@ -370,6 +370,18 @@ describeDb("conversation repository integration", () => {
       input: { content: "I can take it." },
       createdAt: "2026-05-26T00:00:01.000Z",
     });
+    await appendRunEvent(db, {
+      type: "message.delta",
+      runId: secondJob.run.id,
+      content: "normal output should stay hidden",
+      createdAt: "2026-05-26T00:00:02.000Z",
+    });
+    await appendRunEvent(db, {
+      type: "run.completed",
+      runId: secondJob.run.id,
+      status: "succeeded",
+      createdAt: "2026-05-26T00:00:03.000Z",
+    });
 
     const messages = await listConversationMessagesForUser(db, {
       ownerUserId,

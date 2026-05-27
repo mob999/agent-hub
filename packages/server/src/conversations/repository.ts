@@ -2723,7 +2723,12 @@ export async function appendRunEventToConversationMessage(
           }),
       updatedAt,
     })
-    .where(eq(conversationMessages.runId, event.runId))
+    .where(
+      and(
+        eq(conversationMessages.runId, event.runId),
+        eq(conversationMessages.status, "streaming"),
+      ),
+    )
     .returning({
       conversationId: conversationMessages.conversationId,
     });

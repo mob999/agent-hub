@@ -2062,8 +2062,9 @@ async function resolveMentionedAgentIds(
   return compactUniqueStrings(resolvedAgentIds);
 }
 
-function buildAssignedTaskPrompt(input: {
+export function buildAssignedTaskPrompt(input: {
   conversationTitle: string;
+  taskId: string;
   taskTitle: string;
   taskDescription?: string;
   dispatchMessage: string;
@@ -2071,12 +2072,14 @@ function buildAssignedTaskPrompt(input: {
   return [
     "<agenthub_assigned_task>",
     `Group: #${input.conversationTitle}`,
+    `Task ID: ${input.taskId}`,
     `Task: ${input.taskTitle}`,
     input.taskDescription ? `Description: ${input.taskDescription}` : undefined,
     "",
     "You were assigned this task by the group orchestrator.",
     "Create the requested report or result file in your current workspace.",
-    "Upload the report with AgentHub MCP upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
+    "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
+    "Upload the report with upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
@@ -2621,6 +2624,7 @@ export async function appendRunEventToConversationMessage(
             daemonDeviceId: runAgent.daemonDeviceId,
             prompt: buildAssignedTaskPrompt({
               conversationTitle: conversation.title,
+              taskId: task.id,
               taskTitle: task.title,
               taskDescription: optionalString(task.description),
               dispatchMessage: content,

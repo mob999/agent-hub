@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAssignedTaskPrompt,
   buildConversationRunPrompt,
   type ConversationMessage,
 } from "../../src";
@@ -58,6 +59,21 @@ describe("conversation prompt builder", () => {
       "Now add tests.",
       "</user_request>",
     ].join("\n"));
+  });
+
+  it("includes the assigned task id for MCP task completion tools", () => {
+    const prompt = buildAssignedTaskPrompt({
+      conversationTitle: "Research",
+      taskId: "00000000-0000-4000-8000-000000000010",
+      taskTitle: "Write the report",
+      taskDescription: "Summarize the findings.",
+      dispatchMessage: "@dudu please write this report.",
+    });
+
+    expect(prompt).toContain("Task ID: 00000000-0000-4000-8000-000000000010");
+    expect(prompt).toContain(
+      "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
+    );
   });
 });
 

@@ -101,3 +101,11 @@ export function buildArtifactDownloadUrl(input: {
   return new URL(`/artifacts/${input.artifactId}/download`, input.publicApiBaseUrl)
     .toString();
 }
+
+export function buildArtifactEditorUrl(input: {
+  artifactId: string;
+  publicWebBaseUrl: string;
+}): string {
+  return new URL(`/editor/${input.artifactId}`, input.publicWebBaseUrl)
+    .toString();
+}

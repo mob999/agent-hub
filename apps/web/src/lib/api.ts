@@ -189,6 +189,7 @@ export interface ConversationArtifact {
   filename: string
   sizeBytes: number
   downloadUrl?: string
+  editorUrl?: string
   latestRevisionId?: string
   createdAt: string
   updatedAt: string

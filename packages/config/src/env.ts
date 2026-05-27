@@ -77,6 +77,7 @@ export const apiEnvSchema = z.object({
     z.string().min(1),
   ),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
+  AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -100,6 +101,7 @@ export const workerEnvSchema = z.object({
     z.string().min(1),
   ),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
+  AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
 });
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

@@ -38,6 +38,7 @@ import {
   type WorkspaceView,
 } from '../lib/api'
 import { DaemonPage } from './DaemonPage'
+import { ArtifactEditorPage } from './ArtifactEditorPage'
 import { RunsPage } from './RunsPage'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
@@ -53,6 +54,7 @@ const workspaceViewByRoute: Record<WorkspaceRoutePath, WorkspaceView> = {
 }
 const selectedConversationStoragePrefix = 'agenthub.workspace.selectedConversation'
 const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
+const authRedirectStorageKey = 'agenthub.auth.redirect'
 
 function userScopedStorageKey(prefix: string, userId: string): string {
   return `${prefix}.${userId}`
@@ -141,10 +143,11 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   route: WorkspaceRoutePath
+  editorArtifactId?: string | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
+export function WorkspacePage({ route, editorArtifactId = null, navigate }: WorkspacePageProps) {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -457,6 +460,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
           return
         }
         if (error instanceof ApiRequestError && error.status === 401) {
+          window.sessionStorage.setItem(authRedirectStorageKey, window.location.pathname)
           navigate('/login')
           return
         }
@@ -776,6 +780,10 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   }
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
+  }
+
+  const openArtifactEditor = (artifactId: string) => {
+    navigate(`/editor/${encodeURIComponent(artifactId)}` as RoutePath)
   }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
@@ -1199,7 +1207,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
   return (
     <main
       className={
-        activeView === 'chat'
+        activeView === 'chat' && editorArtifactId === null
           ? 'grid h-screen grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
           : 'grid h-screen grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
       }
@@ -1214,7 +1222,9 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
         refreshWorkspace={refreshWorkspace}
         logout={logout}
       />
-      {activeView === 'chat' ? (
+      {editorArtifactId !== null ? (
+        <ArtifactEditorPage artifactId={editorArtifactId} navigate={navigate} />
+      ) : activeView === 'chat' ? (
         <>
           <ChatSidebar
             conversations={conversations}
@@ -1254,11 +1264,7 @@ export function WorkspacePage({ route, navigate }: WorkspacePageProps) {
             submitRun={submitRun}
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}
-            refreshArtifacts={() => {
-              if (activeConversation?.id) {
-                void loadArtifacts(activeConversation.id)
-              }
-            }}
+            openArtifactEditor={openArtifactEditor}
           />
         </>
       ) : activeView === 'daemon' ? (

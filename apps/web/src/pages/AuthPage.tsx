@@ -15,8 +15,27 @@ import { useState, type FormEvent, type MouseEvent } from 'react'
 import { ApiRequestError, apiRequest, type AuthResponse } from '../lib/api'
 
 export type WorkspaceRoutePath = '/chat' | '/runs' | '/daemon'
+export type EditorRoutePath = `/editor/${string}`
 export type AuthRoutePath = '/login' | '/register'
-export type RoutePath = WorkspaceRoutePath | AuthRoutePath
+export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
+
+const authRedirectStorageKey = 'agenthub.auth.redirect'
+
+function readPendingAuthRedirect(): RoutePath | null {
+  const value = window.sessionStorage.getItem(authRedirectStorageKey)
+
+  if (
+    value === '/chat' ||
+    value === '/runs' ||
+    value === '/daemon' ||
+    (value?.startsWith('/editor/') && value.length > '/editor/'.length)
+  ) {
+    window.sessionStorage.removeItem(authRedirectStorageKey)
+    return value as RoutePath
+  }
+
+  return null
+}
 
 interface AuthPageProps {
   mode: 'login' | 'register'
@@ -90,7 +109,7 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
             : { email: email.trim(), password },
         ),
       })
-      navigate('/chat')
+      navigate(readPendingAuthRedirect() ?? '/chat')
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setServerError(error.message)

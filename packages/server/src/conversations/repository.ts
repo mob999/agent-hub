@@ -40,6 +40,7 @@ import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { getRunnableAgentForUser } from "../agents/repository.js";
 import {
   buildArtifactDownloadUrl,
+  buildArtifactEditorUrl,
   conversationArtifactRevisionStorageKey,
   conversationArtifactStorageKey,
   sanitizeArtifactFilename,
@@ -102,12 +103,14 @@ export interface AppendRunEventResult {
 
 export interface AppendRunEventOptions {
   publicApiBaseUrl?: string;
+  publicWebBaseUrl?: string;
 }
 
 export interface PersistConversationArtifactUploadInput {
   contentBase64: string;
   filename: string;
   publicApiBaseUrl?: string;
+  publicWebBaseUrl?: string;
   runId: string;
   sizeBytes: number;
   sourcePath?: string;
@@ -211,7 +214,7 @@ async function getConversationAgentIdsForRow(
 
 export function toConversationArtifact(
   row: ConversationArtifactRow,
-  input: { publicApiBaseUrl?: string } = {},
+  input: { publicApiBaseUrl?: string; publicWebBaseUrl?: string } = {},
 ): ConversationArtifact {
   return {
     id: row.id,
@@ -231,6 +234,13 @@ export function toConversationArtifact(
         : buildArtifactDownloadUrl({
             artifactId: row.id,
             publicApiBaseUrl: input.publicApiBaseUrl,
+          }),
+    editorUrl:
+      input.publicWebBaseUrl === undefined
+        ? undefined
+        : buildArtifactEditorUrl({
+            artifactId: row.id,
+            publicWebBaseUrl: input.publicWebBaseUrl,
           }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -1054,6 +1064,7 @@ export async function listConversationTasksForUser(
     conversationId: ConversationId;
     ownerUserId: string;
     publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<ConversationTask[] | null> {
   const conversation = await getConversationForUser(db, input);
@@ -1084,6 +1095,7 @@ export async function listConversationTasksForUser(
     artifacts.push(
       toConversationArtifact(artifactRow, {
         publicApiBaseUrl: input.publicApiBaseUrl,
+        publicWebBaseUrl: input.publicWebBaseUrl,
       }),
     );
     artifactsByTask.set(artifactRow.taskId, artifacts);
@@ -1098,6 +1110,7 @@ export async function listConversationArtifactsForUser(
     conversationId: ConversationId;
     ownerUserId: string;
     publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<ConversationArtifact[] | null> {
   const conversation = await getConversationForUser(db, input);
@@ -1115,13 +1128,19 @@ export async function listConversationArtifactsForUser(
   return rows.map((row) =>
     toConversationArtifact(row, {
       publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
     }),
   );
 }
 
 export async function getConversationArtifactForUser(
   db: Db,
-  input: { artifactId: string; ownerUserId: string; publicApiBaseUrl?: string },
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
 ): Promise<
   | { artifact: ConversationArtifact; storageKey: string; sourcePath: string | null }
   | null
@@ -1144,6 +1163,7 @@ export async function getConversationArtifactForUser(
   return {
     artifact: toConversationArtifact(row, {
       publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
     }),
     storageKey: row.storageKey,
     sourcePath: row.sourcePath,
@@ -1173,7 +1193,12 @@ function availableArtifactActions(
 
 export async function getConversationArtifactDetailsForUser(
   db: Db,
-  input: { artifactId: string; ownerUserId: string; publicApiBaseUrl?: string },
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
 ): Promise<ConversationArtifactDetails | null> {
   const record = await getConversationArtifactForUser(db, input);
 
@@ -1571,6 +1596,7 @@ export async function persistConversationArtifactUpload(
 
   return toConversationArtifact(artifact, {
     publicApiBaseUrl: input.publicApiBaseUrl,
+    publicWebBaseUrl: input.publicWebBaseUrl,
   });
 }
 
@@ -2094,6 +2120,7 @@ async function maybeCreateFinalizationRun(
     createdAt: Date;
     dispatchJobs: RunQueueJob[];
     publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<void> {
   const taskRows = await db
@@ -2149,6 +2176,7 @@ async function maybeCreateFinalizationRun(
     artifacts.push(
       toConversationArtifact(artifactRow, {
         publicApiBaseUrl: input.publicApiBaseUrl,
+        publicWebBaseUrl: input.publicWebBaseUrl,
       }),
     );
     artifactsByTask.set(artifactRow.taskId, artifacts);
@@ -2169,7 +2197,7 @@ async function maybeCreateFinalizationRun(
           "Artifacts:",
           ...artifacts.map(
             (artifact) =>
-              `- ${artifact.title}: ${artifact.downloadUrl ?? `/artifacts/${artifact.id}/download`}`,
+              `- ${artifact.title}: ${artifact.editorUrl ?? artifact.downloadUrl ?? `/editor/${artifact.id}`}`,
           ),
         ];
 
@@ -2186,7 +2214,7 @@ async function maybeCreateFinalizationRun(
     `Group: #${conversation.title}`,
     "All tasks created by this Orchestrator run reached a terminal state.",
     "Send one final Markdown summary to the user with the AgentHub MCP send_message tool.",
-    "Include any report download links listed below.",
+    "Include any report preview/editor links listed below.",
     "</agenthub_task_finalization>",
     "",
     "<original_user_request>",
@@ -2308,6 +2336,7 @@ export async function appendRunEventToConversationMessage(
           createdAt: updatedAt,
           dispatchJobs,
           publicApiBaseUrl: options.publicApiBaseUrl,
+          publicWebBaseUrl: options.publicWebBaseUrl,
         });
       }
     }
@@ -2482,6 +2511,7 @@ export async function appendRunEventToConversationMessage(
         createdAt: updatedAt,
         dispatchJobs,
         publicApiBaseUrl: options.publicApiBaseUrl,
+        publicWebBaseUrl: options.publicWebBaseUrl,
       });
 
       return { dispatchJobs };

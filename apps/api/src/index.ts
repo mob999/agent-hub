@@ -1363,6 +1363,7 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
     conversationId: c.req.param("conversationId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (tasks === null) {
@@ -1399,6 +1400,7 @@ app.get("/conversations/:conversationId/artifacts", async (c) => {
     conversationId: c.req.param("conversationId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (artifacts === null) {
@@ -1515,6 +1517,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           conversationId: conversation.id,
           ownerUserId: user.id,
           publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+          publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
         })
       : [];
 
@@ -1866,6 +1869,7 @@ app.get("/artifacts/:artifactId", async (c) => {
     artifactId: c.req.param("artifactId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (details === null) {
@@ -1939,6 +1943,7 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
     artifactId: c.req.param("artifactId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (details === null) {
@@ -1976,6 +1981,8 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
   const record = await getConversationArtifactForUser(db, {
     artifactId: details.artifact.id,
     ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (record === null) {
@@ -2131,6 +2138,7 @@ app.get("/artifacts/:artifactId/download", async (c) => {
     artifactId: c.req.param("artifactId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (record === null) {

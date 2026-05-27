@@ -69,6 +69,7 @@ const gateway = new DaemonGateway({
   onRunEvent: async (event) => {
     const result = await appendRunEvent(db, event, {
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
     });
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
   },
@@ -77,6 +78,7 @@ const gateway = new DaemonGateway({
       contentBase64: message.contentBase64,
       filename: message.filename,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
       runId: message.runId,
       sizeBytes: message.sizeBytes,
       sourcePath: message.sourcePath,
@@ -205,7 +207,10 @@ while (!shuttingDown) {
           error: `Daemon ${message.job.daemonDeviceId} is not connected.`,
           createdAt: new Date().toISOString(),
         },
-        { publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL },
+        {
+          publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+          publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+        },
       );
       await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
     }

@@ -76,6 +76,7 @@ export interface ConversationArtifact {
   sizeBytes: number;
   latestRevisionId?: ConversationArtifactRevisionId;
   downloadUrl?: string;
+  editorUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }

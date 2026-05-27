@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AuthPage, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
+import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
 function getRoutePath(): RoutePath {
   const path = window.location.pathname
+  if (path.startsWith('/editor/') && path.length > '/editor/'.length) {
+    return path as EditorRoutePath
+  }
+
   if (
     path === '/login' ||
     path === '/register' ||
@@ -18,6 +22,10 @@ function getRoutePath(): RoutePath {
 
 function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
   return route === '/chat' || route === '/runs' || route === '/daemon'
+}
+
+function editorArtifactIdFromRoute(route: RoutePath): string | null {
+  return route.startsWith('/editor/') ? decodeURIComponent(route.slice('/editor/'.length)) : null
 }
 
 function App() {
@@ -44,7 +52,13 @@ function App() {
     return <AuthPage mode={route === '/login' ? 'login' : 'register'} navigate={navigate} />
   }
 
-  return <WorkspacePage route={isWorkspaceRoute(route) ? route : '/chat'} navigate={navigate} />
+  return (
+    <WorkspacePage
+      route={isWorkspaceRoute(route) ? route : '/chat'}
+      editorArtifactId={editorArtifactIdFromRoute(route)}
+      navigate={navigate}
+    />
+  )
 }
 
 export default App

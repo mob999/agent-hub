@@ -103,6 +103,8 @@ describe("conversation protocol", () => {
       sizeBytes: 2048,
       downloadUrl:
         "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000020/download",
+      editorUrl:
+        "http://localhost:5173/editor/00000000-0000-4000-8000-000000000020",
       createdAt: "2026-05-26T00:00:01.000Z",
       updatedAt: "2026-05-26T00:00:01.000Z",
     };
@@ -130,6 +132,7 @@ describe("conversation protocol", () => {
     expect(task.status).toBe("succeeded");
     expect(task.assigneeRunId).toBeDefined();
     expect(task.artifacts?.[0]?.downloadUrl).toContain("/download");
+    expect(task.artifacts?.[0]?.editorUrl).toContain("/editor/");
   });
 
   it("expresses artifact revisions and actions", () => {

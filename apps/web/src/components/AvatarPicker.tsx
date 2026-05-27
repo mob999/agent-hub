@@ -31,7 +31,7 @@ export function AvatarPicker({
               disabled={disabled}
               aria-pressed={selected}
               title="Double click to preview"
-              className={`relative h-16 w-16 overflow-hidden border-4 transition ${
+              className={`relative h-[50px] w-[50px] appearance-none overflow-hidden border-4 p-0 leading-none transition ${
                 selected
                   ? "border-[var(--cds-border-interactive)] ring-2 ring-[var(--cds-border-interactive)] ring-offset-2 ring-offset-[var(--cds-layer-01)]"
                   : "border-[var(--cds-border-subtle-01)] hover:border-[var(--cds-border-strong-01)]"

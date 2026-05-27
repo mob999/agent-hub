@@ -6,8 +6,10 @@ import {
   TextArea,
   TextInput,
 } from '@carbon/react'
+import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { useMemo, useState } from 'react'
 import type { DaemonDevice, RuntimeKind } from '../lib/api'
+import { AvatarPicker } from './AvatarPicker'
 
 interface AgentCreateModalProps {
   open: boolean
@@ -19,6 +21,7 @@ interface AgentCreateModalProps {
   onCreate: (input: {
     name: string
     description?: string
+    avatar: string
     daemonDeviceId: string
     runtimeKind: RuntimeKind
   }) => void
@@ -50,6 +53,7 @@ export function AgentCreateModal({
     ''
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR_PATHS[0])
   const [daemonDeviceId, setDaemonDeviceId] = useState(initialDeviceId)
   const selectedDaemonDeviceId =
     availableDevices.some((device) => device.id === daemonDeviceId)
@@ -85,6 +89,7 @@ export function AgentCreateModal({
         onCreate({
           name: name.trim(),
           description: description.trim() || undefined,
+          avatar,
           daemonDeviceId: selectedDaemonDeviceId,
           runtimeKind: selectedRuntimeKind,
         })
@@ -124,6 +129,12 @@ export function AgentCreateModal({
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
+        />
+        <AvatarPicker
+          label="Avatar"
+          value={avatar}
+          disabled={isCreating}
+          onChange={setAvatar}
         />
         <Select
           id="agent-daemon"

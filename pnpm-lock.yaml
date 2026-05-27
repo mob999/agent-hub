@@ -100,6 +100,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@agent-hub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@carbon/react':
         specifier: ^1.108.0
         version: 1.108.0(react-dom@19.2.6(react@19.2.6))(react-is@19.2.6)(react@19.2.6)(sass@1.100.0)

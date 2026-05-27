@@ -1058,6 +1058,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const createAgent = async (input: {
     name: string
     description?: string
+    avatar: string
     daemonDeviceId: string
     runtimeKind: RuntimeKind
   }) => {
@@ -1097,7 +1098,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
       setIsCreatingAgent(false)
     }
   }
-  const updateAgent = async (input: { name: string; description?: string }) => {
+  const updateAgent = async (input: { name: string; description?: string; avatar: string }) => {
     if (editingAgent === null) {
       return
     }

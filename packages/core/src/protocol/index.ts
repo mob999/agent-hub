@@ -4,3 +4,4 @@ export * from "./conversation.js";
 export * from "./daemon.js";
 export * from "./mcp.js";
 export * from "./run.js";
+export * from "../avatar.js";

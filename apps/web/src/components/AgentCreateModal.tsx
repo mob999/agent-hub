@@ -6,9 +6,9 @@ import {
   TextArea,
   TextInput,
 } from '@carbon/react'
-import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { useMemo, useState } from 'react'
 import type { DaemonDevice, RuntimeKind } from '../lib/api'
+import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
 
 interface AgentCreateModalProps {

@@ -5,9 +5,9 @@ import {
   TextArea,
   TextInput,
 } from '@carbon/react'
-import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { useState } from 'react'
 import type { AgentDetails } from '../lib/api'
+import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
 
 interface AgentEditModalProps {

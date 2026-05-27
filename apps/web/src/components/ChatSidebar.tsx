@@ -28,6 +28,8 @@ const selectedListItem =
   'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-hover-01)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-selected-hover-01)]'
 const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
+const agentAvatarFrame =
+  'grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]'
 
 export function ChatSidebar({
   conversations,
@@ -124,18 +126,20 @@ export function ChatSidebar({
                 ))}
                 {archivedAgents.map((agent) => (
                   <div
-                    className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                    className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
                     key={agent.agent.id}
                   >
-                    {agent.agent.avatar ? (
-                      <img
-                        src={agent.agent.avatar}
-                        alt={agent.agent.name}
-                        className="h-6 w-6 object-cover"
-                      />
-                    ) : (
-                      <ChatBot size={14} />
-                    )}
+                    <span className={agentAvatarFrame} aria-hidden="true">
+                      {agent.agent.avatar ? (
+                        <img
+                          src={agent.agent.avatar}
+                          alt=""
+                          className="h-7 w-7 object-cover"
+                        />
+                      ) : (
+                        <ChatBot size={16} />
+                      )}
+                    </span>
                     <span className="min-w-0 truncate">{agent.agent.name}</span>
                     <button
                       className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -218,17 +222,17 @@ export function ChatSidebar({
                 <button
                   className={`${sidebarButton} ${
                     agentSelected ? selectedListItem : transparentListItem
-                  } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
+                  } min-h-11 grid-cols-[2rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
                   type="button"
                   key={agent.agent.id}
                   aria-current={agentSelected ? 'page' : undefined}
                   onClick={() => selectAgent(agent.agent.id)}
                 >
-                  <span className="grid h-6 w-5 place-items-center" aria-hidden="true">
+                  <span className={agentAvatarFrame} aria-hidden="true">
                     {agent.agent.avatar ? (
                       <img
                         src={agent.agent.avatar}
-                        alt={agent.agent.name}
+                        alt=""
                         className="h-7 w-7 object-cover"
                       />
                     ) : (

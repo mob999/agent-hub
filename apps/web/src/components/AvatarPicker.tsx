@@ -1,6 +1,6 @@
 import { CheckmarkFilled } from "@carbon/react/icons";
-import { DEFAULT_AVATAR_PATHS } from "@agent-hub/core";
 import { useState } from "react";
+import { DEFAULT_AVATAR_PATHS } from "@agent-hub/core";
 
 interface AvatarPickerProps {
   disabled?: boolean;

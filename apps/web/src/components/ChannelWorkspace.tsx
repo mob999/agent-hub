@@ -32,8 +32,10 @@ interface ChannelWorkspaceProps {
   openCreateAgent: () => void
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
+  openConversationEditor?: (conversationId: string) => void
   closeArtifactEditor?: () => void
   activeEditorArtifactId?: string | null
+  editorConversationId?: string | null
   onActiveEditorArtifactChange?: (artifactId: string) => void
   refreshArtifacts?: () => void
 }
@@ -104,8 +106,10 @@ export function ChannelWorkspace({
   openCreateAgent,
   openEditConversation,
   openArtifactEditor,
+  openConversationEditor,
   closeArtifactEditor,
   activeEditorArtifactId = null,
+  editorConversationId = null,
   onActiveEditorArtifactChange,
   refreshArtifacts,
 }: ChannelWorkspaceProps) {
@@ -296,7 +300,10 @@ export function ChannelWorkspace({
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'files'
   const firstArtifactId = artifacts[0]?.id ?? null
-  const showEditor = activeEditorArtifactId !== null && canOpenWorkspacePanel
+  const showEditor =
+    editorConversationId !== null &&
+    editorConversationId === activeConversation?.id &&
+    canOpenWorkspacePanel
   const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
 
@@ -403,7 +410,7 @@ export function ChannelWorkspace({
             size="md"
             align="bottom"
             type="button"
-            disabled={!canOpenWorkspacePanel || firstArtifactId === null}
+            disabled={!canOpenWorkspacePanel}
             onClick={() => {
               if (showEditor) {
                 closeArtifactEditor?.()
@@ -412,6 +419,11 @@ export function ChannelWorkspace({
 
               if (firstArtifactId !== null) {
                 openArtifactEditor(firstArtifactId)
+                return
+              }
+
+              if (activeConversation !== null) {
+                openConversationEditor?.(activeConversation.id)
               }
             }}
           >

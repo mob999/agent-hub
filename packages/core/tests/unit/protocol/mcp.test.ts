@@ -114,7 +114,7 @@ describe("AgentHub MCP protocol", () => {
         downloadUrl:
           "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000011/download",
         editorUrl:
-          "http://localhost:5173/editor/00000000-0000-4000-8000-000000000011",
+          "http://localhost:5173/editor/00000000-0000-4000-8000-000000000013/00000000-0000-4000-8000-000000000011",
         createdAt: "2026-05-26T00:00:00.000Z",
         updatedAt: "2026-05-26T00:00:00.000Z",
       },

@@ -104,8 +104,11 @@ export function buildArtifactDownloadUrl(input: {
 
 export function buildArtifactEditorUrl(input: {
   artifactId: string;
+  conversationId: string;
   publicWebBaseUrl: string;
 }): string {
-  return new URL(`/editor/${input.artifactId}`, input.publicWebBaseUrl)
-    .toString();
+  return new URL(
+    `/editor/${input.conversationId}/${input.artifactId}`,
+    input.publicWebBaseUrl,
+  ).toString();
 }

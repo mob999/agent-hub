@@ -2,9 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
+interface EditorRouteState {
+  artifactId: string | null
+  conversationId: string
+}
+
 function getRoutePath(): RoutePath {
   const path = window.location.pathname
-  if (path.startsWith('/editor/') && path.length > '/editor/'.length) {
+  const editorRoute = editorStateFromPath(path)
+  if (editorRoute !== null) {
     return path as EditorRoutePath
   }
 
@@ -24,8 +30,17 @@ function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
   return route === '/chat' || route === '/runs' || route === '/daemon'
 }
 
-function editorArtifactIdFromRoute(route: RoutePath): string | null {
-  return route.startsWith('/editor/') ? decodeURIComponent(route.slice('/editor/'.length)) : null
+function editorStateFromPath(path: string): EditorRouteState | null {
+  const segments = path.split('/').filter(Boolean)
+
+  if (segments[0] !== 'editor' || segments.length < 2 || segments.length > 3) {
+    return null
+  }
+
+  return {
+    conversationId: decodeURIComponent(segments[1] ?? ''),
+    artifactId: segments[2] === undefined ? null : decodeURIComponent(segments[2]),
+  }
 }
 
 function App() {
@@ -55,7 +70,7 @@ function App() {
   return (
     <WorkspacePage
       route={isWorkspaceRoute(route) ? route : '/chat'}
-      editorArtifactId={editorArtifactIdFromRoute(route)}
+      editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
       navigate={navigate}
     />
   )

@@ -240,6 +240,7 @@ export function toConversationArtifact(
         ? undefined
         : buildArtifactEditorUrl({
             artifactId: row.id,
+            conversationId: row.conversationId,
             publicWebBaseUrl: input.publicWebBaseUrl,
           }),
     createdAt: row.createdAt.toISOString(),
@@ -2197,7 +2198,7 @@ async function maybeCreateFinalizationRun(
           "Artifacts:",
           ...artifacts.map(
             (artifact) =>
-              `- ${artifact.title}: ${artifact.editorUrl ?? artifact.downloadUrl ?? `/editor/${artifact.id}`}`,
+              `- ${artifact.title}: ${artifact.editorUrl ?? artifact.downloadUrl ?? `/editor/${artifact.conversationId}/${artifact.id}`}`,
           ),
         ];
 

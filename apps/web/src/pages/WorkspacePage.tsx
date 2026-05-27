@@ -20,7 +20,6 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
-  type ConversationArtifactDetails,
   type ConversationMessage,
   type ConversationTask,
   type CreateGroupConversationResponse,
@@ -143,11 +142,11 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   route: WorkspaceRoutePath
-  editorArtifactId?: string | null
+  editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, editorArtifactId = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({ route, editorRoute = null, navigate }: WorkspacePageProps) {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -564,52 +563,21 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
   }, [activeConversationId, loadArtifacts, loadMessages, loadTasks])
 
   useEffect(() => {
-    if (!user || editorArtifactId === null) {
+    if (!user || editorRoute === null) {
       return
     }
 
-    let active = true
+    const timer = window.setTimeout(() => {
+      activateConversation(editorRoute.conversationId)
+      void loadMessages(editorRoute.conversationId)
+      void loadTasks(editorRoute.conversationId)
+      void loadArtifacts(editorRoute.conversationId)
+    }, 0)
 
-    const loadEditorConversation = async () => {
-      try {
-        const details = await apiRequest<ConversationArtifactDetails>(`/artifacts/${editorArtifactId}`)
-
-        if (!active) {
-          return
-        }
-
-        activateConversation(details.artifact.conversationId)
-        setArtifactsByConversation((current) => {
-          const existingArtifacts = current[details.artifact.conversationId] ?? []
-          const nextArtifacts = existingArtifacts.some((artifact) => artifact.id === details.artifact.id)
-            ? existingArtifacts
-            : [details.artifact, ...existingArtifacts]
-
-          return {
-            ...current,
-            [details.artifact.conversationId]: nextArtifacts,
-          }
-        })
-        void loadMessages(details.artifact.conversationId)
-        void loadTasks(details.artifact.conversationId)
-        void loadArtifacts(details.artifact.conversationId)
-      } catch (error) {
-        if (!active) {
-          return
-        }
-
-        setRunError(error instanceof ApiRequestError ? error.message : 'Unable to open artifact.')
-      }
-    }
-
-    void loadEditorConversation()
-
-    return () => {
-      active = false
-    }
+    return () => window.clearTimeout(timer)
   }, [
     activateConversation,
-    editorArtifactId,
+    editorRoute,
     loadArtifacts,
     loadMessages,
     loadTasks,
@@ -835,8 +803,22 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
     navigate(workspaceRouteByView[view])
   }
 
+  const openConversationEditor = (conversationId: string, artifactId?: string | null) => {
+    navigate(
+      artifactId
+        ? `/editor/${encodeURIComponent(conversationId)}/${encodeURIComponent(artifactId)}` as RoutePath
+        : `/editor/${encodeURIComponent(conversationId)}` as RoutePath,
+    )
+  }
   const openArtifactEditor = (artifactId: string) => {
-    navigate(`/editor/${encodeURIComponent(artifactId)}` as RoutePath)
+    const artifact = Object.values(artifactsByConversation)
+      .flat()
+      .find((item) => item.id === artifactId)
+    const conversationId = artifact?.conversationId ?? activeConversationId
+
+    if (conversationId !== null) {
+      openConversationEditor(conversationId, artifactId)
+    }
   }
   const closeArtifactEditor = () => {
     navigate('/chat')
@@ -1319,8 +1301,10 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}
             openArtifactEditor={openArtifactEditor}
+            openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
             closeArtifactEditor={closeArtifactEditor}
-            activeEditorArtifactId={editorArtifactId}
+            activeEditorArtifactId={editorRoute?.artifactId ?? null}
+            editorConversationId={editorRoute?.conversationId ?? null}
             onActiveEditorArtifactChange={openArtifactEditor}
             refreshArtifacts={() => {
               if (activeConversation?.id) {

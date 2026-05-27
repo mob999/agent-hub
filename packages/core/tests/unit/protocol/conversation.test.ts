@@ -104,7 +104,7 @@ describe("conversation protocol", () => {
       downloadUrl:
         "http://localhost:3000/artifacts/00000000-0000-4000-8000-000000000020/download",
       editorUrl:
-        "http://localhost:5173/editor/00000000-0000-4000-8000-000000000020",
+        "http://localhost:5173/editor/00000000-0000-4000-8000-000000000012/00000000-0000-4000-8000-000000000020",
       createdAt: "2026-05-26T00:00:01.000Z",
       updatedAt: "2026-05-26T00:00:01.000Z",
     };

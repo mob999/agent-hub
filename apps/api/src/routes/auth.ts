@@ -1,4 +1,5 @@
 import { users } from "@agent-hub/db";
+import { pickRandomDefaultAvatar } from "@agent-hub/core";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -171,12 +172,14 @@ authRoutes.openapi(registerRoute, async (c) => {
     .values({
       email,
       name: body.name ?? null,
+      avatar: pickRandomDefaultAvatar(),
       passwordHash,
     })
     .returning({
       id: users.id,
       email: users.email,
       name: users.name,
+      avatar: users.avatar,
     });
 
   const { token } = await createSession(db, {
@@ -206,6 +209,7 @@ authRoutes.openapi(loginRoute, async (c) => {
       id: users.id,
       email: users.email,
       name: users.name,
+      avatar: users.avatar,
       passwordHash: users.passwordHash,
     })
     .from(users)
@@ -240,6 +244,7 @@ authRoutes.openapi(loginRoute, async (c) => {
         id: user.id,
         email: user.email,
         name: user.name,
+        avatar: user.avatar,
       },
     },
     200,

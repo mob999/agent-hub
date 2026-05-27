@@ -127,7 +127,15 @@ export function ChatSidebar({
                     className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
                     key={agent.agent.id}
                   >
-                    <ChatBot size={14} />
+                    {agent.agent.avatar ? (
+                      <img
+                        src={agent.agent.avatar}
+                        alt={agent.agent.name}
+                        className="h-6 w-6 object-cover"
+                      />
+                    ) : (
+                      <ChatBot size={14} />
+                    )}
                     <span className="min-w-0 truncate">{agent.agent.name}</span>
                     <button
                       className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -217,7 +225,15 @@ export function ChatSidebar({
                   onClick={() => selectAgent(agent.agent.id)}
                 >
                   <span className="grid h-6 w-5 place-items-center" aria-hidden="true">
-                    <ChatBot size={16} />
+                    {agent.agent.avatar ? (
+                      <img
+                        src={agent.agent.avatar}
+                        alt={agent.agent.name}
+                        className="h-7 w-7 object-cover"
+                      />
+                    ) : (
+                      <ChatBot size={16} />
+                    )}
                   </span>
                   <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
                   <AgentStatusIndicator agent={agent} />

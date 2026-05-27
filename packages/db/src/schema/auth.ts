@@ -14,6 +14,7 @@ export const users = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     email: varchar("email", { length: 320 }).notNull(),
     name: varchar("name", { length: 120 }),
+    avatar: text("avatar"),
     passwordHash: text("password_hash").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -48,4 +49,3 @@ export const sessions = pgTable(
     sessionsUserIdIdx: index("sessions_user_id_idx").on(table.userId),
   }),
 );
-

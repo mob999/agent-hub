@@ -9,6 +9,7 @@ export type AuthUser = {
   id: string;
   email: string;
   name: string | null;
+  avatar: string | null;
 };
 
 export type AppBindings = {
@@ -42,6 +43,7 @@ export const attachAuthUser: MiddlewareHandler<AppBindings> = async (c, next) =>
     id: result.user.id,
     email: result.user.email,
     name: result.user.name,
+    avatar: result.user.avatar,
   });
 
   await next();

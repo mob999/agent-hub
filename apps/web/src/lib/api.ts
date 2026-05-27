@@ -32,6 +32,7 @@ export interface User {
   id: string
   email: string
   name: string | null
+  avatar: string | null
 }
 
 export interface AuthResponse {
@@ -97,6 +98,7 @@ export interface AgentDetails {
 export interface UpdateAgentRequest {
   name: string
   description?: string
+  avatar?: string
 }
 
 export interface UpdateAgentResponse {

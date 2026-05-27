@@ -19,6 +19,7 @@ import {
   agentHubAllMcpTools,
   agentHubNonOrchestratorMcpTools,
   inferArtifactFileInfo,
+  isDefaultAvatarPath,
 } from "@agent-hub/core";
 import {
   appendRunEvent,
@@ -745,6 +746,7 @@ app.post("/agents", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     name?: unknown;
     description?: unknown;
+    avatar?: unknown;
     daemonDeviceId?: unknown;
     runtimeKind?: unknown;
   };
@@ -753,10 +755,16 @@ app.post("/agents", async (c) => {
     typeof body.description === "string" && body.description.trim().length > 0
       ? body.description.trim()
       : undefined;
+  const avatar = body.avatar === undefined
+    ? undefined
+    : isDefaultAvatarPath(body.avatar)
+    ? body.avatar
+    : null;
 
   if (
     name.length === 0 ||
     name.length > 120 ||
+    avatar === null ||
     typeof body.daemonDeviceId !== "string" ||
     body.daemonDeviceId.length === 0 ||
     !isRuntimeKind(body.runtimeKind)
@@ -766,7 +774,7 @@ app.post("/agents", async (c) => {
         error: {
           code: "INVALID_AGENT_REQUEST",
           message:
-            "name, daemonDeviceId, and a supported runtimeKind are required.",
+            "name, avatar, daemonDeviceId, and a supported runtimeKind are required.",
         },
       },
       400,
@@ -796,6 +804,7 @@ app.post("/agents", async (c) => {
     ownerUserId: user.id,
     name,
     description,
+    avatar: avatar ?? undefined,
     runtime,
     createdAt,
   });
@@ -867,19 +876,26 @@ app.patch("/agents/:agentId", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     description?: unknown;
     name?: unknown;
+    avatar?: unknown;
   };
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const description =
     typeof body.description === "string" && body.description.trim().length > 0
       ? body.description.trim()
       : undefined;
+  const avatar = body.avatar === undefined
+    ? undefined
+    : isDefaultAvatarPath(body.avatar)
+    ? body.avatar
+    : null;
 
-  if (name.length === 0 || name.length > 120) {
+  if (name.length === 0 || name.length > 120 || avatar === null) {
     return c.json(
       {
         error: {
           code: "INVALID_AGENT_REQUEST",
-          message: "name is required and must be 120 characters or fewer.",
+          message:
+            "name is required, must be 120 characters or fewer, and avatar must be a default avatar.",
         },
       },
       400,
@@ -891,6 +907,7 @@ app.patch("/agents/:agentId", async (c) => {
     ownerUserId: user.id,
     name,
     description,
+    avatar,
   });
 
   if (agent === null) {

@@ -5,8 +5,10 @@ import {
   TextArea,
   TextInput,
 } from '@carbon/react'
+import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { useState } from 'react'
 import type { AgentDetails } from '../lib/api'
+import { AvatarPicker } from './AvatarPicker'
 
 interface AgentEditModalProps {
   agent: AgentDetails
@@ -15,7 +17,7 @@ interface AgentEditModalProps {
   open: boolean
   onClose: () => void
   onArchive: () => void
-  onSave: (input: { name: string; description?: string }) => void
+  onSave: (input: { name: string; description?: string; avatar: string }) => void
 }
 
 export function AgentEditModal({
@@ -29,6 +31,7 @@ export function AgentEditModal({
 }: AgentEditModalProps) {
   const [name, setName] = useState(agent.agent.name)
   const [description, setDescription] = useState(agent.agent.description ?? '')
+  const [avatar, setAvatar] = useState(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
   const canSave = name.trim().length > 0 && !isSaving
 
   return (
@@ -48,6 +51,7 @@ export function AgentEditModal({
         onSave({
           name: name.trim(),
           description: description.trim() || undefined,
+          avatar,
         })
       }}
     >
@@ -76,6 +80,12 @@ export function AgentEditModal({
           value={description}
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
+        />
+        <AvatarPicker
+          label="Avatar"
+          value={avatar}
+          disabled={isSaving}
+          onChange={setAvatar}
         />
         <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
           <Button

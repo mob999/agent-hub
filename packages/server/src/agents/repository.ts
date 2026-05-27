@@ -23,6 +23,7 @@ export interface CreateAgentRecordInput {
   ownerUserId: string;
   name: string;
   description?: string;
+  avatar?: string;
   runtime: DaemonRuntime;
   createdAt: Date;
 }
@@ -218,6 +219,7 @@ export async function createAgentProvisioningRecords(
       ownerUserId: input.ownerUserId,
       name: input.name,
       description: input.description,
+      avatar: input.avatar,
       defaultRuntimeKind: input.runtime.runtimeKind,
       status: "active",
       createdAt: input.createdAt,
@@ -443,18 +445,30 @@ export async function updateAgentProfileForUser(
     ownerUserId: string;
     name: string;
     description?: string;
+    avatar?: string;
   },
 ): Promise<AgentDetails | null> {
   const name = input.name.trim();
   const description = input.description?.trim() || undefined;
   const updatedAt = new Date();
+  const updateValues: {
+    name: string;
+    description: string | null;
+    avatar?: string | null;
+    updatedAt: Date;
+  } = {
+    name,
+    description: description ?? null,
+    updatedAt,
+  };
+
+  if (Object.hasOwn(input, "avatar")) {
+    updateValues.avatar = input.avatar ?? null;
+  }
+
   const [updated] = await db
     .update(agents)
-    .set({
-      name,
-      description: description ?? null,
-      updatedAt,
-    })
+    .set(updateValues)
     .where(
       and(
         eq(agents.id, input.agentId),

@@ -380,10 +380,24 @@ export function ChannelWorkspace({
       <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-start gap-3">
           <span
-            className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-base font-semibold leading-none"
+            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-base font-semibold leading-none"
             aria-hidden="true"
           >
-            {!hasSelectedConversation || isAgentDirectMessage ? <ChatBot size={20} /> : '#'}
+            {!hasSelectedConversation ? (
+              <ChatBot size={20} />
+            ) : isAgentDirectMessage ? (
+              selectedAgent?.agent.avatar ? (
+                <img
+                  src={selectedAgent.agent.avatar}
+                  alt={selectedAgent.agent.name}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <ChatBot size={20} />
+              )
+            ) : (
+              '#'
+            )}
           </span>
           <div className="grid min-w-0 gap-0.5">
             <div className="flex min-w-0 items-center gap-2">
@@ -696,6 +710,12 @@ export function ChannelWorkspace({
                   : message.senderType === 'agent'
                     ? senderAgent?.agent.name ?? 'Agent'
                     : 'System'
+              const senderAvatar =
+                message.senderType === 'user'
+                  ? user?.avatar
+                  : message.senderType === 'agent'
+                    ? senderAgent?.agent.avatar
+                    : null
               const avatarInitial = displayNameInitial(senderName)
 
               return (
@@ -704,10 +724,18 @@ export function ChannelWorkspace({
                   key={message.id}
                 >
                   <span
-                    className="grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm font-semibold max-[671px]:h-7 max-[671px]:w-7"
+                    className="grid h-10 w-10 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm font-semibold max-[671px]:h-9 max-[671px]:w-9"
                     aria-hidden="true"
                   >
-                    {avatarInitial}
+                    {senderAvatar ? (
+                      <img
+                        src={senderAvatar}
+                        alt={senderName}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      avatarInitial
+                    )}
                   </span>
                   <span className="grid min-w-0 gap-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">

@@ -6,7 +6,7 @@ import {
   TextInput,
 } from '@carbon/react'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AgentDetails } from '../lib/api'
 import { AvatarPicker } from './AvatarPicker'
 
@@ -33,15 +33,6 @@ export function AgentEditModal({
   const [description, setDescription] = useState(agent.agent.description ?? '')
   const [avatar, setAvatar] = useState(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
   const canSave = name.trim().length > 0 && !isSaving
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-    setName(agent.agent.name)
-    setDescription(agent.agent.description ?? '')
-    setAvatar(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
-  }, [agent, open])
 
   return (
     <Modal

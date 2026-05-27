@@ -89,6 +89,30 @@ function replaceActiveMention(value: string, agentName: string): string {
   })
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function mentionsFromPrompt(
+  value: string,
+  agents: AgentDetails[],
+): ConversationMention[] {
+  return agents
+    .filter((agent) => {
+      const pattern = new RegExp(
+        `(^|\\s)@${escapeRegExp(agent.agent.name)}(?=$|\\s|[.,!?;:])`,
+        'i',
+      )
+
+      return pattern.test(value)
+    })
+    .map((agent) => ({
+      type: 'agent',
+      agentId: agent.agent.id,
+      label: agent.agent.name,
+    }))
+}
+
 export function ChannelWorkspace({
   activeConversation,
   messages,
@@ -114,8 +138,8 @@ export function ChannelWorkspace({
   refreshArtifacts,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [mentions, setMentions] = useState<ConversationMention[]>([])
   const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const hasSelectedConversation = activeConversation !== null
@@ -151,6 +175,10 @@ export function ChannelWorkspace({
       )
       .sort((first, second) => first.agent.name.localeCompare(second.agent.name))
   }, [activeConversation, agents])
+  const promptMentions = useMemo(
+    () => mentionsFromPrompt(prompt, mentionableAgents),
+    [mentionableAgents, prompt],
+  )
   const mentionTerm = hasSelectedConversation && !isAgentDirectMessage ? mentionSearchTerm(prompt) : null
   const mentionSuggestions =
     mentionTerm === null
@@ -159,9 +187,13 @@ export function ChannelWorkspace({
           .filter(
             (agent) =>
               agent.agent.name.toLowerCase().includes(mentionTerm) &&
-              !mentions.some((mention) => mention.agentId === agent.agent.id),
+              !promptMentions.some((mention) => mention.agentId === agent.agent.id),
           )
           .slice(0, 6)
+  const normalizedMentionIndex = mentionSuggestions.length === 0
+    ? 0
+    : Math.min(activeMentionIndex, mentionSuggestions.length - 1)
+  const activeMentionSuggestion = mentionSuggestions[normalizedMentionIndex] ?? null
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
     : hasSelectedConversation && readyGroupAgentCount > 0
@@ -251,9 +283,32 @@ export function ChannelWorkspace({
       ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
       : 'min-w-0 truncate text-xl font-semibold leading-tight'
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Escape' && mentionSuggestions.length > 0) {
-      event.preventDefault()
-      return
+    if (mentionSuggestions.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setActiveMentionIndex((current) => (current + 1) % mentionSuggestions.length)
+        return
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setActiveMentionIndex((current) => (current - 1 + mentionSuggestions.length) % mentionSuggestions.length)
+        return
+      }
+
+      if ((event.key === 'Enter' && !event.ctrlKey && !event.metaKey) || event.key === 'Tab') {
+        if (activeMentionSuggestion !== null) {
+          event.preventDefault()
+          selectMention(activeMentionSuggestion)
+        }
+        return
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setActiveMentionIndex(0)
+        return
+      }
     }
 
     if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) {
@@ -267,30 +322,15 @@ export function ChannelWorkspace({
   }
   const selectMention = (agent: AgentDetails) => {
     setPrompt(replaceActiveMention(prompt, agent.agent.name))
-    setMentions((current) =>
-      current.some((mention) => mention.agentId === agent.agent.id)
-        ? current
-        : [
-            ...current,
-            {
-              type: 'agent',
-              agentId: agent.agent.id,
-              label: agent.agent.name,
-            },
-          ],
-    )
-  }
-  const removeMention = (agentId: string) => {
-    setMentions((current) => current.filter((mention) => mention.agentId !== agentId))
   }
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    submitRun(event, composerMode, mentions)
+    submitRun(event, composerMode, promptMentions)
   }
   const handlePromptChange = (value: string) => {
-    setPrompt(value)
-    if (value.trim().length === 0 && mentions.length > 0) {
-      setMentions([])
+    if (mentionSearchTerm(value) !== mentionTerm) {
+      setActiveMentionIndex(0)
     }
+    setPrompt(value)
   }
 
   const showTasks =
@@ -714,43 +754,27 @@ export function ChannelWorkspace({
           />
         )}
         <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
-          {mentions.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-              {mentions.map((mention) => (
-                <button
-                  key={mention.agentId}
-                  type="button"
-                  className="inline-flex h-6 items-center gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] px-2 text-xs font-semibold text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-02)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                  onClick={() => removeMention(mention.agentId)}
-                  aria-label={`Remove ${mention.label ?? 'agent'} mention`}
-                >
-                  @{mention.label ?? 'agent'}
-                  <span aria-hidden="true">x</span>
-                </button>
-              ))}
-            </div>
-          )}
           <label className="sr-only" htmlFor="run-prompt">
             {`Message ${chatDisplayName}`}
           </label>
-          <textarea
-            id="run-prompt"
-            className="min-h-16 w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
-            rows={2}
-            value={prompt}
-            placeholder={composerPlaceholder}
-            disabled={isCreatingRun || !selectedAgentReady}
-            onChange={(event) => handlePromptChange(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-          />
           {mentionSuggestions.length > 0 && (
-            <div className="mx-2 mb-1 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
+            <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
               {mentionSuggestions.map((agent) => (
                 <button
                   key={agent.agent.id}
                   type="button"
-                  className="flex min-h-10 cursor-pointer items-center gap-2 border-0 bg-transparent px-3 text-left text-sm text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-02)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]"
+                  className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                    activeMentionSuggestion?.agent.id === agent.agent.id
+                      ? 'bg-[var(--cds-layer-selected-02)]'
+                      : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
+                  }`}
                   onClick={() => selectMention(agent)}
+                  onMouseEnter={() => {
+                    const nextIndex = mentionSuggestions.findIndex((item) => item.agent.id === agent.agent.id)
+                    if (nextIndex >= 0) {
+                      setActiveMentionIndex(nextIndex)
+                    }
+                  }}
                 >
                   <span className="grid h-6 w-6 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
                     {displayNameInitial(agent.agent.name)}
@@ -761,6 +785,16 @@ export function ChannelWorkspace({
               ))}
             </div>
           )}
+          <textarea
+            id="run-prompt"
+            className="min-h-16 w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+            rows={2}
+            value={prompt}
+            placeholder={composerPlaceholder}
+            disabled={isCreatingRun || !selectedAgentReady}
+            onChange={(event) => handlePromptChange(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+          />
           <div className="flex min-h-10 items-center gap-2 px-2 pb-2 pt-1 max-[671px]:flex-wrap">
             <div className="flex items-center gap-1.5" aria-label="Message tools">
               <button

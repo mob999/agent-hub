@@ -525,7 +525,7 @@ export function ArtifactWorkspace({
               label="Preview"
               size="md"
               align="bottom"
-              disabled={!availableActions.includes('preview') || runningAction !== null}
+              disabled
               onClick={() => createAction('preview')}
             >
               <Launch size={16} />

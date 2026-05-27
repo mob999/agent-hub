@@ -1,6 +1,6 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
 import { Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
-import Editor from '@monaco-editor/react'
+import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -141,28 +141,72 @@ function shouldLoadArtifactContent(filename: string): boolean {
   return fileInfo.category === 'markdown' || fileInfo.category === 'diff' || fileInfo.category === 'text'
 }
 
-function diffLineClassName(line: string): string {
-  if (line.startsWith('+++') || line.startsWith('---')) {
-    return 'bg-[var(--cds-layer-accent-01)] text-[var(--cds-text-primary)]'
+function parseUnifiedDiff(content: string): {
+  language: string
+  modified: string
+  original: string
+} {
+  const originalLines: string[] = []
+  const modifiedLines: string[] = []
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const targetFile = lines
+    .find((line) => line.startsWith('+++ ') && !line.startsWith('+++ /dev/null'))
+    ?.replace(/^\+\+\+\s+(?:b\/)?/, '')
+    .trim()
+  let sawHunk = false
+
+  for (const line of lines) {
+    if (
+      line.startsWith('diff --git ') ||
+      line.startsWith('index ') ||
+      line.startsWith('new file mode ') ||
+      line.startsWith('deleted file mode ') ||
+      line.startsWith('similarity index ') ||
+      line.startsWith('rename from ') ||
+      line.startsWith('rename to ') ||
+      line.startsWith('--- ') ||
+      line.startsWith('+++ ')
+    ) {
+      continue
+    }
+
+    if (line.startsWith('@@')) {
+      sawHunk = true
+      continue
+    }
+
+    if (!sawHunk || line.startsWith('\\ No newline')) {
+      continue
+    }
+
+    if (line.startsWith('+')) {
+      modifiedLines.push(line.slice(1))
+      continue
+    }
+
+    if (line.startsWith('-')) {
+      originalLines.push(line.slice(1))
+      continue
+    }
+
+    const contextLine = line.startsWith(' ') ? line.slice(1) : line
+    originalLines.push(contextLine)
+    modifiedLines.push(contextLine)
   }
 
-  if (line.startsWith('@@')) {
-    return 'bg-[var(--cds-highlight)] text-[var(--cds-text-primary)]'
+  if (!sawHunk || (originalLines.length === 0 && modifiedLines.length === 0)) {
+    return {
+      language: 'diff',
+      modified: content,
+      original: '',
+    }
   }
 
-  if (line.startsWith('+')) {
-    return 'bg-[#defbe6] text-[#044317]'
+  return {
+    language: inferArtifactFileInfo(targetFile ?? '').language,
+    modified: modifiedLines.join('\n'),
+    original: originalLines.join('\n'),
   }
-
-  if (line.startsWith('-')) {
-    return 'bg-[#fff1f1] text-[#750e13]'
-  }
-
-  if (line.startsWith('diff ') || line.startsWith('index ')) {
-    return 'bg-[var(--cds-layer-01)] text-[var(--cds-text-secondary)]'
-  }
-
-  return 'text-[var(--cds-text-primary)]'
 }
 
 export function ArtifactWorkspace({
@@ -235,6 +279,10 @@ export function ArtifactWorkspace({
     : undefined
   const canEdit = artifact !== null && fileInfo.canEdit
   const isMarkdown = fileInfo.category === 'markdown'
+  const parsedDiff = useMemo(
+    () => (fileInfo.category === 'diff' ? parseUnifiedDiff(draft) : null),
+    [draft, fileInfo.category],
+  )
 
   const syncMarkdownPreviewScroll = useCallback(() => {
     const editor = markdownEditorRef.current
@@ -379,7 +427,6 @@ export function ArtifactWorkspace({
         <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
-            const itemFileInfo = inferArtifactFileInfo(item.filename)
 
             return (
               <button
@@ -394,9 +441,6 @@ export function ArtifactWorkspace({
               >
                 <span className="truncate font-semibold">{item.title}</span>
                 <span className="truncate text-xs">{item.filename}</span>
-                <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-[0.7rem] uppercase">
-                  {itemFileInfo.label}
-                </span>
               </button>
             )
           })}
@@ -568,21 +612,19 @@ export function ArtifactWorkspace({
               </div>
             )
           ) : fileInfo.category === 'diff' ? (
-            <div className="h-full min-h-0 overflow-auto bg-[var(--cds-background)] p-3">
-              <pre className="min-w-max whitespace-pre font-mono text-xs leading-5">
-                {draft.split('\n').map((line, index) => (
-                  <div
-                    key={`${index}:${line}`}
-                    className={`grid grid-cols-[4rem_minmax(0,1fr)] ${diffLineClassName(line)}`}
-                  >
-                    <span className="select-none border-r border-[var(--cds-border-subtle-01)] px-2 text-right text-[var(--cds-text-secondary)]">
-                      {index + 1}
-                    </span>
-                    <code className="px-3">{line.length === 0 ? ' ' : line}</code>
-                  </div>
-                ))}
-              </pre>
-            </div>
+            <DiffEditor
+              height="100%"
+              original={parsedDiff?.original ?? ''}
+              modified={parsedDiff?.modified ?? draft}
+              language={parsedDiff?.language ?? 'plaintext'}
+              options={{
+                automaticLayout: true,
+                minimap: { enabled: false },
+                readOnly: true,
+                renderSideBySide: true,
+                wordWrap: 'on',
+              }}
+            />
           ) : isMarkdown ? (
             <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[1055px]:grid-cols-1">
               <div className="min-h-0 min-w-0 overflow-hidden">

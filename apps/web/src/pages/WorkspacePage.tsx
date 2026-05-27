@@ -9,6 +9,7 @@ import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
+import { UserSettingsModal } from '../components/UserSettingsModal'
 import {
   ApiRequestError,
   apiRequest,
@@ -171,6 +172,9 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   const routeConversationId = editorRoute?.conversationId ?? chatConversationId
   const activeView = workspaceViewFromRoute(route)
@@ -721,6 +725,29 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const logout = async () => {
     await apiRequest<{ ok: true }>('/auth/logout', { method: 'POST' }).catch(() => null)
     navigate('/login')
+  }
+
+  const updateUserSettings = async (input: { avatar: string }) => {
+    setSettingsError(null)
+    setIsSavingSettings(true)
+
+    try {
+      const response = await apiRequest<AuthResponse>('/auth/me', {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      })
+
+      setUser(response.user)
+      setSettingsOpen(false)
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setSettingsError(error.message)
+      } else {
+        setSettingsError('Unable to save settings. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingSettings(false)
+    }
   }
 
   const refreshWorkspace = () => {
@@ -1382,6 +1409,11 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         setActiveView={navigateToView}
         refreshWorkspace={refreshWorkspace}
         logout={logout}
+        openSettings={() => {
+          setAccountExpanded(false)
+          setSettingsError(null)
+          setSettingsOpen(true)
+        }}
       />
       {activeView === 'chat' ? (
         <>
@@ -1510,6 +1542,19 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             onSave={updateGroup}
           />
         )
+      )}
+      {settingsOpen && user && (
+        <UserSettingsModal
+          key={user.avatar ?? 'user-settings'}
+          open={settingsOpen}
+          user={user}
+          error={settingsError}
+          isSaving={isSavingSettings}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(input) => {
+            void updateUserSettings(input)
+          }}
+        />
       )}
     </main>
   )

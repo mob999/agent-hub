@@ -1,5 +1,5 @@
 import { users } from "@agent-hub/db";
-import { pickRandomDefaultAvatar } from "@agent-hub/core";
+import { isDefaultAvatarPath, pickRandomDefaultAvatar } from "@agent-hub/core";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -288,4 +288,66 @@ authRoutes.openapi(meRoute, async (c) => {
     },
     200,
   );
+});
+
+authRoutes.patch("/me", requireAuth, async (c) => {
+  const db = c.get("db");
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    avatar?: unknown;
+  };
+  const avatar = isDefaultAvatarPath(body.avatar) ? body.avatar : null;
+
+  if (avatar === null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_USER_SETTINGS",
+          message: "avatar must be a default avatar path.",
+        },
+      },
+      400,
+    );
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      avatar,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id))
+    .returning({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      avatar: users.avatar,
+    });
+
+  if (updatedUser === undefined) {
+    return c.json(
+      {
+        error: {
+          code: "USER_NOT_FOUND",
+          message: "User was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ user: updatedUser });
 });

@@ -1,5 +1,5 @@
 import { Button, Theme } from '@carbon/react'
-import { Chat, Devices, JobRun, Logout, Renew, Settings } from '@carbon/react/icons'
+import { Chat, Devices, JobRun, Logout, Renew, Settings, UserAvatar } from '@carbon/react/icons'
 import type { User, WorkspaceView } from '../lib/api'
 
 interface AppRailProps {
@@ -10,6 +10,7 @@ interface AppRailProps {
   setActiveView: (view: WorkspaceView) => void
   refreshWorkspace: () => void
   logout: () => void
+  openSettings: () => void
 }
 
 const railButton =
@@ -25,9 +26,10 @@ export function AppRail({
   setActiveView,
   refreshWorkspace,
   logout,
+  openSettings,
 }: AppRailProps) {
   const displayName = user?.name?.trim() || user?.email || 'A'
-  const avatarInitial = displayName.slice(0, 1).toUpperCase()
+  const avatar = user?.avatar ?? null
 
   return (
     <Theme
@@ -53,7 +55,7 @@ export function AppRail({
         aria-expanded={accountExpanded}
         onClick={toggleAccount}
       >
-        {avatarInitial}
+        <UserAvatar size={20} />
       </button>
       {accountExpanded && (
         <div
@@ -61,10 +63,27 @@ export function AppRail({
           role="dialog"
           aria-label="Account"
         >
-          <p className="cds--type-label-01">Signed in as</p>
-          <strong className="truncate">{user?.name ?? user?.email}</strong>
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]">
+              {avatar ? (
+                <img src={avatar} alt="" className="h-9 w-9 object-cover" />
+              ) : (
+                <UserAvatar size={22} />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="cds--type-label-01">Signed in as</p>
+              <strong className="block truncate">{displayName}</strong>
+            </div>
+          </div>
           <span className="truncate text-[var(--cds-text-secondary)]">{user?.email}</span>
-          <Button kind="ghost" size="sm" renderIcon={Logout} onClick={logout}>
+          <Button
+            className="justify-self-start !pl-0 text-left"
+            kind="danger--ghost"
+            size="sm"
+            renderIcon={Logout}
+            onClick={logout}
+          >
             Log out
           </Button>
         </div>
@@ -102,7 +121,7 @@ export function AppRail({
         <button className={railButton} type="button" aria-label="Refresh" onClick={refreshWorkspace}>
           <Renew size={20} />
         </button>
-        <button className={railButton} type="button" aria-label="Settings">
+        <button className={railButton} type="button" aria-label="Settings" onClick={openSettings}>
           <Settings size={20} />
         </button>
       </div>

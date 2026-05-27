@@ -4,6 +4,7 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
 import { formatTime } from '../lib/format'
+import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
 const inlineLink =
@@ -31,6 +32,10 @@ interface ChannelWorkspaceProps {
   openCreateAgent: () => void
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
+  closeArtifactEditor?: () => void
+  activeEditorArtifactId?: string | null
+  onActiveEditorArtifactChange?: (artifactId: string) => void
+  refreshArtifacts?: () => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -99,6 +104,10 @@ export function ChannelWorkspace({
   openCreateAgent,
   openEditConversation,
   openArtifactEditor,
+  closeArtifactEditor,
+  activeEditorArtifactId = null,
+  onActiveEditorArtifactChange,
+  refreshArtifacts,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [mentions, setMentions] = useState<ConversationMention[]>([])
@@ -287,7 +296,8 @@ export function ChannelWorkspace({
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'files'
   const firstArtifactId = artifacts[0]?.id ?? null
-  const showWorkspacePage = (showTasks || showFiles) && canOpenWorkspacePanel
+  const showEditor = activeEditorArtifactId !== null && canOpenWorkspacePanel
+  const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
 
   useEffect(() => {
@@ -388,13 +398,18 @@ export function ChannelWorkspace({
             <Folder size={16} />
           </IconButton>
           <IconButton
-            kind="ghost"
+            kind={showEditor ? 'secondary' : 'ghost'}
             label="Editor"
             size="md"
             align="bottom"
             type="button"
             disabled={!canOpenWorkspacePanel || firstArtifactId === null}
             onClick={() => {
+              if (showEditor) {
+                closeArtifactEditor?.()
+                return
+              }
+
               if (firstArtifactId !== null) {
                 openArtifactEditor(firstArtifactId)
               }
@@ -432,7 +447,9 @@ export function ChannelWorkspace({
 
       <div
         ref={scrollContainerRef}
-        className="min-h-0 overflow-y-auto p-2"
+        className={`min-h-0 p-2 ${
+          showEditor ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
         aria-live="polite"
       >
         {showWorkspacePage && showTasks ? (
@@ -524,6 +541,15 @@ export function ChannelWorkspace({
                 })}
               </div>
             )}
+          </div>
+        ) : showWorkspacePage && showEditor ? (
+          <div className="grid h-full min-h-0 w-full">
+            <ArtifactWorkspace
+              artifacts={artifacts}
+              activeArtifactId={activeEditorArtifactId}
+              onActiveArtifactChange={onActiveEditorArtifactChange}
+              onRefreshArtifacts={refreshArtifacts}
+            />
           </div>
         ) : showWorkspacePage && showFiles ? (
           <div className="grid w-full content-start gap-4">

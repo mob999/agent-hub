@@ -20,6 +20,7 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
+  type ConversationArtifactDetails,
   type ConversationMessage,
   type ConversationTask,
   type CreateGroupConversationResponse,
@@ -38,7 +39,6 @@ import {
   type WorkspaceView,
 } from '../lib/api'
 import { DaemonPage } from './DaemonPage'
-import { ArtifactEditorPage } from './ArtifactEditorPage'
 import { RunsPage } from './RunsPage'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
@@ -564,6 +564,59 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
   }, [activeConversationId, loadArtifacts, loadMessages, loadTasks])
 
   useEffect(() => {
+    if (!user || editorArtifactId === null) {
+      return
+    }
+
+    let active = true
+
+    const loadEditorConversation = async () => {
+      try {
+        const details = await apiRequest<ConversationArtifactDetails>(`/artifacts/${editorArtifactId}`)
+
+        if (!active) {
+          return
+        }
+
+        activateConversation(details.artifact.conversationId)
+        setArtifactsByConversation((current) => {
+          const existingArtifacts = current[details.artifact.conversationId] ?? []
+          const nextArtifacts = existingArtifacts.some((artifact) => artifact.id === details.artifact.id)
+            ? existingArtifacts
+            : [details.artifact, ...existingArtifacts]
+
+          return {
+            ...current,
+            [details.artifact.conversationId]: nextArtifacts,
+          }
+        })
+        void loadMessages(details.artifact.conversationId)
+        void loadTasks(details.artifact.conversationId)
+        void loadArtifacts(details.artifact.conversationId)
+      } catch (error) {
+        if (!active) {
+          return
+        }
+
+        setRunError(error instanceof ApiRequestError ? error.message : 'Unable to open artifact.')
+      }
+    }
+
+    void loadEditorConversation()
+
+    return () => {
+      active = false
+    }
+  }, [
+    activateConversation,
+    editorArtifactId,
+    loadArtifacts,
+    loadMessages,
+    loadTasks,
+    user,
+  ])
+
+  useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
       return
     }
@@ -784,6 +837,9 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
 
   const openArtifactEditor = (artifactId: string) => {
     navigate(`/editor/${encodeURIComponent(artifactId)}` as RoutePath)
+  }
+  const closeArtifactEditor = () => {
+    navigate('/chat')
   }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
@@ -1207,7 +1263,7 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
   return (
     <main
       className={
-        activeView === 'chat' && editorArtifactId === null
+        activeView === 'chat'
           ? 'grid h-screen grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
           : 'grid h-screen grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
       }
@@ -1222,9 +1278,7 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
         refreshWorkspace={refreshWorkspace}
         logout={logout}
       />
-      {editorArtifactId !== null ? (
-        <ArtifactEditorPage artifactId={editorArtifactId} navigate={navigate} />
-      ) : activeView === 'chat' ? (
+      {activeView === 'chat' ? (
         <>
           <ChatSidebar
             conversations={conversations}
@@ -1265,6 +1319,14 @@ export function WorkspacePage({ route, editorArtifactId = null, navigate }: Work
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}
             openArtifactEditor={openArtifactEditor}
+            closeArtifactEditor={closeArtifactEditor}
+            activeEditorArtifactId={editorArtifactId}
+            onActiveEditorArtifactChange={openArtifactEditor}
+            refreshArtifacts={() => {
+              if (activeConversation?.id) {
+                void loadArtifacts(activeConversation.id)
+              }
+            }}
           />
         </>
       ) : activeView === 'daemon' ? (

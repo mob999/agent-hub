@@ -369,6 +369,7 @@ export function buildConversationRunPrompt(input: {
 }
 
 export interface AgentGroupContext {
+  agents: Array<{ id: string; name: string }>;
   conversationId: ConversationId;
   groupName: string;
   title: string;
@@ -408,10 +409,32 @@ export async function listActiveAgentGroupContexts(
   const activeGroups = await toConversationsWithAgentIds(db, rows, {
     ownerUserId: input.ownerUserId,
   });
+  const agentIds = compactUniqueStrings(
+    activeGroups.flatMap((conversation) => conversation.agentIds ?? []),
+  );
+  const agentRows = agentIds.length === 0
+    ? []
+    : await db
+        .select({ id: agents.id, name: agents.name })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.ownerUserId, input.ownerUserId),
+            eq(agents.status, "active"),
+            inArray(agents.id, agentIds),
+          ),
+        )
+        .orderBy(asc(agents.createdAt));
+  const agentNamesById = new Map(agentRows.map((agent) => [agent.id, agent.name]));
 
   return activeGroups
     .filter((conversation) => conversation.agentIds?.includes(input.agentId))
     .map((conversation) => ({
+      agents: (conversation.agentIds ?? []).flatMap((agentId) => {
+        const name = agentNamesById.get(agentId);
+
+        return name === undefined ? [] : [{ id: agentId, name }];
+      }),
       conversationId: conversation.id,
       groupName: conversation.key === defaultGroupConversationKey
         ? defaultGroupConversationKey
@@ -426,8 +449,13 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
     : [
         "You are a member of these active AgentHub groups:",
         ...groups.map(
-          (group) =>
-            `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId})`,
+          (group) => {
+            const agentList = group.agents.length === 0
+              ? "none"
+              : group.agents.map((agent) => `@${agent.name}`).join(", ");
+
+            return `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId}; agents: ${agentList})`;
+          },
         ),
       ];
 
@@ -435,6 +463,7 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
     "<agenthub_agent_groups>",
     ...groupLines,
     "Use send_message_to_group with a listed groupName to send a visible message to one of these groups.",
+    "To wake another agent in a group, include @AgentName in the message content.",
     "Use send_message_to_user to send a visible private message to the current user.",
     "Archived groups are not listed and cannot be targeted.",
     "</agenthub_agent_groups>",
@@ -2061,6 +2090,57 @@ function mentionAgentReferences(input: AgentHubSendMessageToolInput): string[] {
   );
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasMentionBoundary(value: string, endIndex: number): boolean {
+  if (endIndex >= value.length) {
+    return true;
+  }
+
+  return !/[A-Za-z0-9_-]/.test(value[endIndex] ?? "");
+}
+
+export function resolveTextMentionedAgentIds(
+  content: string,
+  agentRefs: Array<{ id: string; name: string }>,
+  options: { excludeAgentId?: string } = {},
+): string[] {
+  const refs = agentRefs
+    .filter((agent) => agent.id !== options.excludeAgentId)
+    .filter((agent) => agent.name.trim().length > 0)
+    .sort((first, second) =>
+      second.name.length - first.name.length ||
+      first.name.localeCompare(second.name),
+    );
+  const matchedMentions: Array<{ agentId: string; start: number; end: number }> = [];
+
+  for (const agent of refs) {
+    const pattern = new RegExp(`@${escapeRegExp(agent.name)}`, "gi");
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(content)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const overlaps = matchedMentions.some(
+        (range) => start < range.end && end > range.start,
+      );
+
+      if (!overlaps && hasMentionBoundary(content, end)) {
+        matchedMentions.push({ agentId: agent.id, start, end });
+        break;
+      }
+    }
+  }
+
+  return compactUniqueStrings(
+    matchedMentions
+      .sort((first, second) => first.start - second.start)
+      .map((mention) => mention.agentId),
+  );
+}
+
 function isDefaultGroup(row: Pick<ConversationRow, "key" | "type">): boolean {
   return row.type === "group" && row.key === defaultGroupConversationKey;
 }
@@ -2078,9 +2158,9 @@ async function insertCompletedAgentMessage(
     createdAt: Date;
     runId: string;
   },
-): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.insert(conversationMessages).values({
+): Promise<ConversationMessageRow> {
+  return db.transaction(async (tx) => {
+    const [message] = await tx.insert(conversationMessages).values({
       conversationId: input.conversationId,
       senderType: "agent",
       senderAgentId: input.agentId,
@@ -2089,7 +2169,7 @@ async function insertCompletedAgentMessage(
       status: "completed",
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
-    });
+    }).returning();
 
     await tx
       .update(conversations)
@@ -2098,6 +2178,8 @@ async function insertCompletedAgentMessage(
         updatedAt: input.createdAt,
       })
       .where(eq(conversations.id, input.conversationId));
+
+    return message;
   });
 }
 
@@ -2154,14 +2236,25 @@ async function listConversationAgentRefs(
     return db
       .select({ id: agents.id, name: agents.name })
       .from(agents)
-      .where(eq(agents.ownerUserId, conversation.ownerUserId));
+      .where(
+        and(
+          eq(agents.ownerUserId, conversation.ownerUserId),
+          eq(agents.status, "active"),
+        ),
+      )
+      .orderBy(asc(agents.createdAt));
   }
 
   return db
     .select({ id: agents.id, name: agents.name })
     .from(conversationAgentMembers)
     .innerJoin(agents, eq(agents.id, conversationAgentMembers.agentId))
-    .where(eq(conversationAgentMembers.conversationId, conversation.id))
+    .where(
+      and(
+        eq(conversationAgentMembers.conversationId, conversation.id),
+        eq(agents.status, "active"),
+      ),
+    )
     .orderBy(asc(conversationAgentMembers.position));
 }
 
@@ -2270,6 +2363,234 @@ function buildAssignedTaskInstructions(input: {
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
+}
+
+function buildMentionedGroupChatAgentInstructions(input: {
+  agentDescription?: string;
+  conversationTitle: string;
+}): string {
+  return [
+    input.agentDescription === undefined || input.agentDescription.trim().length === 0
+      ? undefined
+      : [
+          "AgentHub agent profile:",
+          "Follow this agent profile when responding.",
+          "",
+          input.agentDescription.trim(),
+        ].join("\n"),
+    `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
+    "Visible group replies must be sent with the AgentHub MCP tool send_message.",
+    "Do not answer a group chat by writing normal assistant text.",
+  ].filter((line): line is string => line !== undefined && line.trim().length > 0)
+    .join("\n\n");
+}
+
+function buildMentionedGroupChatRunPrompt(input: {
+  agentGroupsPrompt: string;
+  agentName: string;
+  agentNamesById: Record<string, string>;
+  conversationTitle: string;
+  currentMessage: string;
+  messages: ConversationMessage[];
+  senderAgentName: string;
+}): string {
+  const conversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
+    currentUserMessage: [
+      "<mentioned_message>",
+      `From: ${input.senderAgentName}`,
+      "Content:",
+      input.currentMessage,
+      "</mentioned_message>",
+    ].join("\n"),
+    messages: input.messages,
+  });
+
+  return [
+    "<agenthub_group_chat_protocol>",
+    `You are ${input.agentName} in #${input.conversationTitle}.`,
+    `${input.senderAgentName} explicitly mentioned you in the latest message.`,
+    "If you should reply, call the MCP tool send_message with { content: string }.",
+    "If you should not reply, do not call send_message.",
+    "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
+    "</agenthub_group_chat_protocol>",
+    "",
+    input.agentGroupsPrompt,
+    "",
+    conversationPrompt,
+  ].join("\n");
+}
+
+async function listAgentNamesByIdForUser(
+  db: Db,
+  ownerUserId: string,
+): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ id: agents.id, name: agents.name })
+    .from(agents)
+    .where(eq(agents.ownerUserId, ownerUserId));
+
+  return Object.fromEntries(rows.map((agent) => [agent.id, agent.name]));
+}
+
+async function createMentionedGroupChatRuns(
+  db: Db,
+  input: {
+    content: string;
+    conversation: ConversationRow;
+    createdAt: Date;
+    eventCreatedAt: string;
+    ownerUserId: string;
+    senderAgentId: string;
+    triggerMessageId: string;
+  },
+): Promise<RunQueueJob[]> {
+  if (
+    input.conversation.type !== "group" ||
+    input.conversation.status !== "active"
+  ) {
+    return [];
+  }
+
+  const agentRefs = await listConversationAgentRefs(db, input.conversation);
+  const mentionedAgentIds = resolveTextMentionedAgentIds(input.content, agentRefs, {
+    excludeAgentId: input.senderAgentId,
+  });
+
+  if (mentionedAgentIds.length === 0) {
+    return [];
+  }
+
+  const priorMessages =
+    (await listConversationMessagesForUser(db, {
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+    }))?.filter((message) => message.id !== input.triggerMessageId) ?? [];
+  const agentNamesById = await listAgentNamesByIdForUser(db, input.ownerUserId);
+  const senderAgentName = agentNamesById[input.senderAgentId] ?? "Another agent";
+  const taskRows = await db
+    .select()
+    .from(conversationTasks)
+    .where(eq(conversationTasks.conversationId, input.conversation.id))
+    .orderBy(asc(conversationTasks.createdAt));
+  const agentHubMcpTasks = toMcpTaskListFromRows(taskRows);
+  const dispatchJobs: RunQueueJob[] = [];
+
+  for (const agentId of mentionedAgentIds) {
+    const runAgent = await getRunnableAgentForUser(db, {
+      agentId,
+      ownerUserId: input.ownerUserId,
+    });
+
+    if (runAgent === null) {
+      continue;
+    }
+
+    const runId = randomUUID();
+    const agentGroupsPrompt = buildAgentGroupsPrompt(
+      await listActiveAgentGroupContexts(db, {
+        agentId: runAgent.agent.id,
+        ownerUserId: input.ownerUserId,
+      }),
+    );
+    const job: RunQueueJob = {
+      conversationId: input.conversation.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      prompt: buildMentionedGroupChatRunPrompt({
+        agentGroupsPrompt,
+        agentName: runAgent.agent.name,
+        agentNamesById,
+        conversationTitle: input.conversation.title,
+        currentMessage: input.content,
+        messages: priorMessages,
+        senderAgentName,
+      }),
+      agentInstructions: buildMentionedGroupChatAgentInstructions({
+        agentDescription: runAgent.agent.description,
+        conversationTitle: input.conversation.title,
+      }),
+      agentHubMcpTools: input.conversation.orchestratorAgentId === runAgent.agent.id
+        ? [...agentHubAllMcpTools]
+        : [...agentHubNonOrchestratorMcpTools],
+      agentHubMcpTasks,
+      workspacePath: runAgent.workspacePath,
+      run: {
+        id: runId,
+        agentId: runAgent.agent.id,
+        daemonDeviceId: runAgent.daemonDeviceId,
+        status: "queued",
+        createdAt: input.eventCreatedAt,
+        updatedAt: input.eventCreatedAt,
+      },
+      runtime: runAgent.runtime,
+    };
+    const queuedEvent: RunEvent = {
+      type: "run.queued",
+      runId,
+      agentId: runAgent.agent.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      createdAt: input.eventCreatedAt,
+    };
+
+    await db.transaction(async (tx) => {
+      await tx.insert(runs).values({
+        id: runId,
+        ownerUserId: input.ownerUserId,
+        conversationId: input.conversation.id,
+        agentId: runAgent.agent.id,
+        daemonDeviceId: runAgent.daemonDeviceId,
+        status: "queued",
+        prompt: job.prompt,
+        workspacePath: runAgent.workspacePath,
+        runtime: runAgent.runtime,
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      });
+
+      await tx.insert(runEvents).values({
+        runId,
+        eventType: queuedEvent.type,
+        payload: queuedEvent,
+        createdAt: input.createdAt,
+      });
+    });
+
+    dispatchJobs.push(job);
+  }
+
+  return dispatchJobs;
+}
+
+async function persistVisibleAgentMessageAndDispatchMentions(
+  db: Db,
+  input: {
+    agentId: string;
+    content: string;
+    conversation: ConversationRow;
+    createdAt: Date;
+    eventCreatedAt: string;
+    ownerUserId: string;
+    runId: string;
+  },
+): Promise<{ dispatchJobs: RunQueueJob[]; message: ConversationMessageRow }> {
+  const message = await insertCompletedAgentMessage(db, {
+    agentId: input.agentId,
+    content: input.content,
+    conversationId: input.conversation.id,
+    createdAt: input.createdAt,
+    runId: input.runId,
+  });
+  const dispatchJobs = await createMentionedGroupChatRuns(db, {
+    content: input.content,
+    conversation: input.conversation,
+    createdAt: input.createdAt,
+    eventCreatedAt: input.eventCreatedAt,
+    ownerUserId: input.ownerUserId,
+    senderAgentId: input.agentId,
+    triggerMessageId: message.id,
+  });
+
+  return { dispatchJobs, message };
 }
 
 function isTerminalTaskStatus(status: string): boolean {
@@ -2733,13 +3054,16 @@ export async function appendRunEventToConversationMessage(
         return { dispatchJobs };
       }
 
-      await insertCompletedAgentMessage(db, {
+      const result = await persistVisibleAgentMessageAndDispatchMentions(db, {
         agentId: run.agentId,
         content: input.content,
-        conversationId: targetConversation.id,
+        conversation: targetConversation,
         createdAt: new Date(event.createdAt),
+        eventCreatedAt: event.createdAt,
+        ownerUserId: run.ownerUserId,
         runId: event.runId,
       });
+      dispatchJobs.push(...result.dispatchJobs);
 
       return { dispatchJobs };
     }
@@ -2816,17 +3140,34 @@ export async function appendRunEventToConversationMessage(
 
     const conversationId = run.conversationId;
     const createdAt = new Date(event.createdAt);
+    const [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { dispatchJobs };
+    }
+
+    const taskIds = compactUniqueStrings(input.taskIds ?? []);
+
+    if (taskIds.length === 0) {
+      const result = await persistVisibleAgentMessageAndDispatchMentions(db, {
+        agentId: run.agentId,
+        content,
+        conversation,
+        createdAt,
+        eventCreatedAt: event.createdAt,
+        ownerUserId: run.ownerUserId,
+        runId: event.runId,
+      });
+
+      dispatchJobs.push(...result.dispatchJobs);
+      return { dispatchJobs };
+    }
+
     await db.transaction(async (tx) => {
-      const [conversation] = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.id, conversationId))
-        .limit(1);
-
-      if (conversation === undefined) {
-        return;
-      }
-
       const [message] = await tx.insert(conversationMessages).values({
         conversationId: conversation.id,
         senderType: "agent",
@@ -2838,125 +3179,122 @@ export async function appendRunEventToConversationMessage(
         updatedAt: createdAt,
       }).returning();
 
-      const taskIds = compactUniqueStrings(input.taskIds ?? []);
       const mentionedAgentIds = await resolveMentionedAgentIds(db, {
         conversation,
         message: input,
       });
 
-      if (taskIds.length > 0) {
-        const conversationTaskRows = await tx
-          .select()
-          .from(conversationTasks)
-          .where(eq(conversationTasks.conversationId, conversation.id))
-          .orderBy(asc(conversationTasks.createdAt));
-        const agentHubMcpTasks = toMcpTaskListFromRows(conversationTaskRows);
-        const taskWhere = [
-          eq(conversationTasks.conversationId, conversation.id),
-          eq(conversationTasks.creatorRunId, event.runId),
-          eq(conversationTasks.orchestratorAgentId, run.agentId),
-          inArray(conversationTasks.id, taskIds),
-          eq(conversationTasks.status, "created"),
-        ];
-        const taskRows = await tx
-          .select()
-          .from(conversationTasks)
-          .where(
-            and(
-              ...taskWhere,
-              ...(mentionedAgentIds.length === 0
-                ? []
-                : [inArray(conversationTasks.assigneeAgentId, mentionedAgentIds)]),
-            ),
-          )
-          .orderBy(asc(conversationTasks.createdAt));
+      const conversationTaskRows = await tx
+        .select()
+        .from(conversationTasks)
+        .where(eq(conversationTasks.conversationId, conversation.id))
+        .orderBy(asc(conversationTasks.createdAt));
+      const agentHubMcpTasks = toMcpTaskListFromRows(conversationTaskRows);
+      const taskWhere = [
+        eq(conversationTasks.conversationId, conversation.id),
+        eq(conversationTasks.creatorRunId, event.runId),
+        eq(conversationTasks.orchestratorAgentId, run.agentId),
+        inArray(conversationTasks.id, taskIds),
+        eq(conversationTasks.status, "created"),
+      ];
+      const taskRows = await tx
+        .select()
+        .from(conversationTasks)
+        .where(
+          and(
+            ...taskWhere,
+            ...(mentionedAgentIds.length === 0
+              ? []
+              : [inArray(conversationTasks.assigneeAgentId, mentionedAgentIds)]),
+          ),
+        )
+        .orderBy(asc(conversationTasks.createdAt));
 
-        for (const task of taskRows) {
-          const runAgent = await getRunnableAgentForUser(db, {
-            agentId: task.assigneeAgentId,
-            ownerUserId: run.ownerUserId,
-          });
+      for (const task of taskRows) {
+        const runAgent = await getRunnableAgentForUser(db, {
+          agentId: task.assigneeAgentId,
+          ownerUserId: run.ownerUserId,
+        });
 
-          if (runAgent === null) {
-            continue;
-          }
+        if (runAgent === null) {
+          continue;
+        }
 
-          const agentGroupsPrompt = buildAgentGroupsPrompt(
-            await listActiveAgentGroupContexts(db, {
-              agentId: runAgent.agent.id,
-              ownerUserId: run.ownerUserId,
-            }),
-          );
-          const runId = randomUUID();
-          const job: RunQueueJob = {
-            conversationId: conversation.id,
-            daemonDeviceId: runAgent.daemonDeviceId,
-            prompt: buildAssignedTaskPrompt({
-              conversationTitle: conversation.title,
-              taskId: task.id,
-              taskTitle: task.title,
-              taskDescription: optionalString(task.description),
-              dispatchMessage: content,
-              agentGroupsPrompt,
-            }),
-            agentInstructions: buildAssignedTaskInstructions({
-              agentDescription: runAgent.agent.description,
-              conversationTitle: conversation.title,
-            }),
-            agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-            agentHubMcpTasks,
-            workspacePath: runAgent.workspacePath,
-            run: {
-              id: runId,
-              agentId: runAgent.agent.id,
-              daemonDeviceId: runAgent.daemonDeviceId,
-              status: "queued",
-              createdAt: event.createdAt,
-              updatedAt: event.createdAt,
-            },
-            runtime: runAgent.runtime,
-          };
-          const queuedEvent: RunEvent = {
-            type: "run.queued",
-            runId,
+        const agentGroupsPrompt = buildAgentGroupsPrompt(
+          await listActiveAgentGroupContexts(db, {
             agentId: runAgent.agent.id,
-            daemonDeviceId: runAgent.daemonDeviceId,
-            createdAt: event.createdAt,
-          };
-
-          await tx.insert(runs).values({
-            id: runId,
             ownerUserId: run.ownerUserId,
-            conversationId: conversation.id,
+          }),
+        );
+        const runId = randomUUID();
+        const job: RunQueueJob = {
+          conversationId: conversation.id,
+          daemonDeviceId: runAgent.daemonDeviceId,
+          prompt: buildAssignedTaskPrompt({
+            conversationTitle: conversation.title,
+            taskId: task.id,
+            taskTitle: task.title,
+            taskDescription: optionalString(task.description),
+            dispatchMessage: content,
+            agentGroupsPrompt,
+          }),
+          agentInstructions: buildAssignedTaskInstructions({
+            agentDescription: runAgent.agent.description,
+            conversationTitle: conversation.title,
+          }),
+          agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+          agentHubMcpTasks,
+          workspacePath: runAgent.workspacePath,
+          run: {
+            id: runId,
             agentId: runAgent.agent.id,
             daemonDeviceId: runAgent.daemonDeviceId,
             status: "queued",
-            prompt: job.prompt,
-            workspacePath: runAgent.workspacePath,
-            runtime: runAgent.runtime,
-            createdAt,
+            createdAt: event.createdAt,
+            updatedAt: event.createdAt,
+          },
+          runtime: runAgent.runtime,
+        };
+        const queuedEvent: RunEvent = {
+          type: "run.queued",
+          runId,
+          agentId: runAgent.agent.id,
+          daemonDeviceId: runAgent.daemonDeviceId,
+          createdAt: event.createdAt,
+        };
+
+        await tx.insert(runs).values({
+          id: runId,
+          ownerUserId: run.ownerUserId,
+          conversationId: conversation.id,
+          agentId: runAgent.agent.id,
+          daemonDeviceId: runAgent.daemonDeviceId,
+          status: "queued",
+          prompt: job.prompt,
+          workspacePath: runAgent.workspacePath,
+          runtime: runAgent.runtime,
+          createdAt,
+          updatedAt: createdAt,
+        });
+
+        await tx.insert(runEvents).values({
+          runId,
+          eventType: queuedEvent.type,
+          payload: queuedEvent,
+          createdAt,
+        });
+
+        await tx
+          .update(conversationTasks)
+          .set({
+            assigneeRunId: runId,
+            dispatchMessageId: message.id,
+            status: "assigned",
             updatedAt: createdAt,
-          });
+          })
+          .where(eq(conversationTasks.id, task.id));
 
-          await tx.insert(runEvents).values({
-            runId,
-            eventType: queuedEvent.type,
-            payload: queuedEvent,
-            createdAt,
-          });
-
-          await tx
-            .update(conversationTasks)
-            .set({
-              assigneeRunId: runId,
-              dispatchMessageId: message.id,
-              status: "assigned",
-              updatedAt: createdAt,
-            })
-            .where(eq(conversationTasks.id, task.id));
-
-          dispatchJobs.push(job);
-        }
+        dispatchJobs.push(job);
       }
 
       await tx

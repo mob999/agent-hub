@@ -4,6 +4,7 @@ import {
   buildAgentGroupsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  resolveTextMentionedAgentIds,
   type ConversationMessage,
 } from "../../src";
 
@@ -80,11 +81,16 @@ describe("conversation prompt builder", () => {
   it("describes the active groups an agent can message", () => {
     const prompt = buildAgentGroupsPrompt([
       {
+        agents: [{ id: "agent-all", name: "coco" }],
         conversationId: "00000000-0000-4000-8000-000000000020",
         groupName: "all",
         title: "all",
       },
       {
+        agents: [
+          { id: "agent-design-1", name: "dudu" },
+          { id: "agent-design-2", name: "jojo" },
+        ],
         conversationId: "00000000-0000-4000-8000-000000000021",
         groupName: "Design",
         title: "Design",
@@ -92,9 +98,34 @@ describe("conversation prompt builder", () => {
     ]);
 
     expect(prompt).toContain("- #all (groupName: all, conversationId:");
+    expect(prompt).toContain("agents: @coco");
     expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
+    expect(prompt).toContain("agents: @dudu, @jojo");
     expect(prompt).toContain("send_message_to_group");
     expect(prompt).toContain("send_message_to_user");
+  });
+
+  it("resolves text mentions by longest agent name first", () => {
+    const mentionedAgentIds = resolveTextMentionedAgentIds(
+      "@jojo please pair with @Coco Team. @missing is ignored. @jojo again.",
+      [
+        { id: "agent-jo", name: "jo" },
+        { id: "agent-jojo", name: "jojo" },
+        { id: "agent-coco-team", name: "Coco Team" },
+      ],
+    );
+
+    expect(mentionedAgentIds).toEqual(["agent-jojo", "agent-coco-team"]);
+  });
+
+  it("does not return the sender when resolving text mentions", () => {
+    expect(
+      resolveTextMentionedAgentIds(
+        "@dudu please continue",
+        [{ id: "agent-dudu", name: "dudu" }],
+        { excludeAgentId: "agent-dudu" },
+      ),
+    ).toEqual([]);
   });
 });
 

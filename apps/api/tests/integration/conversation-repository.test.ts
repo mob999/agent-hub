@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import type { RunEvent } from "@agent-hub/core";
 import {
+  agentRuntimeBindings,
   agents,
+  agentWorkspaces,
   conversationMessages,
   conversations,
   createDb,
+  daemonDevices,
   runEvents,
   runs,
   sessions,
@@ -62,6 +65,7 @@ describeDb("conversation repository integration", () => {
   const db = createDb(databaseUrl);
   const userIds: string[] = [];
   const agentIds: string[] = [];
+  const daemonDeviceIds: string[] = [];
   const runIds: string[] = [];
   const conversationIds: string[] = [];
 
@@ -78,14 +82,14 @@ describeDb("conversation repository integration", () => {
     return user.id;
   }
 
-  async function createAgent(ownerUserId: string): Promise<string> {
+  async function createAgent(ownerUserId: string, name?: string): Promise<string> {
     const id = randomUUID();
     const now = new Date("2026-05-26T00:00:00.000Z");
 
     await db.insert(agents).values({
       id,
       ownerUserId,
-      name: `Agent ${id.slice(0, 4)}`,
+      name: name ?? `Agent ${id.slice(0, 4)}`,
       defaultRuntimeKind: "codex",
       status: "active",
       createdAt: now,
@@ -93,6 +97,38 @@ describeDb("conversation repository integration", () => {
     });
     agentIds.push(id);
     return id;
+  }
+
+  async function markAgentReady(agentId: string): Promise<string> {
+    const daemonDeviceId = `local-${randomUUID()}`;
+    const now = new Date("2026-05-26T00:00:00.000Z");
+
+    await db.insert(daemonDevices).values({
+      id: daemonDeviceId,
+      status: "online",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(agentRuntimeBindings).values({
+      agentId,
+      daemonDeviceId,
+      runtimeKind: "codex",
+      capabilities: [],
+      status: "ready",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(agentWorkspaces).values({
+      agentId,
+      daemonDeviceId,
+      workspacePath: "/workspace",
+      status: "ready",
+      syncMode: "local-only",
+      createdAt: now,
+      updatedAt: now,
+    });
+    daemonDeviceIds.push(daemonDeviceId);
+    return daemonDeviceId;
   }
 
   beforeAll(() => {
@@ -119,7 +155,19 @@ describeDb("conversation repository integration", () => {
     }
 
     if (agentIds.length > 0) {
+      await db
+        .delete(agentWorkspaces)
+        .where(inArray(agentWorkspaces.agentId, agentIds));
+      await db
+        .delete(agentRuntimeBindings)
+        .where(inArray(agentRuntimeBindings.agentId, agentIds));
       await db.delete(agents).where(inArray(agents.id, agentIds));
+    }
+
+    if (daemonDeviceIds.length > 0) {
+      await db
+        .delete(daemonDevices)
+        .where(inArray(daemonDevices.id, daemonDeviceIds));
     }
 
     if (userIds.length > 0) {
@@ -519,5 +567,95 @@ describeDb("conversation repository integration", () => {
     expect(directMessages?.map((message) => message.content)).toEqual([
       "Private note.",
     ]);
+  });
+
+  it("dispatches group chat runs from text mentions in agent messages", async () => {
+    const ownerUserId = await createUser(
+      `conversation-mention-owner-${randomUUID()}@example.com`,
+    );
+    const senderAgentId = await createAgent(ownerUserId, "coco");
+    const mentionedAgentId = await createAgent(ownerUserId, "dudu");
+    await markAgentReady(senderAgentId);
+    await markAgentReady(mentionedAgentId);
+    const directConversation = await ensureDirectConversation(db, {
+      ownerUserId,
+      agentId: senderAgentId,
+    });
+    const group = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Design",
+      agentIds: [senderAgentId, mentionedAgentId],
+    });
+
+    expect(directConversation).not.toBeNull();
+    expect(group.status).toBe("created");
+    if (directConversation === null || group.status !== "created") {
+      return;
+    }
+
+    conversationIds.push(directConversation.id, group.conversation.id);
+
+    const directJob = createJob({
+      agentId: senderAgentId,
+      conversationId: directConversation.id,
+    });
+    runIds.push(directJob.run.id);
+    await createUserMessageAndRun(db, {
+      ownerUserId,
+      conversationId: directConversation.id,
+      job: directJob,
+      userMessageContent: "ask the group",
+    });
+
+    const crossResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: directJob.run.id,
+      toolCallId: "tool_group_mention",
+      name: "send_message_to_group",
+      input: { groupName: "Design", content: "@dudu 看一下这个问题" },
+      createdAt: "2026-05-26T00:00:01.000Z",
+    });
+
+    expect(crossResult.dispatchJobs).toHaveLength(1);
+    expect(crossResult.dispatchJobs[0]?.run.agentId).toBe(mentionedAgentId);
+    if (crossResult.dispatchJobs[0] !== undefined) {
+      runIds.push(crossResult.dispatchJobs[0].run.id);
+    }
+
+    const groupMessages = await listConversationMessagesForUser(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+    });
+
+    expect(groupMessages?.map((message) => message.content)).toEqual([
+      "@dudu 看一下这个问题",
+    ]);
+
+    const groupJob = createJob({
+      agentId: senderAgentId,
+      conversationId: group.conversation.id,
+    });
+    runIds.push(groupJob.run.id);
+    await createUserMessageAndRuns(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+      jobs: [groupJob],
+      userMessageContent: "continue here",
+    });
+
+    const groupResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: groupJob.run.id,
+      toolCallId: "tool_local_mention",
+      name: "send_message",
+      input: { content: "@dudu please continue" },
+      createdAt: "2026-05-26T00:00:02.000Z",
+    });
+
+    expect(groupResult.dispatchJobs).toHaveLength(1);
+    expect(groupResult.dispatchJobs[0]?.run.agentId).toBe(mentionedAgentId);
+    if (groupResult.dispatchJobs[0] !== undefined) {
+      runIds.push(groupResult.dispatchJobs[0].run.id);
+    }
   });
 });

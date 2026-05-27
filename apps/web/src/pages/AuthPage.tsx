@@ -14,7 +14,8 @@ import { ChatBot } from '@carbon/react/icons'
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import { ApiRequestError, apiRequest, type AuthResponse } from '../lib/api'
 
-export type WorkspaceRoutePath = '/chat' | '/runs' | '/daemon'
+export type ChatRoutePath = '/chat' | `/chat/${string}`
+export type WorkspaceRoutePath = ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
 export type AuthRoutePath = '/login' | '/register'
 export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
@@ -23,12 +24,17 @@ const authRedirectStorageKey = 'agenthub.auth.redirect'
 
 function readPendingAuthRedirect(): RoutePath | null {
   const value = window.sessionStorage.getItem(authRedirectStorageKey)
+  const isChatConversationRoute = value?.startsWith('/chat/') === true &&
+    value.split('/').filter(Boolean).length === 2
+  const isEditorRoute = value?.startsWith('/editor/') === true &&
+    [2, 3].includes(value.split('/').filter(Boolean).length)
 
   if (
     value === '/chat' ||
+    isChatConversationRoute ||
     value === '/runs' ||
     value === '/daemon' ||
-    (value?.startsWith('/editor/') && value.length > '/editor/'.length)
+    isEditorRoute
   ) {
     window.sessionStorage.removeItem(authRedirectStorageKey)
     return value as RoutePath

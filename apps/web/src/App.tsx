@@ -7,6 +7,16 @@ interface EditorRouteState {
   conversationId: string
 }
 
+function chatConversationIdFromPath(path: string): string | null {
+  const segments = path.split('/').filter(Boolean)
+
+  if (segments[0] !== 'chat') {
+    return null
+  }
+
+  return segments.length === 2 ? decodeURIComponent(segments[1] ?? '') : null
+}
+
 function getRoutePath(): RoutePath {
   const path = window.location.pathname
   const editorRoute = editorStateFromPath(path)
@@ -18,16 +28,17 @@ function getRoutePath(): RoutePath {
     path === '/login' ||
     path === '/register' ||
     path === '/chat' ||
+    chatConversationIdFromPath(path) !== null ||
     path === '/runs' ||
     path === '/daemon'
   ) {
-    return path
+    return path as RoutePath
   }
   return '/chat'
 }
 
 function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
-  return route === '/chat' || route === '/runs' || route === '/daemon'
+  return route === '/chat' || route.startsWith('/chat/') || route === '/runs' || route === '/daemon'
 }
 
 function editorStateFromPath(path: string): EditorRouteState | null {
@@ -70,6 +81,7 @@ function App() {
   return (
     <WorkspacePage
       route={isWorkspaceRoute(route) ? route : '/chat'}
+      chatConversationId={route.startsWith('/chat/') ? chatConversationIdFromPath(route) : null}
       editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
       navigate={navigate}
     />

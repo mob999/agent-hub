@@ -46,36 +46,22 @@ const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
   runs: '/runs',
   daemon: '/daemon',
 }
-const workspaceViewByRoute: Record<WorkspaceRoutePath, WorkspaceView> = {
-  '/chat': 'chat',
-  '/runs': 'runs',
-  '/daemon': 'daemon',
+function workspaceViewFromRoute(route: WorkspaceRoutePath): WorkspaceView {
+  if (route === '/runs') {
+    return 'runs'
+  }
+
+  if (route === '/daemon') {
+    return 'daemon'
+  }
+
+  return 'chat'
 }
-const selectedConversationStoragePrefix = 'agenthub.workspace.selectedConversation'
 const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
 const authRedirectStorageKey = 'agenthub.auth.redirect'
 
 function userScopedStorageKey(prefix: string, userId: string): string {
   return `${prefix}.${userId}`
-}
-
-function readSelectedConversationId(userId: string): string | null {
-  return window.localStorage.getItem(
-    userScopedStorageKey(selectedConversationStoragePrefix, userId),
-  )
-}
-
-function writeSelectedConversationId(userId: string, conversationId: string): void {
-  window.localStorage.setItem(
-    userScopedStorageKey(selectedConversationStoragePrefix, userId),
-    conversationId,
-  )
-}
-
-function clearSelectedConversationId(userId: string): void {
-  window.localStorage.removeItem(
-    userScopedStorageKey(selectedConversationStoragePrefix, userId),
-  )
 }
 
 function readConversationDrafts(userId: string): Record<string, string> {
@@ -141,12 +127,13 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 }
 
 interface WorkspacePageProps {
+  chatConversationId?: string | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, editorRoute = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({ route, chatConversationId = null, editorRoute = null, navigate }: WorkspacePageProps) {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -183,7 +170,8 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
 
-  const activeView = workspaceViewByRoute[route]
+  const routeConversationId = editorRoute?.conversationId ?? chatConversationId
+  const activeView = workspaceViewFromRoute(route)
   const activeRunCount = useMemo(
     () =>
       runs.filter((localRun) => localRun.run.status === 'queued' || localRun.run.status === 'running')
@@ -224,7 +212,6 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
 
   const activateConversation = useCallback((conversationId: string) => {
     if (user) {
-      writeSelectedConversationId(user.id, conversationId)
       setPrompt(readConversationDraft(user.id, conversationId))
     } else {
       setPrompt('')
@@ -234,14 +221,11 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
   }, [user])
 
   const clearActiveConversation = useCallback(() => {
-    if (user) {
-      clearSelectedConversationId(user.id)
-    }
-
     setPrompt('')
     setSelectedRunId(null)
     setActiveConversationId(null)
-  }, [user])
+    navigate('/chat')
+  }, [navigate])
 
   const updatePrompt = useCallback((value: string) => {
     setPrompt(value)
@@ -306,13 +290,16 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
 
       setConversations(conversations)
       const conversationIds = new Set(conversations.map((conversation) => conversation.id))
-      const savedConversationId = user ? readSelectedConversationId(user.id) : null
       const nextConversationId =
-        activeConversationId !== null && conversationIds.has(activeConversationId)
-          ? activeConversationId
-          : savedConversationId !== null && conversationIds.has(savedConversationId)
-            ? savedConversationId
-            : conversations[0]?.id ?? null
+        routeConversationId !== null && conversationIds.has(routeConversationId)
+          ? routeConversationId
+          : routeConversationId === null && route === '/chat'
+            ? conversations[0]?.id ?? null
+            : null
+
+      if (routeConversationId === null && route === '/chat' && nextConversationId !== null) {
+        navigate(`/chat/${encodeURIComponent(nextConversationId)}` as RoutePath)
+      }
 
       if (nextConversationId !== activeConversationId) {
         if (nextConversationId === null || !user) {
@@ -329,7 +316,7 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
         setRunError('Unable to load conversations.')
       }
     }
-  }, [activateConversation, activeConversationId, user])
+  }, [activateConversation, activeConversationId, navigate, route, routeConversationId, user])
 
   const loadArchivedConversations = useCallback(async () => {
     try {
@@ -563,24 +550,24 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
   }, [activeConversationId, loadArtifacts, loadMessages, loadTasks])
 
   useEffect(() => {
-    if (!user || editorRoute === null) {
+    if (!user || routeConversationId === null) {
       return
     }
 
     const timer = window.setTimeout(() => {
-      activateConversation(editorRoute.conversationId)
-      void loadMessages(editorRoute.conversationId)
-      void loadTasks(editorRoute.conversationId)
-      void loadArtifacts(editorRoute.conversationId)
+      activateConversation(routeConversationId)
+      void loadMessages(routeConversationId)
+      void loadTasks(routeConversationId)
+      void loadArtifacts(routeConversationId)
     }, 0)
 
     return () => window.clearTimeout(timer)
   }, [
     activateConversation,
-    editorRoute,
     loadArtifacts,
     loadMessages,
     loadTasks,
+    routeConversationId,
     user,
   ])
 
@@ -821,13 +808,18 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
     }
   }
   const closeArtifactEditor = () => {
-    navigate('/chat')
+    navigate(
+      activeConversationId === null
+        ? '/chat'
+        : `/chat/${encodeURIComponent(activeConversationId)}` as RoutePath,
+    )
   }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
       setSelectedRunId(null)
     }
     setRunError(null)
+    navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
     activateConversation(conversationId)
     void loadMessages(conversationId)
     void loadTasks(conversationId)
@@ -910,7 +902,7 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
         writeConversationDraft(user.id, response.conversation.id, '')
       }
       setSelectedRunId(null)
-      activateConversation(response.conversation.id)
+      selectConversation(response.conversation.id)
       setGroupModalOpen(false)
       void loadConversations()
     } catch (error) {
@@ -1091,7 +1083,7 @@ export function WorkspacePage({ route, editorRoute = null, navigate }: Workspace
       if (user) {
         writeConversationDraft(user.id, conversationResponse.conversation.id, '')
       }
-      activateConversation(conversationResponse.conversation.id)
+      selectConversation(conversationResponse.conversation.id)
       setAgentModalOpen(false)
       void loadAgents()
       void loadConversations()

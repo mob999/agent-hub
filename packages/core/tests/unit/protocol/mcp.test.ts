@@ -4,6 +4,8 @@ import type {
   AgentHubCompleteTaskToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolCall,
+  AgentHubSendMessageToGroupToolInput,
+  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -18,6 +20,8 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
+      "send_message_to_group",
+      "send_message_to_user",
       "list_tasks",
       "create_task",
       "upload_artifact",
@@ -25,6 +29,8 @@ describe("AgentHub MCP protocol", () => {
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
+      "send_message_to_group",
+      "send_message_to_user",
       "list_tasks",
       "upload_artifact",
       "complete_task",
@@ -129,5 +135,26 @@ describe("AgentHub MCP protocol", () => {
     expect(uploadResult.artifact.filename).toBe("report.md");
     expect(uploadResult.artifact.editorUrl).toContain("/editor/");
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
+  });
+
+  it("expresses cross-conversation message tools", () => {
+    const groupInput: AgentHubSendMessageToGroupToolInput = {
+      groupName: "#Design",
+      content: "I found something relevant for this group.",
+    };
+    const userInput: AgentHubSendMessageToUserToolInput = {
+      content: "I need your confirmation before continuing.",
+    };
+    const groupCall: AgentHubMcpToolCall = {
+      runId: "00000000-0000-4000-8000-000000000003",
+      toolCallId: "tool_group",
+      name: "send_message_to_group",
+      input: groupInput,
+      createdAt: "2026-05-26T00:00:00.000Z",
+    };
+
+    expect(groupCall.name).toBe("send_message_to_group");
+    expect(groupInput.groupName).toBe("#Design");
+    expect(userInput.content).toContain("confirmation");
   });
 });

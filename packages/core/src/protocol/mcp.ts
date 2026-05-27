@@ -2,6 +2,8 @@ import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
   ConversationArtifactId,
+  ConversationId,
+  ConversationMessageId,
   ConversationMention,
   ConversationTaskStatus,
   ConversationTaskId,
@@ -10,6 +12,8 @@ import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
+  | "send_message_to_group"
+  | "send_message_to_user"
   | "list_tasks"
   | "create_task"
   | "upload_artifact"
@@ -17,6 +21,8 @@ export type AgentHubMcpToolName =
 
 export const agentHubAllMcpTools = [
   "send_message",
+  "send_message_to_group",
+  "send_message_to_user",
   "list_tasks",
   "create_task",
   "upload_artifact",
@@ -25,6 +31,8 @@ export const agentHubAllMcpTools = [
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
+  "send_message_to_group",
+  "send_message_to_user",
   "list_tasks",
   "upload_artifact",
   "complete_task",
@@ -38,6 +46,21 @@ export interface AgentHubSendMessageToolInput {
 
 export interface AgentHubSendMessageToolResult {
   accepted: true;
+}
+
+export interface AgentHubSendMessageToGroupToolInput {
+  groupName: string;
+  content: string;
+}
+
+export interface AgentHubSendMessageToUserToolInput {
+  content: string;
+}
+
+export interface AgentHubCrossConversationMessageToolResult {
+  accepted: true;
+  conversationId?: ConversationId;
+  messageId?: ConversationMessageId;
 }
 
 export interface AgentHubListTasksToolInput {
@@ -97,12 +120,15 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
+  | AgentHubSendMessageToGroupToolInput
+  | AgentHubSendMessageToUserToolInput
   | AgentHubListTasksToolInput
   | AgentHubCreateTaskToolInput
   | AgentHubUploadArtifactToolInput
   | AgentHubCompleteTaskToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
+  | AgentHubCrossConversationMessageToolResult
   | AgentHubListTasksToolResult
   | AgentHubCreateTaskToolResult
   | AgentHubUploadArtifactToolResult

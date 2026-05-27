@@ -12,10 +12,13 @@ import type {
   AgentHubCreateTaskToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
+  AgentHubCrossConversationMessageToolResult,
   AgentHubListTasksToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
+  AgentHubSendMessageToGroupToolInput,
+  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubSendMessageToolResult,
   AgentHubUploadArtifactToolInput,
@@ -23,12 +26,18 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
+const sendMessageToGroupToolName =
+  "send_message_to_group" satisfies AgentHubMcpToolName;
+const sendMessageToUserToolName =
+  "send_message_to_user" satisfies AgentHubMcpToolName;
 const listTasksToolName = "list_tasks" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
+  sendMessageToGroupToolName,
+  sendMessageToUserToolName,
   listTasksToolName,
   createTaskToolName,
   uploadArtifactToolName,
@@ -98,6 +107,54 @@ export async function startAgentHubMcpStdioServer(
                     description:
                       "Task ids created with create_task that this message dispatches.",
                     items: { type: "string", minLength: 1 },
+                  },
+                },
+                required: ["content"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(sendMessageToGroupToolName)
+        ? [
+            {
+              name: sendMessageToGroupToolName,
+              description:
+                "Send a visible message to another active AgentHub group by group name. The current run's agent must be a member of that group.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  groupName: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "The target group name, with or without a leading #.",
+                  },
+                  content: {
+                    type: "string",
+                    minLength: 1,
+                    description: "The chat message content to send.",
+                  },
+                },
+                required: ["groupName", "content"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(sendMessageToUserToolName)
+        ? [
+            {
+              name: sendMessageToUserToolName,
+              description:
+                "Send a visible private message to the current AgentHub user.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  content: {
+                    type: "string",
+                    minLength: 1,
+                    description: "The private message content to send.",
                   },
                 },
                 required: ["content"],
@@ -223,15 +280,19 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
-        : toolName === listTasksToolName
-          ? readListTasksInput(request.params.arguments)
-        : toolName === createTaskToolName
-          ? readCreateTaskInput(request.params.arguments)
-          : toolName === uploadArtifactToolName
-            ? readUploadArtifactInput(request.params.arguments)
-            : toolName === completeTaskToolName
-              ? readCompleteTaskInput(request.params.arguments)
-          : undefined;
+        : toolName === sendMessageToGroupToolName
+          ? readSendMessageToGroupInput(request.params.arguments)
+          : toolName === sendMessageToUserToolName
+            ? readSendMessageToUserInput(request.params.arguments)
+            : toolName === listTasksToolName
+              ? readListTasksInput(request.params.arguments)
+              : toolName === createTaskToolName
+                ? readCreateTaskInput(request.params.arguments)
+                : toolName === uploadArtifactToolName
+                  ? readUploadArtifactInput(request.params.arguments)
+                  : toolName === completeTaskToolName
+                    ? readCompleteTaskInput(request.params.arguments)
+                    : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -269,18 +330,22 @@ function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-function readSendMessageInput(value: unknown): AgentHubSendMessageToolInput {
+function readObjectArguments(value: unknown, toolName: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("send_message arguments must be an object.");
+    throw new Error(`${toolName} arguments must be an object.`);
   }
 
-  const content = (value as Record<string, unknown>).content;
+  return value as Record<string, unknown>;
+}
+
+function readSendMessageInput(value: unknown): AgentHubSendMessageToolInput {
+  const input = readObjectArguments(value, "send_message");
+  const content = input.content;
 
   if (typeof content !== "string" || content.trim().length === 0) {
     throw new Error("send_message.content is required.");
   }
 
-  const input = value as Record<string, unknown>;
   const mentions = Array.isArray(input.mentions)
     ? input.mentions.flatMap((mention) => {
         if (
@@ -312,6 +377,42 @@ function readSendMessageInput(value: unknown): AgentHubSendMessageToolInput {
     content: content.trim(),
     mentions: mentions && mentions.length > 0 ? mentions : undefined,
     taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+  };
+}
+
+function readSendMessageToGroupInput(
+  value: unknown,
+): AgentHubSendMessageToGroupToolInput {
+  const input = readObjectArguments(value, "send_message_to_group");
+  const groupName = input.groupName;
+  const content = input.content;
+
+  if (typeof groupName !== "string" || groupName.trim().length === 0) {
+    throw new Error("send_message_to_group.groupName is required.");
+  }
+
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("send_message_to_group.content is required.");
+  }
+
+  return {
+    groupName: groupName.trim(),
+    content: content.trim(),
+  };
+}
+
+function readSendMessageToUserInput(
+  value: unknown,
+): AgentHubSendMessageToUserToolInput {
+  const input = readObjectArguments(value, "send_message_to_user");
+  const content = input.content;
+
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("send_message_to_user.content is required.");
+  }
+
+  return {
+    content: content.trim(),
   };
 }
 
@@ -426,6 +527,8 @@ async function callRelayTool(input: {
   input:
     | AgentHubCreateTaskToolInput
     | AgentHubSendMessageToolInput
+    | AgentHubSendMessageToGroupToolInput
+    | AgentHubSendMessageToUserToolInput
     | AgentHubListTasksToolInput
     | AgentHubUploadArtifactToolInput
     | AgentHubCompleteTaskToolInput;
@@ -455,6 +558,7 @@ async function callRelayTool(input: {
   return (await response.json()) as
     | AgentHubCreateTaskToolResult
     | AgentHubSendMessageToolResult
+    | AgentHubCrossConversationMessageToolResult
     | AgentHubListTasksToolResult
     | AgentHubUploadArtifactToolResult
     | AgentHubCompleteTaskToolResult;

@@ -4,6 +4,8 @@ import type {
   AgentHubCreateTaskToolInput,
   AgentHubCompleteTaskToolInput,
   AgentHubListTasksToolResult,
+  AgentHubSendMessageToGroupToolInput,
+  AgentHubSendMessageToUserToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubSendMessageToolInput,
   Conversation,
@@ -363,6 +365,79 @@ export function buildConversationRunPrompt(input: {
     "<user_request>",
     input.currentUserMessage,
     "</user_request>",
+  ].join("\n");
+}
+
+export interface AgentGroupContext {
+  conversationId: ConversationId;
+  groupName: string;
+  title: string;
+}
+
+export async function listActiveAgentGroupContexts(
+  db: Db,
+  input: { ownerUserId: string; agentId: string },
+): Promise<AgentGroupContext[]> {
+  const [agent] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.id, input.agentId),
+        eq(agents.ownerUserId, input.ownerUserId),
+        eq(agents.status, "active"),
+      ),
+    )
+    .limit(1);
+
+  if (agent === undefined) {
+    return [];
+  }
+
+  const rows = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.type, "group"),
+        eq(conversations.status, "active"),
+      ),
+    )
+    .orderBy(asc(conversations.title));
+  const activeGroups = await toConversationsWithAgentIds(db, rows, {
+    ownerUserId: input.ownerUserId,
+  });
+
+  return activeGroups
+    .filter((conversation) => conversation.agentIds?.includes(input.agentId))
+    .map((conversation) => ({
+      conversationId: conversation.id,
+      groupName: conversation.key === defaultGroupConversationKey
+        ? defaultGroupConversationKey
+        : conversation.title,
+      title: conversation.title,
+    }));
+}
+
+export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
+  const groupLines = groups.length === 0
+    ? ["You are not a member of any active AgentHub groups."]
+    : [
+        "You are a member of these active AgentHub groups:",
+        ...groups.map(
+          (group) =>
+            `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId})`,
+        ),
+      ];
+
+  return [
+    "<agenthub_agent_groups>",
+    ...groupLines,
+    "Use send_message_to_group with a listed groupName to send a visible message to one of these groups.",
+    "Use send_message_to_user to send a visible private message to the current user.",
+    "Archived groups are not listed and cannot be targeted.",
+    "</agenthub_agent_groups>",
   ].join("\n");
 }
 
@@ -1835,6 +1910,52 @@ function readSendMessageToolInput(
     : null;
 }
 
+function readSendMessageToGroupToolInput(
+  input: unknown,
+): AgentHubSendMessageToGroupToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("groupName" in input) ||
+    !("content" in input)
+  ) {
+    return null;
+  }
+
+  const groupName = (input as AgentHubSendMessageToGroupToolInput).groupName;
+  const content = (input as AgentHubSendMessageToGroupToolInput).content;
+
+  return typeof groupName === "string" &&
+    groupName.trim().length > 0 &&
+    typeof content === "string" &&
+    content.trim().length > 0
+    ? {
+        groupName: groupName.trim(),
+        content: content.trim(),
+      }
+    : null;
+}
+
+function readSendMessageToUserToolInput(
+  input: unknown,
+): AgentHubSendMessageToUserToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("content" in input)
+  ) {
+    return null;
+  }
+
+  const content = (input as AgentHubSendMessageToUserToolInput).content;
+
+  return typeof content === "string" && content.trim().length > 0
+    ? { content: content.trim() }
+    : null;
+}
+
 function readCreateTaskToolInput(
   input: unknown,
 ): AgentHubCreateTaskToolInput | null {
@@ -1944,6 +2065,42 @@ function isDefaultGroup(row: Pick<ConversationRow, "key" | "type">): boolean {
   return row.type === "group" && row.key === defaultGroupConversationKey;
 }
 
+function groupToolNameToKey(groupName: string): string {
+  return groupName.replace(/^#+/, "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+async function insertCompletedAgentMessage(
+  db: Db,
+  input: {
+    agentId: string;
+    content: string;
+    conversationId: string;
+    createdAt: Date;
+    runId: string;
+  },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.insert(conversationMessages).values({
+      conversationId: input.conversationId,
+      senderType: "agent",
+      senderAgentId: input.agentId,
+      runId: input.runId,
+      content: input.content,
+      status: "completed",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    });
+
+    await tx
+      .update(conversations)
+      .set({
+        lastMessageAt: input.createdAt,
+        updatedAt: input.createdAt,
+      })
+      .where(eq(conversations.id, input.conversationId));
+  });
+}
+
 async function isConversationAgentMember(
   db: Db,
   input: {
@@ -1963,6 +2120,7 @@ async function isConversationAgentMember(
         and(
           eq(agents.id, input.agentId),
           eq(agents.ownerUserId, input.conversation.ownerUserId),
+          eq(agents.status, "active"),
         ),
       )
       .limit(1);
@@ -2063,6 +2221,7 @@ async function resolveMentionedAgentIds(
 }
 
 export function buildAssignedTaskPrompt(input: {
+  agentGroupsPrompt?: string;
   conversationTitle: string;
   taskId: string;
   taskTitle: string;
@@ -2083,6 +2242,8 @@ export function buildAssignedTaskPrompt(input: {
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
+    input.agentGroupsPrompt,
+    input.agentGroupsPrompt === undefined ? undefined : "",
     "<orchestrator_dispatch_message>",
     input.dispatchMessage,
     "</orchestrator_dispatch_message>",
@@ -2191,6 +2352,12 @@ async function maybeCreateFinalizationRun(
     .from(runs)
     .where(eq(runs.id, input.creatorRunId))
     .limit(1);
+  const agentGroupsPrompt = buildAgentGroupsPrompt(
+    await listActiveAgentGroupContexts(db, {
+      agentId: runAgent.agent.id,
+      ownerUserId: firstTask.ownerUserId,
+    }),
+  );
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
   const taskSummaries = taskRows.map((task, index) => {
@@ -2220,6 +2387,8 @@ async function maybeCreateFinalizationRun(
     "Send one final Markdown summary to the user with the AgentHub MCP send_message tool.",
     "Include any report preview/editor links listed below.",
     "</agenthub_task_finalization>",
+    "",
+    agentGroupsPrompt,
     "",
     "<original_user_request>",
     creatorRun?.prompt ?? "",
@@ -2521,6 +2690,100 @@ export async function appendRunEventToConversationMessage(
       return { dispatchJobs };
     }
 
+    if (event.name === "send_message_to_group") {
+      const input = readSendMessageToGroupToolInput(event.input);
+
+      if (input === null) {
+        return { dispatchJobs };
+      }
+
+      const [run] = await db
+        .select({
+          agentId: runs.agentId,
+          ownerUserId: runs.ownerUserId,
+        })
+        .from(runs)
+        .where(eq(runs.id, event.runId))
+        .limit(1);
+
+      if (run === undefined) {
+        return { dispatchJobs };
+      }
+
+      const [targetConversation] = await db
+        .select()
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.ownerUserId, run.ownerUserId),
+            eq(conversations.type, "group"),
+            eq(conversations.status, "active"),
+            eq(conversations.key, groupToolNameToKey(input.groupName)),
+          ),
+        )
+        .limit(1);
+
+      if (
+        targetConversation === undefined ||
+        !(await isConversationAgentMember(db, {
+          agentId: run.agentId,
+          conversation: targetConversation,
+        }))
+      ) {
+        return { dispatchJobs };
+      }
+
+      await insertCompletedAgentMessage(db, {
+        agentId: run.agentId,
+        content: input.content,
+        conversationId: targetConversation.id,
+        createdAt: new Date(event.createdAt),
+        runId: event.runId,
+      });
+
+      return { dispatchJobs };
+    }
+
+    if (event.name === "send_message_to_user") {
+      const input = readSendMessageToUserToolInput(event.input);
+
+      if (input === null) {
+        return { dispatchJobs };
+      }
+
+      const [run] = await db
+        .select({
+          agentId: runs.agentId,
+          ownerUserId: runs.ownerUserId,
+        })
+        .from(runs)
+        .where(eq(runs.id, event.runId))
+        .limit(1);
+
+      if (run === undefined) {
+        return { dispatchJobs };
+      }
+
+      const conversation = await ensureDirectConversation(db, {
+        agentId: run.agentId,
+        ownerUserId: run.ownerUserId,
+      });
+
+      if (conversation === null) {
+        return { dispatchJobs };
+      }
+
+      await insertCompletedAgentMessage(db, {
+        agentId: run.agentId,
+        content: input.content,
+        conversationId: conversation.id,
+        createdAt: new Date(event.createdAt),
+        runId: event.runId,
+      });
+
+      return { dispatchJobs };
+    }
+
     if (event.name !== "send_message") {
       return { dispatchJobs };
     }
@@ -2618,6 +2881,12 @@ export async function appendRunEventToConversationMessage(
             continue;
           }
 
+          const agentGroupsPrompt = buildAgentGroupsPrompt(
+            await listActiveAgentGroupContexts(db, {
+              agentId: runAgent.agent.id,
+              ownerUserId: run.ownerUserId,
+            }),
+          );
           const runId = randomUUID();
           const job: RunQueueJob = {
             conversationId: conversation.id,
@@ -2628,6 +2897,7 @@ export async function appendRunEventToConversationMessage(
               taskTitle: task.title,
               taskDescription: optionalString(task.description),
               dispatchMessage: content,
+              agentGroupsPrompt,
             }),
             agentInstructions: buildAssignedTaskInstructions({
               agentDescription: runAgent.agent.description,

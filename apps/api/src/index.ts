@@ -23,6 +23,7 @@ import {
   createAgentProvisioningRecords,
   createAgentHubRedisClient,
   createLogger,
+  buildAgentGroupsPrompt,
   createRunRecord,
   buildConversationRunPrompt,
   createConversationArtifactAction,
@@ -49,6 +50,7 @@ import {
   getRunEventsForUser,
   getRunForUser,
   listAgentsForUser,
+  listActiveAgentGroupContexts,
   listDaemonDevicesWithRuntimes,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
@@ -274,6 +276,18 @@ function toMcpTaskList(
   }));
 }
 
+async function buildAgentGroupsPromptForAgent(input: {
+  agentId: string;
+  ownerUserId: string;
+}): Promise<string> {
+  return buildAgentGroupsPrompt(
+    await listActiveAgentGroupContexts(db, {
+      agentId: input.agentId,
+      ownerUserId: input.ownerUserId,
+    }),
+  );
+}
+
 function buildGroupChatAgentInstructions(input: {
   agentInstructions?: string;
   conversationTitle: string;
@@ -288,6 +302,7 @@ function buildGroupChatAgentInstructions(input: {
 }
 
 function buildGroupChatRunPrompt(input: {
+  agentGroupsPrompt?: string;
   agentNamesById?: Record<string, string>;
   agentName: string;
   conversationTitle: string;
@@ -310,8 +325,10 @@ function buildGroupChatRunPrompt(input: {
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
     "</agenthub_group_chat_protocol>",
     "",
+    input.agentGroupsPrompt,
+    input.agentGroupsPrompt === undefined ? undefined : "",
     conversationPrompt,
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function buildGroupTaskOrchestratorInstructions(input: {
@@ -330,6 +347,7 @@ function buildGroupTaskOrchestratorInstructions(input: {
 }
 
 function buildGroupTaskOrchestratorPrompt(input: {
+  agentGroupsPrompt?: string;
   agentNamesById?: Record<string, string>;
   agentName: string;
   agents: RunnableAgent[];
@@ -360,8 +378,10 @@ function buildGroupTaskOrchestratorPrompt(input: {
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
+    input.agentGroupsPrompt,
+    input.agentGroupsPrompt === undefined ? undefined : "",
     conversationPrompt,
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 const healthRoute = createRoute({
@@ -1562,15 +1582,24 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       );
     }
 
+    const agentGroupsPrompt = await buildAgentGroupsPromptForAgent({
+      agentId: runAgent.agent.id,
+      ownerUserId: user.id,
+    });
     const job: RunQueueJob = {
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
-      prompt: buildConversationRunPrompt({
-        agentNamesById,
-        currentUserMessage: content,
-        messages: priorMessages,
-      }),
+      prompt: [
+        agentGroupsPrompt,
+        buildConversationRunPrompt({
+          agentNamesById,
+          currentUserMessage: content,
+          messages: priorMessages,
+        }),
+      ].join("\n\n"),
       agentInstructions: buildAgentInstructions(runAgent.agent.description),
+      agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+      agentHubMcpTasks,
       workspacePath: runAgent.workspacePath,
       run: {
         id: randomUUID(),
@@ -1677,6 +1706,10 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       }
     }
 
+    const agentGroupsPrompt = await buildAgentGroupsPromptForAgent({
+      agentId: orchestrator.agent.id,
+      ownerUserId: user.id,
+    });
     const job: RunQueueJob = {
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
@@ -1684,6 +1717,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         agentNamesById,
         agentName: orchestrator.agent.name,
         agents: readyGroupAgents,
+        agentGroupsPrompt,
         conversationTitle: conversation.title,
         currentUserMessage: content,
         messages: priorMessages,
@@ -1785,36 +1819,42 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const jobs = runAgents.map((runAgent): RunQueueJob => ({
-    conversationId: conversation.id,
-    daemonDeviceId: runAgent.daemonDeviceId,
-    prompt: buildGroupChatRunPrompt({
-      agentNamesById,
-      agentName: runAgent.agent.name,
-      conversationTitle: conversation.title,
-      currentUserMessage: content,
-      messages: priorMessages,
-    }),
-    agentInstructions: buildGroupChatAgentInstructions({
-      agentInstructions: buildAgentInstructions(runAgent.agent.description),
-      conversationTitle: conversation.title,
-    }),
-    agentHubMcpTools: groupChatMcpToolsForAgent({
-      agentId: runAgent.agent.id,
-      orchestratorAgentId: conversation.orchestratorAgentId,
-    }),
-    agentHubMcpTasks,
-    workspacePath: runAgent.workspacePath,
-    run: {
-      id: randomUUID(),
-      agentId: runAgent.agent.id,
+  const jobs = await Promise.all(
+    runAgents.map(async (runAgent): Promise<RunQueueJob> => ({
+      conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
-      status: "queued",
-      createdAt: now,
-      updatedAt: now,
-    },
-    runtime: runAgent.runtime,
-  }));
+      prompt: buildGroupChatRunPrompt({
+        agentGroupsPrompt: await buildAgentGroupsPromptForAgent({
+          agentId: runAgent.agent.id,
+          ownerUserId: user.id,
+        }),
+        agentNamesById,
+        agentName: runAgent.agent.name,
+        conversationTitle: conversation.title,
+        currentUserMessage: content,
+        messages: priorMessages,
+      }),
+      agentInstructions: buildGroupChatAgentInstructions({
+        agentInstructions: buildAgentInstructions(runAgent.agent.description),
+        conversationTitle: conversation.title,
+      }),
+      agentHubMcpTools: groupChatMcpToolsForAgent({
+        agentId: runAgent.agent.id,
+        orchestratorAgentId: conversation.orchestratorAgentId,
+      }),
+      agentHubMcpTasks,
+      workspacePath: runAgent.workspacePath,
+      run: {
+        id: randomUUID(),
+        agentId: runAgent.agent.id,
+        daemonDeviceId: runAgent.daemonDeviceId,
+        status: "queued",
+        createdAt: now,
+        updatedAt: now,
+      },
+      runtime: runAgent.runtime,
+    })),
+  );
   const result = await createUserMessageAndRuns(db, {
     ownerUserId: user.id,
     conversationId: conversation.id,
@@ -2246,6 +2286,8 @@ app.post("/runs", async (c) => {
   let daemonDeviceId = body.daemonDeviceId;
   let workspacePath = body.workspacePath;
   let agentInstructions: string | undefined;
+  let agentHubMcpTools: AgentHubMcpToolName[] | undefined;
+  let runPrompt = prompt;
   let runtime: RunQueueJob["runtime"] = {
     runtimeKind: "codex",
     capabilities: [],
@@ -2280,6 +2322,14 @@ app.post("/runs", async (c) => {
     daemonDeviceId = runnableAgent.daemonDeviceId;
     workspacePath = runnableAgent.workspacePath;
     agentInstructions = buildAgentInstructions(runnableAgent.agent.description);
+    agentHubMcpTools = [...agentHubNonOrchestratorMcpTools];
+    runPrompt = [
+      await buildAgentGroupsPromptForAgent({
+        agentId: runnableAgent.agent.id,
+        ownerUserId: user.id,
+      }),
+      prompt,
+    ].join("\n\n");
     runtime = runnableAgent.runtime;
   } else {
     agentId = env.AGENTHUB_DEFAULT_AGENT_ID;
@@ -2306,8 +2356,9 @@ app.post("/runs", async (c) => {
 
   const job: RunQueueJob = {
     daemonDeviceId,
-    prompt,
+    prompt: runPrompt,
     agentInstructions,
+    agentHubMcpTools,
     workspacePath,
     run: {
       id: randomUUID(),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAgentGroupsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
   type ConversationMessage,
@@ -74,6 +75,26 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain(
       "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
     );
+  });
+
+  it("describes the active groups an agent can message", () => {
+    const prompt = buildAgentGroupsPrompt([
+      {
+        conversationId: "00000000-0000-4000-8000-000000000020",
+        groupName: "all",
+        title: "all",
+      },
+      {
+        conversationId: "00000000-0000-4000-8000-000000000021",
+        groupName: "Design",
+        title: "Design",
+      },
+    ]);
+
+    expect(prompt).toContain("- #all (groupName: all, conversationId:");
+    expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
+    expect(prompt).toContain("send_message_to_group");
+    expect(prompt).toContain("send_message_to_user");
   });
 });
 

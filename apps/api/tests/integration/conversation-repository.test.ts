@@ -14,6 +14,7 @@ import {
 import type { RunQueueJob } from "@agent-hub/server";
 import {
   appendRunEvent,
+  archiveGroupConversationForUser,
   createGroupConversation,
   createUserMessageAndRun,
   createUserMessageAndRuns,
@@ -21,6 +22,7 @@ import {
   ensureDirectConversation,
   getConversationForUser,
   listConversationMessagesForUser,
+  listActiveAgentGroupContexts,
   listConversationsForUser,
   updateGroupConversation,
 } from "@agent-hub/server";
@@ -400,5 +402,122 @@ describeDb("conversation repository integration", () => {
       content: "I can take it.",
       status: "completed",
     });
+  });
+
+  it("persists cross-conversation MCP messages and hides archived groups from context", async () => {
+    const ownerUserId = await createUser(
+      `conversation-cross-owner-${randomUUID()}@example.com`,
+    );
+    const agentId = await createAgent(ownerUserId);
+    const sourceConversation = await ensureDefaultGroupConversation(db, {
+      ownerUserId,
+    });
+    const activeGroup = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Design",
+      agentIds: [agentId],
+    });
+    const archivedGroup = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Archive Me",
+      agentIds: [agentId],
+    });
+
+    expect(activeGroup.status).toBe("created");
+    expect(archivedGroup.status).toBe("created");
+    if (activeGroup.status !== "created" || archivedGroup.status !== "created") {
+      return;
+    }
+
+    conversationIds.push(
+      sourceConversation.id,
+      activeGroup.conversation.id,
+      archivedGroup.conversation.id,
+    );
+
+    await archiveGroupConversationForUser(db, {
+      ownerUserId,
+      conversationId: archivedGroup.conversation.id,
+    });
+
+    const job = createJob({
+      agentId,
+      conversationId: sourceConversation.id,
+    });
+    runIds.push(job.run.id);
+
+    await createUserMessageAndRuns(db, {
+      ownerUserId,
+      conversationId: sourceConversation.id,
+      jobs: [job],
+      userMessageContent: "notify another group",
+    });
+
+    const contexts = await listActiveAgentGroupContexts(db, {
+      ownerUserId,
+      agentId,
+    });
+
+    expect(contexts.map((context) => context.groupName).sort()).toEqual([
+      "Design",
+      "all",
+    ]);
+
+    await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: job.run.id,
+      toolCallId: "tool_group",
+      name: "send_message_to_group",
+      input: { groupName: "#Design", content: "Cross-group note." },
+      createdAt: "2026-05-26T00:00:01.000Z",
+    });
+    await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: job.run.id,
+      toolCallId: "tool_archived",
+      name: "send_message_to_group",
+      input: { groupName: "Archive Me", content: "Should not appear." },
+      createdAt: "2026-05-26T00:00:02.000Z",
+    });
+    await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: job.run.id,
+      toolCallId: "tool_user",
+      name: "send_message_to_user",
+      input: { content: "Private note." },
+      createdAt: "2026-05-26T00:00:03.000Z",
+    });
+
+    const activeGroupMessages = await listConversationMessagesForUser(db, {
+      ownerUserId,
+      conversationId: activeGroup.conversation.id,
+    });
+    const archivedGroupMessages = await listConversationMessagesForUser(db, {
+      ownerUserId,
+      conversationId: archivedGroup.conversation.id,
+    });
+    const directConversation = await ensureDirectConversation(db, {
+      ownerUserId,
+      agentId,
+    });
+
+    if (directConversation !== null) {
+      conversationIds.push(directConversation.id);
+    }
+
+    const directMessages = directConversation === null
+      ? null
+      : await listConversationMessagesForUser(db, {
+          ownerUserId,
+          conversationId: directConversation.id,
+        });
+
+    expect(activeGroupMessages?.map((message) => message.content)).toEqual([
+      "Cross-group note.",
+    ]);
+    expect(archivedGroupMessages).toEqual([]);
+    expect(directMessages?.map((message) => message.content)).toEqual([
+      "Private note.",
+    ]);
   });
 });

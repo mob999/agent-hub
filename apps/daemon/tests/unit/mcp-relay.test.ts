@@ -166,6 +166,68 @@ describe("AgentHubMcpRelay", () => {
     ]);
   });
 
+  it("relays cross-conversation message tools to the active run session", async () => {
+    const relay = await createStartedRelay();
+    const calls: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      enabledTools: ["send_message_to_group", "send_message_to_user"],
+      onToolCall: (call) => {
+        calls.push(call);
+        return { accepted: true };
+      },
+    });
+
+    const groupResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_group`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_group",
+          input: { groupName: " Design ", content: " hello group " },
+        }),
+      },
+    );
+    const userResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_user`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_user",
+          input: { content: " hello user " },
+        }),
+      },
+    );
+    const rejected = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_group`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: { groupName: " ", content: "hello" },
+        }),
+      },
+    );
+
+    expect(groupResponse.status).toBe(200);
+    expect(userResponse.status).toBe(200);
+    expect(rejected.status).toBe(400);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        name: "send_message_to_group",
+        toolCallId: "tool_group",
+        input: { groupName: "Design", content: "hello group" },
+      }),
+      expect.objectContaining({
+        name: "send_message_to_user",
+        toolCallId: "tool_user",
+        input: { content: "hello user" },
+      }),
+    ]);
+  });
+
   it("rejects calls after the session is closed", async () => {
     const relay = await createStartedRelay();
     const session = relay.createSession({

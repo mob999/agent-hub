@@ -12,6 +12,8 @@ import type {
   AgentHubMcpToolName,
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
+  AgentHubSendMessageToGroupToolInput,
+  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -233,6 +235,14 @@ function readToolInput(
     return readSendMessageInput(input);
   }
 
+  if (toolName === "send_message_to_group") {
+    return readSendMessageToGroupInput(input);
+  }
+
+  if (toolName === "send_message_to_user") {
+    return readSendMessageToUserInput(input);
+  }
+
   if (toolName === "list_tasks") {
     return readListTasksInput(input);
   }
@@ -400,6 +410,42 @@ function readSendMessageInput(input: unknown): AgentHubSendMessageToolInput | nu
     content: content.trim(),
     mentions: mentions && mentions.length > 0 ? mentions : undefined,
     taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+  };
+}
+
+function readSendMessageToGroupInput(
+  input: unknown,
+): AgentHubSendMessageToGroupToolInput | null {
+  const record = input as Record<string, unknown>;
+  const groupName = record.groupName;
+  const content = record.content;
+
+  if (
+    typeof groupName !== "string" ||
+    groupName.trim().length === 0 ||
+    typeof content !== "string" ||
+    content.trim().length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    groupName: groupName.trim(),
+    content: content.trim(),
+  };
+}
+
+function readSendMessageToUserInput(
+  input: unknown,
+): AgentHubSendMessageToUserToolInput | null {
+  const content = (input as Record<string, unknown>).content;
+
+  if (typeof content !== "string" || content.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    content: content.trim(),
   };
 }
 

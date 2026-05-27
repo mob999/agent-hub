@@ -340,6 +340,67 @@ export interface LocalRun {
   run: AgentRun
 }
 
+export type RealtimeEvent =
+  | {
+      type: 'conversation.updated'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      conversation?: Conversation
+    }
+  | {
+      type: 'conversation.message.created'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      message: ConversationMessage
+    }
+  | {
+      type: 'run.updated'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId?: string
+      run: AgentRun
+    }
+  | {
+      type: 'run.event.created'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId?: string
+      runId: string
+      event: RunEvent
+    }
+  | {
+      type: 'task.updated'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      taskId: string
+      task?: ConversationTask
+    }
+  | {
+      type: 'artifact.created'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      artifact: ConversationArtifact
+    }
+  | {
+      type: 'artifact.action.updated'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      artifactId: string
+      action: ConversationArtifactAction
+    }
+
 export class ApiRequestError extends Error {
   readonly status: number
   readonly code?: string

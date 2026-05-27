@@ -8,6 +8,10 @@ import { createDb } from "@agent-hub/db";
 import type {
   AgentHubListTasksToolResult,
   AgentHubMcpToolName,
+  Conversation,
+  ConversationMessage,
+  RealtimeEvent,
+  RunEvent,
   ConversationTask,
   RuntimeKind,
 } from "@agent-hub/core";
@@ -31,6 +35,7 @@ import {
   createGroupConversation,
   createUserMessageAndRun,
   createUserMessageAndRuns,
+  createRealtimeEvent,
   enqueueAgentProvisioningJob,
   enqueueArtifactActionJob,
   enqueueRunJob,
@@ -56,9 +61,11 @@ import {
   listRunningRunIdsByDaemonDevice,
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
+  publishRealtimeEvent,
   readArtifactContent,
   restoreAgentForUser,
   restoreGroupConversationForUser,
+  subscribeRealtimeEvents,
   toAgentRun,
   updateConversationOrchestrator,
   updateAgentProfileForUser,
@@ -80,6 +87,7 @@ import { ErrorResponseSchema, HealthResponseSchema } from "./schemas/common.js";
 const env = loadApiEnv();
 const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
+const realtimeSubscriber = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({ bindings: { service: "api" } });
 const runtimeKinds = new Set<RuntimeKind>([
   "claude-code",
@@ -90,7 +98,126 @@ const runtimeKinds = new Set<RuntimeKind>([
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type SseClient = {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  heartbeat: ReturnType<typeof setInterval> | null;
+  id: string;
+};
+
+const sseEncoder = new TextEncoder();
+const sseClientsByUserId = new Map<string, Set<SseClient>>();
+
+function sseFrame(event: string, data: unknown): Uint8Array {
+  return sseEncoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function unregisterSseClient(ownerUserId: string, client: SseClient): void {
+  if (client.heartbeat !== null) {
+    clearInterval(client.heartbeat);
+    client.heartbeat = null;
+  }
+
+  const clients = sseClientsByUserId.get(ownerUserId);
+  clients?.delete(client);
+
+  if (clients !== undefined && clients.size === 0) {
+    sseClientsByUserId.delete(ownerUserId);
+  }
+}
+
+function deliverRealtimeEvent(event: RealtimeEvent): void {
+  const clients = sseClientsByUserId.get(event.ownerUserId);
+
+  if (clients === undefined) {
+    return;
+  }
+
+  for (const client of [...clients]) {
+    try {
+      client.controller.enqueue(sseFrame(event.type, event));
+    } catch (error) {
+      logger.warn(
+        { err: error, eventId: event.eventId, ownerUserId: event.ownerUserId },
+        "Failed to deliver SSE event",
+      );
+      unregisterSseClient(event.ownerUserId, client);
+    }
+  }
+}
+
+async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
+  await Promise.all(
+    events.map(async (event) => {
+      try {
+        await publishRealtimeEvent(redis, event);
+      } catch (error) {
+        logger.warn(
+          { err: error, eventId: event.eventId, type: event.type },
+          "Failed to publish realtime event",
+        );
+      }
+    }),
+  );
+}
+
+function queuedRunEventForJob(job: RunQueueJob): RunEvent {
+  return {
+    type: "run.queued",
+    runId: job.run.id,
+    agentId: job.run.agentId,
+    daemonDeviceId: job.run.daemonDeviceId,
+    createdAt: job.run.createdAt,
+  };
+}
+
+function realtimeEventsForCreatedRuns(input: {
+  conversation: Conversation;
+  jobs: RunQueueJob[];
+  messages: ConversationMessage[];
+  ownerUserId: string;
+}): RealtimeEvent[] {
+  return [
+    createRealtimeEvent({
+      conversation: input.conversation,
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+      type: "conversation.updated",
+    }),
+    ...input.messages.map((message) =>
+      createRealtimeEvent({
+        conversationId: message.conversationId,
+        message,
+        ownerUserId: input.ownerUserId,
+        type: "conversation.message.created" as const,
+      }),
+    ),
+    ...input.jobs.flatMap((job) => {
+      const queuedEvent = queuedRunEventForJob(job);
+
+      return [
+        createRealtimeEvent({
+          conversationId: input.conversation.id,
+          ownerUserId: input.ownerUserId,
+          run: job.run,
+          type: "run.updated" as const,
+        }),
+        createRealtimeEvent({
+          conversationId: input.conversation.id,
+          event: queuedEvent,
+          ownerUserId: input.ownerUserId,
+          runId: job.run.id,
+          type: "run.event.created" as const,
+        }),
+      ];
+    }),
+  ];
+}
+
 await redis.connect();
+await realtimeSubscriber.connect();
+await subscribeRealtimeEvents(realtimeSubscriber, (event) => {
+  deliverRealtimeEvent(event);
+});
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && runtimeKinds.has(value as RuntimeKind);
@@ -482,6 +609,67 @@ app.get(
 // 5) health
 app.openapi(healthRoute, (c) => {
   return c.json({ ok: true }, 200);
+});
+
+app.use("/events", requireAuth);
+app.get("/events", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const client: SseClient = {
+    controller: undefined as unknown as ReadableStreamDefaultController<Uint8Array>,
+    heartbeat: null,
+    id: randomUUID(),
+  };
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      client.controller = controller;
+      const clients = sseClientsByUserId.get(user.id) ?? new Set<SseClient>();
+      clients.add(client);
+      sseClientsByUserId.set(user.id, clients);
+      controller.enqueue(
+        sseFrame("connected", {
+          connectedAt: new Date().toISOString(),
+          clientId: client.id,
+        }),
+      );
+      client.heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(
+            sseFrame("heartbeat", {
+              sentAt: new Date().toISOString(),
+            }),
+          );
+        } catch (error) {
+          logger.warn({ err: error, clientId: client.id }, "SSE heartbeat failed");
+          unregisterSseClient(user.id, client);
+        }
+      }, 25000);
+    },
+    cancel() {
+      unregisterSseClient(user.id, client);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream; charset=utf-8",
+      "x-accel-buffering": "no",
+    },
+  });
 });
 
 app.use("/daemon/devices", requireAuth);
@@ -1632,6 +1820,17 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
     const queueMessageId = await enqueueRunJob(redis, job);
     const assistant = result.messages.assistant;
+    await publishRealtimeEvents(
+      realtimeEventsForCreatedRuns({
+        conversation: result.conversation,
+        jobs: [job],
+        messages: [
+          result.messages.user,
+          ...(assistant === undefined ? [] : [assistant]),
+        ],
+        ownerUserId: user.id,
+      }),
+    );
 
     return c.json(
       {
@@ -1759,6 +1958,17 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     }
 
     const queueMessageId = await enqueueRunJob(redis, job);
+    await publishRealtimeEvents(
+      realtimeEventsForCreatedRuns({
+        conversation: result.conversation,
+        jobs: [job],
+        messages: [
+          result.messages.user,
+          ...result.messages.assistants,
+        ],
+        ownerUserId: user.id,
+      }),
+    );
 
     return c.json(
       {
@@ -1876,6 +2086,17 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
   const queueMessageIds = await Promise.all(
     jobs.map((job) => enqueueRunJob(redis, job)),
+  );
+  await publishRealtimeEvents(
+    realtimeEventsForCreatedRuns({
+      conversation: result.conversation,
+      jobs,
+      messages: [
+        result.messages.user,
+        ...result.messages.assistants,
+      ],
+      ownerUserId: user.id,
+    }),
   );
 
   return c.json(
@@ -2154,6 +2375,22 @@ for (const actionType of ["apply", "preview", "publish"] as const) {
     }
 
     await enqueueArtifactActionJob(redis, result.job);
+    const artifactRecord = await getConversationArtifactForUser(db, {
+      artifactId: result.action.artifactId,
+      ownerUserId: user.id,
+    });
+
+    if (artifactRecord !== null) {
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          action: result.action,
+          artifactId: result.action.artifactId,
+          conversationId: artifactRecord.artifact.conversationId,
+          ownerUserId: user.id,
+          type: "artifact.action.updated",
+        }),
+      ]);
+    }
 
     return c.json({ action: result.action }, 202);
   });
@@ -2375,7 +2612,7 @@ app.post("/runs", async (c) => {
     ownerUserId: user.id,
     job,
   });
-  await appendRunEvent(db, {
+  const appendResult = await appendRunEvent(db, {
     type: "run.queued",
     runId: job.run.id,
     agentId: job.run.agentId,
@@ -2383,6 +2620,7 @@ app.post("/runs", async (c) => {
     createdAt: now,
   });
   const queueMessageId = await enqueueRunJob(redis, job);
+  await publishRealtimeEvents(appendResult.realtimeEvents);
 
   return c.json(
     {

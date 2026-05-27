@@ -1,6 +1,7 @@
 import type {
   AgentRun,
   AgentRunSummary,
+  RealtimeEvent,
   RunEvent,
   RunId,
 } from "@agent-hub/core";
@@ -17,6 +18,7 @@ import {
   appendRunEventToConversationMessage,
   type AppendRunEventResult,
 } from "../conversations/index.js";
+import { createRealtimeEvent } from "../realtime/index.js";
 
 export async function createRunRecord(
   db: Db,
@@ -92,6 +94,8 @@ export async function appendRunEvent(
   event: RunEvent,
   options: Parameters<typeof appendRunEventToConversationMessage>[2] = {},
 ): Promise<AppendRunEventResult> {
+  const realtimeEvents: RealtimeEvent[] = [];
+
   await db.insert(runEvents).values({
     runId: event.runId,
     eventType: event.type,
@@ -106,15 +110,46 @@ export async function appendRunEvent(
         ? event.status
         : undefined;
 
-  await db
+  const [run] = await db
     .update(runs)
     .set({
       ...(nextStatus === undefined ? {} : { status: nextStatus }),
       updatedAt: new Date(event.createdAt),
     })
-    .where(eq(runs.id, event.runId));
+    .where(eq(runs.id, event.runId))
+    .returning();
 
-  return appendRunEventToConversationMessage(db, event, options);
+  if (run !== undefined) {
+    realtimeEvents.push(
+      createRealtimeEvent({
+        conversationId: run.conversationId ?? undefined,
+        event,
+        ownerUserId: run.ownerUserId,
+        runId: event.runId,
+        type: "run.event.created",
+      }),
+      createRealtimeEvent({
+        conversationId: run.conversationId ?? undefined,
+        ownerUserId: run.ownerUserId,
+        run: toAgentRun(run),
+        type: "run.updated",
+      }),
+    );
+  }
+
+  const conversationResult = await appendRunEventToConversationMessage(
+    db,
+    event,
+    options,
+  );
+
+  return {
+    dispatchJobs: conversationResult.dispatchJobs,
+    realtimeEvents: [
+      ...realtimeEvents,
+      ...conversationResult.realtimeEvents,
+    ],
+  };
 }
 
 export async function upsertDaemonDevice(

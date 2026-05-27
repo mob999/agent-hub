@@ -3,4 +3,5 @@ export * from "./artifact.js";
 export * from "./conversation.js";
 export * from "./daemon.js";
 export * from "./mcp.js";
+export * from "./realtime.js";
 export * from "./run.js";

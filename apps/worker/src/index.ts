@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 
 import { loadWorkerEnv } from "@agent-hub/config";
+import type { RealtimeEvent } from "@agent-hub/core";
 import { createDb } from "@agent-hub/db";
 import {
   ackAgentProvisioningQueueMessage,
@@ -8,8 +9,9 @@ import {
   ackRunQueueMessage,
   appendRunEvent,
   completeConversationArtifactAction,
-  createLogger,
   createAgentHubRedisClient,
+  createLogger,
+  createRealtimeEvent,
   enqueueRunJob,
   ensureAgentProvisioningQueueGroup,
   ensureArtifactActionQueueGroup,
@@ -19,6 +21,7 @@ import {
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
   persistConversationArtifactUpload,
+  publishRealtimeEvent,
   readAgentProvisioningQueueMessages,
   readArtifactActionQueueMessages,
   readRunQueueMessages,
@@ -38,6 +41,21 @@ const logger = createLogger({
     service: "worker",
   },
 });
+
+async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
+  await Promise.all(
+    events.map(async (event) => {
+      try {
+        await publishRealtimeEvent(redis, event);
+      } catch (error) {
+        logger.warn(
+          { err: error, eventId: event.eventId, type: event.type },
+          "Failed to publish realtime event",
+        );
+      }
+    }),
+  );
+}
 const gateway = new DaemonGateway({
   daemonToken: env.AGENTHUB_DAEMON_TOKEN,
   logger,
@@ -71,10 +89,11 @@ const gateway = new DaemonGateway({
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
     });
+    await publishRealtimeEvents(result.realtimeEvents);
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
   },
-  onArtifactUpload: async (message) =>
-    persistConversationArtifactUpload(db, {
+  onArtifactUpload: async (message) => {
+    const artifact = await persistConversationArtifactUpload(db, {
       contentBase64: message.contentBase64,
       filename: message.filename,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
@@ -85,14 +104,36 @@ const gateway = new DaemonGateway({
       storageRoot: env.AGENTHUB_STORAGE_ROOT,
       taskId: message.taskId,
       title: message.title,
-    }),
+    });
+    await publishRealtimeEvents([
+      createRealtimeEvent({
+        artifact,
+        conversationId: artifact.conversationId,
+        ownerUserId: artifact.ownerUserId,
+        type: "artifact.created",
+      }),
+    ]);
+
+    return artifact;
+  },
   onArtifactActionCompleted: async (message) => {
-    await completeConversationArtifactAction(db, {
+    const result = await completeConversationArtifactAction(db, {
       actionId: message.actionId,
       error: message.error,
       result: message.result,
       status: message.status,
     });
+    if (result !== null) {
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          action: result.action,
+          artifactId: result.action.artifactId,
+          conversationId: result.conversationId,
+          ownerUserId: result.ownerUserId,
+          type: "artifact.action.updated",
+        }),
+      ]);
+    }
   },
 });
 const server = createServer((request, response) => {
@@ -212,6 +253,7 @@ while (!shuttingDown) {
           publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
         },
       );
+      await publishRealtimeEvents(result.realtimeEvents);
       await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
     }
 
@@ -245,18 +287,40 @@ while (!shuttingDown) {
       });
 
       if (assignment === null) {
-        await completeConversationArtifactAction(db, {
+        const result = await completeConversationArtifactAction(db, {
           actionId: message.job.actionId,
           error: "Artifact action assignment was not found.",
           status: "failed",
         });
+        if (result !== null) {
+          await publishRealtimeEvents([
+            createRealtimeEvent({
+              action: result.action,
+              artifactId: result.action.artifactId,
+              conversationId: result.conversationId,
+              ownerUserId: result.ownerUserId,
+              type: "artifact.action.updated",
+            }),
+          ]);
+        }
         await ackArtifactActionQueueMessage(redis, message.id);
         continue;
       }
 
-      await markConversationArtifactActionRunning(db, {
+      const runningAction = await markConversationArtifactActionRunning(db, {
         actionId: message.job.actionId,
       });
+      if (runningAction !== null) {
+        await publishRealtimeEvents([
+          createRealtimeEvent({
+            action: runningAction.action,
+            artifactId: runningAction.action.artifactId,
+            conversationId: runningAction.conversationId,
+            ownerUserId: runningAction.ownerUserId,
+            type: "artifact.action.updated",
+          }),
+        ]);
+      }
 
       const assigned = gateway.assignArtifactAction({
         type: "artifact.action.assigned",
@@ -272,11 +336,22 @@ while (!shuttingDown) {
       });
 
       if (!assigned) {
-        await completeConversationArtifactAction(db, {
+        const result = await completeConversationArtifactAction(db, {
           actionId: message.job.actionId,
           error: `Daemon ${assignment.daemonDeviceId} is not connected.`,
           status: "failed",
         });
+        if (result !== null) {
+          await publishRealtimeEvents([
+            createRealtimeEvent({
+              action: result.action,
+              artifactId: result.action.artifactId,
+              conversationId: result.conversationId,
+              ownerUserId: result.ownerUserId,
+              type: "artifact.action.updated",
+            }),
+          ]);
+        }
       }
 
       await ackArtifactActionQueueMessage(redis, message.id);
@@ -292,11 +367,22 @@ while (!shuttingDown) {
           : "Failed to dispatch artifact action to daemon",
       );
     } catch (error) {
-      await completeConversationArtifactAction(db, {
+      const result = await completeConversationArtifactAction(db, {
         actionId: message.job.actionId,
         error: error instanceof Error ? error.message : String(error),
         status: "failed",
       });
+      if (result !== null) {
+        await publishRealtimeEvents([
+          createRealtimeEvent({
+            action: result.action,
+            artifactId: result.action.artifactId,
+            conversationId: result.conversationId,
+            ownerUserId: result.ownerUserId,
+            type: "artifact.action.updated",
+          }),
+        ]);
+      }
       await ackArtifactActionQueueMessage(redis, message.id);
       logger.error(
         {

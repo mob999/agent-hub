@@ -17,6 +17,7 @@ import type {
   ConversationArtifactDetails,
   ConversationArtifactRevision,
   ConversationTask,
+  RealtimeEvent,
   RunEvent,
 } from "@agent-hub/core";
 import {
@@ -51,6 +52,7 @@ import {
   readArtifactContent,
 } from "../artifacts/index.js";
 import type { ArtifactActionQueueJob, RunQueueJob } from "../queue/index.js";
+import { createRealtimeEvent } from "../realtime/index.js";
 
 export const defaultGroupConversationKey = "all";
 export const defaultGroupConversationTitle = "all";
@@ -101,6 +103,7 @@ export type RestoreGroupConversationResult =
 
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
+  realtimeEvents: RealtimeEvent[];
 }
 
 export interface AppendRunEventOptions {
@@ -1592,14 +1595,27 @@ export async function getArtifactActionAssignment(
 export async function markConversationArtifactActionRunning(
   db: Db,
   input: { actionId: string },
-): Promise<void> {
-  await db
+): Promise<{
+  action: ConversationArtifactAction;
+  conversationId: string;
+  ownerUserId: string;
+} | null> {
+  const [action] = await db
     .update(conversationArtifactActions)
     .set({
       status: "running",
       updatedAt: new Date(),
     })
-    .where(eq(conversationArtifactActions.id, input.actionId));
+    .where(eq(conversationArtifactActions.id, input.actionId))
+    .returning();
+
+  return action === undefined
+    ? null
+    : {
+        action: toConversationArtifactAction(action),
+        conversationId: action.conversationId,
+        ownerUserId: action.ownerUserId,
+      };
 }
 
 export async function completeConversationArtifactAction(
@@ -1610,8 +1626,12 @@ export async function completeConversationArtifactAction(
     result?: Record<string, unknown>;
     status: "succeeded" | "failed" | "cancelled";
   },
-): Promise<void> {
-  await db
+): Promise<{
+  action: ConversationArtifactAction;
+  conversationId: string;
+  ownerUserId: string;
+} | null> {
+  const [action] = await db
     .update(conversationArtifactActions)
     .set({
       status: input.status,
@@ -1619,7 +1639,16 @@ export async function completeConversationArtifactAction(
       result: input.result,
       updatedAt: new Date(),
     })
-    .where(eq(conversationArtifactActions.id, input.actionId));
+    .where(eq(conversationArtifactActions.id, input.actionId))
+    .returning();
+
+  return action === undefined
+    ? null
+    : {
+        action: toConversationArtifactAction(action),
+        conversationId: action.conversationId,
+        ownerUserId: action.ownerUserId,
+      };
 }
 
 export async function persistConversationArtifactUpload(
@@ -2444,12 +2473,12 @@ async function createMentionedGroupChatRuns(
     senderAgentId: string;
     triggerMessageId: string;
   },
-): Promise<RunQueueJob[]> {
+): Promise<{ dispatchJobs: RunQueueJob[]; realtimeEvents: RealtimeEvent[] }> {
   if (
     input.conversation.type !== "group" ||
     input.conversation.status !== "active"
   ) {
-    return [];
+    return { dispatchJobs: [], realtimeEvents: [] };
   }
 
   const agentRefs = await listConversationAgentRefs(db, input.conversation);
@@ -2458,7 +2487,7 @@ async function createMentionedGroupChatRuns(
   });
 
   if (mentionedAgentIds.length === 0) {
-    return [];
+    return { dispatchJobs: [], realtimeEvents: [] };
   }
 
   const priorMessages =
@@ -2475,6 +2504,7 @@ async function createMentionedGroupChatRuns(
     .orderBy(asc(conversationTasks.createdAt));
   const agentHubMcpTasks = toMcpTaskListFromRows(taskRows);
   const dispatchJobs: RunQueueJob[] = [];
+  const realtimeEvents: RealtimeEvent[] = [];
 
   for (const agentId of mentionedAgentIds) {
     const runAgent = await getRunnableAgentForUser(db, {
@@ -2531,6 +2561,19 @@ async function createMentionedGroupChatRuns(
       daemonDeviceId: runAgent.daemonDeviceId,
       createdAt: input.eventCreatedAt,
     };
+    const runEvent = createRealtimeEvent({
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+      run: job.run,
+      type: "run.updated",
+    });
+    const queuedRealtimeEvent = createRealtimeEvent({
+      conversationId: input.conversation.id,
+      event: queuedEvent,
+      ownerUserId: input.ownerUserId,
+      runId,
+      type: "run.event.created",
+    });
 
     await db.transaction(async (tx) => {
       await tx.insert(runs).values({
@@ -2556,9 +2599,10 @@ async function createMentionedGroupChatRuns(
     });
 
     dispatchJobs.push(job);
+    realtimeEvents.push(runEvent, queuedRealtimeEvent);
   }
 
-  return dispatchJobs;
+  return { dispatchJobs, realtimeEvents };
 }
 
 async function persistVisibleAgentMessageAndDispatchMentions(
@@ -2572,7 +2616,11 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     ownerUserId: string;
     runId: string;
   },
-): Promise<{ dispatchJobs: RunQueueJob[]; message: ConversationMessageRow }> {
+): Promise<{
+  dispatchJobs: RunQueueJob[];
+  message: ConversationMessageRow;
+  realtimeEvents: RealtimeEvent[];
+}> {
   const message = await insertCompletedAgentMessage(db, {
     agentId: input.agentId,
     content: input.content,
@@ -2580,7 +2628,7 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     createdAt: input.createdAt,
     runId: input.runId,
   });
-  const dispatchJobs = await createMentionedGroupChatRuns(db, {
+  const mentionResult = await createMentionedGroupChatRuns(db, {
     content: input.content,
     conversation: input.conversation,
     createdAt: input.createdAt,
@@ -2589,8 +2637,22 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     senderAgentId: input.agentId,
     triggerMessageId: message.id,
   });
+  const realtimeEvents: RealtimeEvent[] = [
+    createRealtimeEvent({
+      conversationId: input.conversation.id,
+      message: toConversationMessage(message),
+      ownerUserId: input.ownerUserId,
+      type: "conversation.message.created",
+    }),
+    createRealtimeEvent({
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+      type: "conversation.updated",
+    }),
+    ...mentionResult.realtimeEvents,
+  ];
 
-  return { dispatchJobs, message };
+  return { dispatchJobs: mentionResult.dispatchJobs, message, realtimeEvents };
 }
 
 function isTerminalTaskStatus(status: string): boolean {
@@ -2607,6 +2669,7 @@ async function maybeCreateFinalizationRun(
     dispatchJobs: RunQueueJob[];
     publicApiBaseUrl?: string;
     publicWebBaseUrl?: string;
+    realtimeEvents?: RealtimeEvent[];
   },
 ): Promise<void> {
   const taskRows = await db
@@ -2794,6 +2857,21 @@ async function maybeCreateFinalizationRun(
       .where(eq(conversationTasks.creatorRunId, input.creatorRunId));
 
     input.dispatchJobs.push(job);
+    input.realtimeEvents?.push(
+      createRealtimeEvent({
+        conversationId: conversation.id,
+        ownerUserId: firstTask.ownerUserId,
+        run: job.run,
+        type: "run.updated",
+      }),
+      createRealtimeEvent({
+        conversationId: conversation.id,
+        event: queuedEvent,
+        ownerUserId: firstTask.ownerUserId,
+        runId,
+        type: "run.event.created",
+      }),
+    );
   });
 }
 
@@ -2803,6 +2881,8 @@ export async function appendRunEventToConversationMessage(
   options: AppendRunEventOptions = {},
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
+  const realtimeEvents: RealtimeEvent[] = [];
+  const result = (): AppendRunEventResult => ({ dispatchJobs, realtimeEvents });
 
   if (event.type === "run.started" || event.type === "run.completed") {
     const updatedAt = new Date(event.createdAt);
@@ -2818,8 +2898,21 @@ export async function appendRunEventToConversationMessage(
       })
       .where(eq(conversationTasks.assigneeRunId, event.runId))
       .returning({
+        conversationId: conversationTasks.conversationId,
         creatorRunId: conversationTasks.creatorRunId,
+        id: conversationTasks.id,
+        ownerUserId: conversationTasks.ownerUserId,
       });
+    realtimeEvents.push(
+      ...updatedTasks.map((task) =>
+        createRealtimeEvent({
+          conversationId: task.conversationId,
+          ownerUserId: task.ownerUserId,
+          taskId: task.id,
+          type: "task.updated" as const,
+        }),
+      ),
+    );
 
     if (event.type === "run.completed") {
       for (const creatorRunId of compactUniqueStrings(
@@ -2831,6 +2924,7 @@ export async function appendRunEventToConversationMessage(
           dispatchJobs,
           publicApiBaseUrl: options.publicApiBaseUrl,
           publicWebBaseUrl: options.publicWebBaseUrl,
+          realtimeEvents,
         });
       }
     }
@@ -2841,7 +2935,7 @@ export async function appendRunEventToConversationMessage(
       const input = readCreateTaskToolInput(event.input);
 
       if (input === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [run] = await db
@@ -2855,7 +2949,7 @@ export async function appendRunEventToConversationMessage(
         .limit(1);
 
       if (run === undefined || run.conversationId === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [conversation] = await db
@@ -2874,7 +2968,7 @@ export async function appendRunEventToConversationMessage(
         conversation === undefined ||
         conversation.orchestratorAgentId !== run.agentId
       ) {
-        return { dispatchJobs };
+        return result();
       }
 
       const assigneeAgentId = await resolveConversationAgentReference(db, {
@@ -2883,7 +2977,7 @@ export async function appendRunEventToConversationMessage(
       });
 
       if (assigneeAgentId === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const isSelfAssigned = assigneeAgentId === run.agentId;
@@ -2895,11 +2989,11 @@ export async function appendRunEventToConversationMessage(
           conversation,
         }))
       ) {
-        return { dispatchJobs };
+        return result();
       }
 
       const createdAt = new Date(event.createdAt);
-      await db
+      const [createdTask] = await db
         .insert(conversationTasks)
         .values({
           id: input.taskId ?? randomUUID(),
@@ -2915,26 +3009,38 @@ export async function appendRunEventToConversationMessage(
           createdAt,
           updatedAt: createdAt,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: conversationTasks.id });
 
-      return { dispatchJobs };
+      if (createdTask !== undefined) {
+        realtimeEvents.push(
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            ownerUserId: run.ownerUserId,
+            taskId: createdTask.id,
+            type: "task.updated",
+          }),
+        );
+      }
+
+      return result();
     }
 
     if (event.name === "upload_artifact") {
       const input = readUploadArtifactToolInput(event.input);
 
       if (input === null) {
-        return { dispatchJobs };
+        return result();
       }
 
-      return { dispatchJobs };
+      return result();
     }
 
     if (event.name === "complete_task") {
       const input = readCompleteTaskToolInput(event.input);
 
       if (input === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [run] = await db
@@ -2948,7 +3054,7 @@ export async function appendRunEventToConversationMessage(
         .limit(1);
 
       if (run === undefined || run.conversationId === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const updatedAt = new Date(event.createdAt);
@@ -2966,7 +3072,7 @@ export async function appendRunEventToConversationMessage(
         .limit(1);
 
       if (task === undefined) {
-        return { dispatchJobs };
+        return result();
       }
 
       const artifactIds = input.artifactIds ?? [];
@@ -2985,7 +3091,7 @@ export async function appendRunEventToConversationMessage(
           );
 
         if (artifactRows.length !== artifactIds.length) {
-          return { dispatchJobs };
+          return result();
         }
       }
 
@@ -2999,6 +3105,14 @@ export async function appendRunEventToConversationMessage(
           updatedAt,
         })
         .where(eq(conversationTasks.id, task.id));
+      realtimeEvents.push(
+        createRealtimeEvent({
+          conversationId: run.conversationId,
+          ownerUserId: run.ownerUserId,
+          taskId: task.id,
+          type: "task.updated",
+        }),
+      );
 
       await maybeCreateFinalizationRun(db, {
         creatorRunId: task.creatorRunId,
@@ -3006,16 +3120,17 @@ export async function appendRunEventToConversationMessage(
         dispatchJobs,
         publicApiBaseUrl: options.publicApiBaseUrl,
         publicWebBaseUrl: options.publicWebBaseUrl,
+        realtimeEvents,
       });
 
-      return { dispatchJobs };
+      return result();
     }
 
     if (event.name === "send_message_to_group") {
       const input = readSendMessageToGroupToolInput(event.input);
 
       if (input === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [run] = await db
@@ -3028,7 +3143,7 @@ export async function appendRunEventToConversationMessage(
         .limit(1);
 
       if (run === undefined) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [targetConversation] = await db
@@ -3051,10 +3166,10 @@ export async function appendRunEventToConversationMessage(
           conversation: targetConversation,
         }))
       ) {
-        return { dispatchJobs };
+        return result();
       }
 
-      const result = await persistVisibleAgentMessageAndDispatchMentions(db, {
+      const persisted = await persistVisibleAgentMessageAndDispatchMentions(db, {
         agentId: run.agentId,
         content: input.content,
         conversation: targetConversation,
@@ -3063,16 +3178,17 @@ export async function appendRunEventToConversationMessage(
         ownerUserId: run.ownerUserId,
         runId: event.runId,
       });
-      dispatchJobs.push(...result.dispatchJobs);
+      dispatchJobs.push(...persisted.dispatchJobs);
+      realtimeEvents.push(...persisted.realtimeEvents);
 
-      return { dispatchJobs };
+      return result();
     }
 
     if (event.name === "send_message_to_user") {
       const input = readSendMessageToUserToolInput(event.input);
 
       if (input === null) {
-        return { dispatchJobs };
+        return result();
       }
 
       const [run] = await db
@@ -3085,7 +3201,7 @@ export async function appendRunEventToConversationMessage(
         .limit(1);
 
       if (run === undefined) {
-        return { dispatchJobs };
+        return result();
       }
 
       const conversation = await ensureDirectConversation(db, {
@@ -3094,34 +3210,47 @@ export async function appendRunEventToConversationMessage(
       });
 
       if (conversation === null) {
-        return { dispatchJobs };
+        return result();
       }
 
-      await insertCompletedAgentMessage(db, {
+      const message = await insertCompletedAgentMessage(db, {
         agentId: run.agentId,
         content: input.content,
         conversationId: conversation.id,
         createdAt: new Date(event.createdAt),
         runId: event.runId,
       });
+      realtimeEvents.push(
+        createRealtimeEvent({
+          conversationId: conversation.id,
+          ownerUserId: run.ownerUserId,
+          type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: conversation.id,
+          message: toConversationMessage(message),
+          ownerUserId: run.ownerUserId,
+          type: "conversation.message.created",
+        }),
+      );
 
-      return { dispatchJobs };
+      return result();
     }
 
     if (event.name !== "send_message") {
-      return { dispatchJobs };
+      return result();
     }
 
     const input = readSendMessageToolInput(event.input);
 
     if (input === null) {
-      return { dispatchJobs };
+      return result();
     }
 
     const content = input.content.trim();
 
     if (content.length === 0) {
-      return { dispatchJobs };
+      return result();
     }
 
     const [run] = await db
@@ -3135,7 +3264,7 @@ export async function appendRunEventToConversationMessage(
       .limit(1);
 
     if (run === undefined || run.conversationId === null) {
-      return { dispatchJobs };
+      return result();
     }
 
     const conversationId = run.conversationId;
@@ -3147,13 +3276,13 @@ export async function appendRunEventToConversationMessage(
       .limit(1);
 
     if (conversation === undefined) {
-      return { dispatchJobs };
+      return result();
     }
 
     const taskIds = compactUniqueStrings(input.taskIds ?? []);
 
     if (taskIds.length === 0) {
-      const result = await persistVisibleAgentMessageAndDispatchMentions(db, {
+      const persisted = await persistVisibleAgentMessageAndDispatchMentions(db, {
         agentId: run.agentId,
         content,
         conversation,
@@ -3163,8 +3292,9 @@ export async function appendRunEventToConversationMessage(
         runId: event.runId,
       });
 
-      dispatchJobs.push(...result.dispatchJobs);
-      return { dispatchJobs };
+      dispatchJobs.push(...persisted.dispatchJobs);
+      realtimeEvents.push(...persisted.realtimeEvents);
+      return result();
     }
 
     await db.transaction(async (tx) => {
@@ -3295,6 +3425,27 @@ export async function appendRunEventToConversationMessage(
           .where(eq(conversationTasks.id, task.id));
 
         dispatchJobs.push(job);
+        realtimeEvents.push(
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            ownerUserId: run.ownerUserId,
+            run: job.run,
+            type: "run.updated",
+          }),
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            event: queuedEvent,
+            ownerUserId: run.ownerUserId,
+            runId,
+            type: "run.event.created",
+          }),
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            ownerUserId: run.ownerUserId,
+            taskId: task.id,
+            type: "task.updated",
+          }),
+        );
       }
 
       await tx
@@ -3304,15 +3455,28 @@ export async function appendRunEventToConversationMessage(
           updatedAt: createdAt,
         })
         .where(eq(conversations.id, conversation.id));
+      realtimeEvents.push(
+        createRealtimeEvent({
+          conversationId: conversation.id,
+          ownerUserId: run.ownerUserId,
+          type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: conversation.id,
+          message: toConversationMessage(message),
+          ownerUserId: run.ownerUserId,
+          type: "conversation.message.created",
+        }),
+      );
     });
 
-    return { dispatchJobs };
+    return result();
   }
 
   const assistantContent = getAssistantMessageContent(event);
 
   if (assistantContent === undefined && event.type !== "run.completed") {
-    return { dispatchJobs };
+    return result();
   }
 
   const updatedAt = new Date(event.createdAt);
@@ -3342,13 +3506,17 @@ export async function appendRunEventToConversationMessage(
         eq(conversationMessages.status, "streaming"),
       ),
     )
-    .returning({
-      conversationId: conversationMessages.conversationId,
-    });
+    .returning();
 
   if (message === undefined) {
-    return { dispatchJobs };
+    return result();
   }
+
+  const [conversation] = await db
+    .select({ ownerUserId: conversations.ownerUserId })
+    .from(conversations)
+    .where(eq(conversations.id, message.conversationId))
+    .limit(1);
 
   await db
     .update(conversations)
@@ -3357,6 +3525,21 @@ export async function appendRunEventToConversationMessage(
       updatedAt,
     })
     .where(eq(conversations.id, message.conversationId));
+  if (conversation !== undefined) {
+    realtimeEvents.push(
+      createRealtimeEvent({
+        conversationId: message.conversationId,
+        ownerUserId: conversation.ownerUserId,
+        type: "conversation.updated",
+      }),
+      createRealtimeEvent({
+        conversationId: message.conversationId,
+        message: toConversationMessage(message),
+        ownerUserId: conversation.ownerUserId,
+        type: "conversation.message.created",
+      }),
+    );
+  }
 
-  return { dispatchJobs };
+  return result();
 }

@@ -12,6 +12,7 @@ import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import {
   ApiRequestError,
   apiRequest,
+  apiUrl,
   type ArchiveAgentResponse,
   type ArchiveGroupConversationResponse,
   type AgentDetails,
@@ -25,6 +26,7 @@ import {
   type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
+  type RealtimeEvent,
   type ConversationMention,
   type RuntimeKind,
   type RunEvent,
@@ -512,14 +514,9 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
       void loadConversations()
       void loadArchivedConversations()
     }, 0)
-    const timer = window.setInterval(() => {
-      void loadConversations()
-      void loadArchivedConversations()
-    }, 10000)
 
     return () => {
       window.clearTimeout(initialTimer)
-      window.clearInterval(timer)
     }
   }, [loadArchivedConversations, loadConversations, user])
 
@@ -584,24 +581,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   }, [agents, loadAgents])
 
   useEffect(() => {
-    const activeRunIds = runs
-      .filter((localRun) => localRun.run.status === 'queued' || localRun.run.status === 'running')
-      .map((localRun) => localRun.run.id)
-
-    if (activeRunIds.length === 0) {
-      return
-    }
-
-    const timer = window.setInterval(() => {
-      activeRunIds.forEach((runId) => {
-        void refreshRun(runId)
-      })
-    }, 2000)
-
-    return () => window.clearInterval(timer)
-  }, [refreshRun, runs])
-
-  useEffect(() => {
     if (selectedRunId === null) {
       return
     }
@@ -612,32 +591,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
 
     return () => window.clearTimeout(timer)
   }, [refreshRun, selectedRunId])
-
-  useEffect(() => {
-    const hasActiveConversationRuns =
-      activeConversationId !== null &&
-      runs.some(
-        (localRun) =>
-          localRun.channelId === activeConversationId &&
-          (localRun.run.status === 'queued' || localRun.run.status === 'running'),
-      )
-
-    if (
-      activeConversationId === null ||
-      (!hasActiveConversationRuns &&
-        !activeConversationMessages.some((message) => message.status === 'streaming'))
-    ) {
-      return
-    }
-
-    const timer = window.setInterval(() => {
-      void loadMessages(activeConversationId)
-      void loadTasks(activeConversationId)
-      void loadArtifacts(activeConversationId)
-    }, 2000)
-
-    return () => window.clearInterval(timer)
-  }, [activeConversationId, activeConversationMessages, loadArtifacts, loadMessages, loadTasks, runs])
 
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
@@ -786,6 +739,183 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
       void refreshRun(localRun.run.id)
     })
   }
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    const refreshAfterReconnect = () => {
+      void loadConversations()
+      void loadArchivedConversations()
+      void loadRuns()
+
+      if (activeConversationId !== null) {
+        void loadMessages(activeConversationId)
+        void loadTasks(activeConversationId)
+        void loadArtifacts(activeConversationId)
+      }
+    }
+    const upsertMessage = (message: ConversationMessage) => {
+      setMessagesByConversation((current) => {
+        const currentMessages = current[message.conversationId] ?? []
+        const nextMessages = [
+          ...currentMessages.filter((item) => item.id !== message.id),
+          message,
+        ].sort((first, second) =>
+          new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
+        )
+
+        return {
+          ...current,
+          [message.conversationId]: nextMessages,
+        }
+      })
+    }
+    const upsertRun = (event: Extract<RealtimeEvent, { type: 'run.updated' }>) => {
+      setRuns((current) => {
+        const existing = current.find((localRun) => localRun.run.id === event.run.id)
+        const runAgent = agents.find((agent) => agent.agent.id === event.run.agentId)
+        const nextRun: LocalRun = {
+          channelId: event.conversationId ?? existing?.channelId ?? 'runs',
+          agentName: runAgent?.agent.name ?? existing?.agentName,
+          prompt: existing?.prompt ?? '',
+          run: event.run,
+        }
+
+        return [
+          nextRun,
+          ...current.filter((localRun) => localRun.run.id !== event.run.id),
+        ]
+      })
+    }
+    const upsertRunEvent = (event: Extract<RealtimeEvent, { type: 'run.event.created' }>) => {
+      setEventsByRun((current) => {
+        const currentEvents = current[event.runId] ?? []
+        const exists = currentEvents.some(
+          (item) =>
+            item.type === event.event.type &&
+            item.createdAt === event.event.createdAt &&
+            item.runId === event.event.runId,
+        )
+
+        return {
+          ...current,
+          [event.runId]: exists ? currentEvents : [...currentEvents, event.event],
+        }
+      })
+    }
+    const upsertTask = (task: ConversationTask) => {
+      setTasksByConversation((current) => {
+        const currentTasks = current[task.conversationId] ?? []
+
+        return {
+          ...current,
+          [task.conversationId]: [
+            task,
+            ...currentTasks.filter((item) => item.id !== task.id),
+          ],
+        }
+      })
+    }
+    const upsertArtifact = (artifact: ConversationArtifact) => {
+      setArtifactsByConversation((current) => {
+        const currentArtifacts = current[artifact.conversationId] ?? []
+
+        return {
+          ...current,
+          [artifact.conversationId]: [
+            artifact,
+            ...currentArtifacts.filter((item) => item.id !== artifact.id),
+          ],
+        }
+      })
+    }
+    const handleRealtimeEvent = (event: RealtimeEvent) => {
+      switch (event.type) {
+        case 'conversation.updated':
+          if (event.conversation !== undefined) {
+            setConversations((current) => [
+              event.conversation as Conversation,
+              ...current.filter((conversation) => conversation.id !== event.conversationId),
+            ])
+          } else {
+            setConversations((current) => {
+              const existing = current.find((conversation) => conversation.id === event.conversationId)
+
+              if (existing === undefined) {
+                return current
+              }
+
+              return [
+                {
+                  ...existing,
+                  lastMessageAt: event.createdAt,
+                  updatedAt: event.createdAt,
+                },
+                ...current.filter((conversation) => conversation.id !== event.conversationId),
+              ]
+            })
+          }
+          break
+        case 'conversation.message.created':
+          upsertMessage(event.message)
+          break
+        case 'run.updated':
+          upsertRun(event)
+          break
+        case 'run.event.created':
+          upsertRunEvent(event)
+          break
+        case 'task.updated':
+          if (event.task !== undefined) {
+            upsertTask(event.task)
+          } else {
+            void loadTasks(event.conversationId)
+          }
+          break
+        case 'artifact.created':
+          upsertArtifact(event.artifact)
+          break
+        case 'artifact.action.updated':
+          void loadArtifacts(event.conversationId)
+          break
+      }
+    }
+    const source = new EventSource(apiUrl('/events'), { withCredentials: true })
+    const eventTypes: RealtimeEvent['type'][] = [
+      'conversation.updated',
+      'conversation.message.created',
+      'run.updated',
+      'run.event.created',
+      'task.updated',
+      'artifact.created',
+      'artifact.action.updated',
+    ]
+
+    source.addEventListener('connected', refreshAfterReconnect)
+    eventTypes.forEach((eventType) => {
+      source.addEventListener(eventType, (messageEvent) => {
+        const event = JSON.parse((messageEvent as MessageEvent).data) as RealtimeEvent
+        handleRealtimeEvent(event)
+      })
+    })
+
+    return () => {
+      source.close()
+    }
+  }, [
+    activeConversationId,
+    agents,
+    loadArchivedConversations,
+    loadArtifacts,
+    loadConversations,
+    loadMessages,
+    loadRuns,
+    loadTasks,
+    user,
+  ])
+
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }

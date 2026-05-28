@@ -1,5 +1,11 @@
-import type { AgentId, DaemonDeviceId, IsoDateTime } from "./agent";
-import type { Artifact } from "./artifact";
+import type {
+  AgentId,
+  DaemonDeviceId,
+  IsoDateTime,
+  RuntimeKind,
+} from "./agent.js";
+import type { Artifact } from "./artifact.js";
+import type { AgentHubMcpToolInput, AgentHubMcpToolName } from "./mcp.js";
 
 export type RunId = string;
 
@@ -13,6 +19,12 @@ export type RunStatus =
 export type RunLogStream = "stdout" | "stderr";
 export type ToolCallStatus = "succeeded" | "failed";
 
+export interface RuntimeRawEvent {
+  runtimeKind: RuntimeKind;
+  nativeType?: string;
+  payload: unknown;
+}
+
 export interface AgentRun {
   id: RunId;
   agentId: AgentId;
@@ -20,6 +32,12 @@ export interface AgentRun {
   status: RunStatus;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+export interface AgentRunSummary {
+  run: AgentRun;
+  prompt: string;
+  conversationId?: string;
 }
 
 export type RunEvent =
@@ -40,6 +58,7 @@ export type RunEvent =
       type: "message.delta";
       runId: RunId;
       content: string;
+      raw?: RuntimeRawEvent;
       createdAt: IsoDateTime;
     }
   | {
@@ -50,20 +69,38 @@ export type RunEvent =
       createdAt: IsoDateTime;
     }
   | {
+      type: "runtime.event";
+      runId: RunId;
+      raw: RuntimeRawEvent;
+      createdAt: IsoDateTime;
+    }
+  | {
       type: "tool.call.started";
       runId: RunId;
       toolCallId: string;
       name: string;
       input?: unknown;
+      raw?: RuntimeRawEvent;
       createdAt: IsoDateTime;
     }
   | {
       type: "tool.call.completed";
       runId: RunId;
       toolCallId: string;
+      name?: string;
       status: ToolCallStatus;
       output?: unknown;
       error?: string;
+      raw?: RuntimeRawEvent;
+      createdAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call";
+      runId: RunId;
+      toolCallId: string;
+      name: AgentHubMcpToolName;
+      input: AgentHubMcpToolInput;
+      raw?: RuntimeRawEvent;
       createdAt: IsoDateTime;
     }
   | {

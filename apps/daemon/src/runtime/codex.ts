@@ -1,18 +1,28 @@
 import { spawn as spawnChildProcess } from "node:child_process";
 import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_process";
+import path from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import type {
+  AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
 } from "@agent-hub/core/runtime";
 import type {
-  AgentRuntimeBinding,
+  AgentHubMcpToolInput,
+  AgentHubMcpToolResult,
+  AgentHubListTasksToolResult,
+  AgentHubUploadArtifactToolResult,
+  AgentHubMcpToolName,
   AgentRuntimeConfig,
+  DaemonRuntime,
   RunEvent,
   RunId,
+  RuntimeRawEvent,
 } from "@agent-hub/core/protocol";
 
+import type { AgentHubMcpSessionHandle } from "../mcp/relay";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 type SpawnedProcess = Pick<
@@ -28,7 +38,33 @@ export type SpawnCodexProcess = (
 
 export interface CodexAdapterOptions {
   executablePath?: string;
+  mcpRelay?: AgentHubMcpRelayLike;
+  mcpServerCommand?: AgentHubMcpServerCommand;
   spawnProcess?: SpawnCodexProcess;
+}
+
+export interface AgentHubMcpServerCommand {
+  args: string[];
+  command: string;
+  cwd?: string;
+}
+
+export interface AgentHubMcpRelayLike {
+  createSession(input: {
+    enabledTools: AgentHubMcpToolName[];
+    onArtifactUpload?(
+      upload: AgentRunArtifactUpload,
+    ): Promise<AgentHubUploadArtifactToolResult>;
+    onToolCall(call: {
+      createdAt: string;
+      input: AgentHubMcpToolInput;
+      name: AgentHubMcpToolName;
+      runId: RunId;
+      toolCallId: string;
+    }): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
+    runId: RunId;
+    workspacePath: string;
+  }): AgentHubMcpSessionHandle;
 }
 
 interface AsyncQueueItem<T> {
@@ -134,98 +170,130 @@ function readRecordProperty(
   return undefined;
 }
 
-function mapCodexJsonEvent(
-  value: unknown,
+function createCodexRawEvent(
+  payload: unknown,
+  nativeType: string | undefined,
+): RuntimeRawEvent {
+  return {
+    runtimeKind: "codex",
+    ...(nativeType === undefined ? {} : { nativeType }),
+    payload,
+  };
+}
+
+function createCodexRuntimeEvent(
   runId: RunId,
-): RunEvent | undefined {
+  raw: RuntimeRawEvent,
+  createdAt: string,
+): RunEvent {
+  return {
+    type: "runtime.event",
+    runId,
+    raw,
+    createdAt,
+  };
+}
+
+function mapCodexCommandStatus(
+  item: Record<string, unknown>,
+): Extract<RunEvent, { type: "tool.call.completed" }>["status"] {
+  const exitCode = item.exit_code;
+
+  if (typeof exitCode === "number") {
+    return exitCode === 0 ? "succeeded" : "failed";
+  }
+
+  return item.status === "completed" ? "succeeded" : "failed";
+}
+
+function mapCodexJsonEvents(value: unknown, runId: RunId): RunEvent[] {
+  const createdAt = nowIsoDateTime();
+
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
+    const raw = createCodexRawEvent(value, undefined);
+
+    return [createCodexRuntimeEvent(runId, raw, createdAt)];
   }
 
   const record = value as Record<string, unknown>;
-  const type = readStringProperty(record, ["type", "event", "kind"]);
+  const nativeType = readStringProperty(record, ["type"]);
+  const raw = createCodexRawEvent(record, nativeType);
+  const events: RunEvent[] = [createCodexRuntimeEvent(runId, raw, createdAt)];
 
-  if (type === undefined) {
-    return undefined;
+  if (nativeType !== "item.started" && nativeType !== "item.completed") {
+    return events;
   }
 
-  const createdAt = nowIsoDateTime();
   const item = readRecordProperty(record, ["item"]);
   const itemType =
     item === undefined ? undefined : readStringProperty(item, ["type"]);
-  const itemText =
-    item === undefined
-      ? undefined
-      : toText(item.text) ?? toText(item.content) ?? toText(item.delta);
 
-  if (
-    itemText !== undefined &&
-    type === "item.completed" &&
-    itemType === "agent_message"
-  ) {
-    return {
-      type: "message.delta",
-      runId,
-      content: itemText,
-      createdAt,
-    };
+  if (item === undefined || itemType === undefined) {
+    return events;
   }
 
-  const content = toText(record.delta) ?? toText(record.content) ?? toText(record.text);
+  const itemId =
+    readStringProperty(item, ["id"]) ?? `${runId}:codex-item:${createdAt}`;
 
-  if (
-    content !== undefined &&
-    (type.includes("message") ||
-      type.includes("assistant") ||
-      type.includes("response"))
-  ) {
-    return {
-      type: "message.delta",
-      runId,
-      content,
-      createdAt,
-    };
+  if (nativeType === "item.completed" && itemType === "agent_message") {
+    const content = toText(item.text) ?? toText(item.content) ?? toText(item.delta);
+
+    if (content !== undefined) {
+      events.push({
+        type: "message.delta",
+        runId,
+        content,
+        raw,
+        createdAt,
+      });
+    }
+
+    return events;
   }
 
-  if (type.includes("tool") && type.includes("start")) {
-    return {
+  if (itemType !== "command_execution") {
+    return events;
+  }
+
+  if (nativeType === "item.started") {
+    events.push({
       type: "tool.call.started",
       runId,
-      toolCallId:
-        readStringProperty(record, ["toolCallId", "tool_call_id", "id"]) ??
-        `${runId}:tool:${createdAt}`,
-      name:
-        readStringProperty(record, ["name", "toolName", "tool_name"]) ??
-        "unknown",
-      input: readRecordProperty(record, ["input", "arguments", "args"]),
+      toolCallId: itemId,
+      name: itemType,
+      input: {
+        command: item.command,
+      },
+      raw,
       createdAt,
-    };
+    });
+
+    return events;
   }
 
-  if (
-    type.includes("tool") &&
-    (type.includes("complete") || type.includes("finish") || type.includes("end"))
-  ) {
-    const error = toText(record.error);
+  const status = mapCodexCommandStatus(item);
+  const exitCode = item.exit_code;
 
-    return {
-      type: "tool.call.completed",
-      runId,
-      toolCallId:
-        readStringProperty(record, ["toolCallId", "tool_call_id", "id"]) ??
-        `${runId}:tool:${createdAt}`,
-      status: error === undefined ? "succeeded" : "failed",
-      output: record.output,
-      error,
-      createdAt,
-    };
-  }
+  events.push({
+    type: "tool.call.completed",
+    runId,
+    toolCallId: itemId,
+    name: itemType,
+    status,
+    output: {
+      command: item.command,
+      aggregated_output: item.aggregated_output,
+      exit_code: exitCode,
+      status: item.status,
+    },
+    ...(status === "failed" && typeof exitCode === "number"
+      ? { error: `Command exited with code ${exitCode}` }
+      : {}),
+    raw,
+    createdAt,
+  });
 
-  return undefined;
-}
-
-function toLogLine(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
+  return events;
 }
 
 function createLogLineEvent(
@@ -242,20 +310,112 @@ function createLogLineEvent(
   };
 }
 
+function createCodexSpawnOptions(
+  options: SpawnOptionsWithoutStdio,
+): SpawnOptionsWithoutStdio {
+  return process.platform === "win32"
+    ? {
+        ...options,
+        shell: true,
+      }
+    : options;
+}
+
+function createCodexDeveloperInstructionsConfig(
+  agentInstructions: string | undefined,
+): string | undefined {
+  const trimmedInstructions = agentInstructions?.trim();
+
+  if (trimmedInstructions === undefined || trimmedInstructions.length === 0) {
+    return undefined;
+  }
+
+  return `developer_instructions=${JSON.stringify(trimmedInstructions)}`;
+}
+
+function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
+  const currentFile = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFile);
+  const isTypeScriptSource = currentFile.endsWith(".ts");
+
+  if (isTypeScriptSource) {
+    return {
+      command: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        path.resolve(currentDir, "../mcp/stdio-server.ts"),
+      ],
+      cwd: path.resolve(currentDir, "../../../.."),
+    };
+  }
+
+  return {
+    command: process.execPath,
+    args: [path.resolve(currentDir, "../mcp/stdio-server.js")],
+    cwd: path.resolve(currentDir, ".."),
+  };
+}
+
+function toTomlLiteral(value: string): string {
+  if (!value.includes("'") && !/[\r\n]/.test(value)) {
+    return `'${value}'`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function toTomlStringArray(values: string[]): string {
+  return `[${values.map(toTomlLiteral).join(",")}]`;
+}
+
+function createAgentHubMcpConfigArgs(input: {
+  command: AgentHubMcpServerCommand;
+  session: AgentHubMcpSessionHandle;
+}): string[] {
+  return [
+    "-c",
+    `mcp_servers.agenthub.command=${toTomlLiteral(input.command.command)}`,
+    "-c",
+    `mcp_servers.agenthub.args=${toTomlStringArray(input.command.args)}`,
+    "-c",
+    "mcp_servers.agenthub.startup_timeout_sec=15",
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_RELAY_URL=${toTomlLiteral(input.session.relayUrl)}`,
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_SESSION_TOKEN=${toTomlLiteral(input.session.token)}`,
+    "-c",
+    `mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS=${toTomlLiteral(input.session.enabledTools.join(","))}`,
+    ...(input.command.cwd === undefined
+      ? []
+      : [
+          "-c",
+          `mcp_servers.agenthub.cwd=${toTomlLiteral(input.command.cwd)}`,
+        ]),
+  ];
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
   #executablePath: string;
+  #mcpRelay: AgentHubMcpRelayLike | undefined;
+  #mcpServerCommand: AgentHubMcpServerCommand;
   #spawnProcess: SpawnCodexProcess;
 
   constructor(options: CodexAdapterOptions = {}) {
     this.#executablePath = options.executablePath ?? "codex";
+    this.#mcpRelay = options.mcpRelay;
+    this.#mcpServerCommand =
+      options.mcpServerCommand ?? createAgentHubMcpServerCommand();
     this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
   }
 
-  async detect(): Promise<AgentRuntimeBinding> {
+  async detect(): Promise<DaemonRuntime> {
     const process = this.#spawnProcess(this.#executablePath, ["--version"], {
-      stdio: "pipe",
+      ...createCodexSpawnOptions({
+        stdio: "pipe",
+      }),
     });
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();
@@ -288,7 +448,6 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     return {
-      agentId: "",
       daemonDeviceId: "",
       runtimeKind: "codex",
       runtimeVersion: output.join("\n").trim() || undefined,
@@ -296,6 +455,7 @@ export class CodexAdapter implements AgentAdapter {
       capabilities: [
         { name: "json-events", enabled: true },
         { name: "ephemeral-runs", enabled: true },
+        { name: "agenthub-mcp", enabled: this.#mcpRelay !== undefined },
       ],
       status: "ready",
       lastSeenAt: nowIsoDateTime(),
@@ -304,6 +464,75 @@ export class CodexAdapter implements AgentAdapter {
 
   run(input: AgentRunInput): AsyncIterable<RunEvent> {
     const queue = new AsyncEventQueue<RunEvent>();
+    const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
+      input.agentInstructions,
+    );
+    const mcpTasks: AgentHubListTasksToolResult["tasks"] = [
+      ...(input.agentHubMcpTasks ?? []),
+    ];
+    const mcpSession = this.#mcpRelay?.createSession({
+      enabledTools: input.agentHubMcpTools ?? [],
+      runId: input.run.id,
+      workspacePath: input.workspacePath,
+      onArtifactUpload: input.uploadArtifact,
+      onToolCall: (call) => {
+        queue.push({
+          type: "agenthub.tool.call",
+          runId: call.runId,
+          toolCallId: call.toolCallId,
+          name: call.name,
+          input: call.input,
+          createdAt: call.createdAt,
+        });
+
+        if (call.name === "list_tasks") {
+          const status = "status" in call.input &&
+            typeof call.input.status === "string"
+            ? call.input.status
+            : undefined;
+
+          return {
+            accepted: true,
+            tasks: status === undefined
+              ? mcpTasks.map((task) => ({ ...task }))
+              : mcpTasks
+                  .filter((task) => task.status === status)
+                  .map((task) => ({ ...task })),
+          };
+        }
+
+        if (
+          call.name === "create_task" &&
+          "title" in call.input &&
+          "assigneeAgentId" in call.input
+        ) {
+          const taskInput = call.input as {
+            assigneeAgentId: string;
+            taskId?: string;
+            title: string;
+          };
+
+          const task = {
+            id: taskInput.taskId ?? call.toolCallId,
+            title: taskInput.title,
+            assigneeAgentId: taskInput.assigneeAgentId,
+            status: "created" as const,
+          };
+          mcpTasks.push(task);
+
+          return {
+            accepted: true,
+            task: {
+              id: task.id,
+              title: task.title,
+              assigneeAgentId: task.assigneeAgentId,
+            },
+          };
+        }
+
+        return { accepted: true };
+      },
+    });
     const args = [
       "exec",
       "--json",
@@ -312,11 +541,22 @@ export class CodexAdapter implements AgentAdapter {
       input.workspacePath,
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
+      ...(developerInstructionsConfig === undefined
+        ? []
+        : ["-c", developerInstructionsConfig]),
+      ...(mcpSession === undefined
+        ? []
+        : createAgentHubMcpConfigArgs({
+            command: this.#mcpServerCommand,
+            session: mcpSession,
+          })),
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {
-      cwd: input.workspacePath,
-      stdio: "pipe",
+      ...createCodexSpawnOptions({
+        cwd: input.workspacePath,
+        stdio: "pipe",
+      }),
     });
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();
@@ -332,6 +572,7 @@ export class CodexAdapter implements AgentAdapter {
       }
 
       completed = true;
+      mcpSession?.close();
       queue.push({
         type: "run.completed",
         runId: input.run.id,
@@ -350,11 +591,9 @@ export class CodexAdapter implements AgentAdapter {
         return;
       }
 
-      const event = mapCodexJsonEvent(parsed.value, input.run.id);
-
-      queue.push(
-        event ?? createLogLineEvent(input.run.id, "stdout", toLogLine(parsed.value)),
-      );
+      for (const event of mapCodexJsonEvents(parsed.value, input.run.id)) {
+        queue.push(event);
+      }
     };
 
     process.stdout.on("data", (chunk) => {

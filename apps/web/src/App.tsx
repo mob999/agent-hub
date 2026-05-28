@@ -1,121 +1,90 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useCallback, useEffect, useState } from 'react'
+import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
+import { WorkspacePage } from './pages/WorkspacePage'
+
+interface EditorRouteState {
+  artifactId: string | null
+  conversationId: string
+}
+
+function chatConversationIdFromPath(path: string): string | null {
+  const segments = path.split('/').filter(Boolean)
+
+  if (segments[0] !== 'chat') {
+    return null
+  }
+
+  return segments.length === 2 ? decodeURIComponent(segments[1] ?? '') : null
+}
+
+function getRoutePath(): RoutePath {
+  const path = window.location.pathname
+  const editorRoute = editorStateFromPath(path)
+  if (editorRoute !== null) {
+    return path as EditorRoutePath
+  }
+
+  if (
+    path === '/login' ||
+    path === '/register' ||
+    path === '/chat' ||
+    chatConversationIdFromPath(path) !== null ||
+    path === '/runs' ||
+    path === '/daemon'
+  ) {
+    return path as RoutePath
+  }
+  return '/chat'
+}
+
+function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
+  return route === '/chat' || route.startsWith('/chat/') || route === '/runs' || route === '/daemon'
+}
+
+function editorStateFromPath(path: string): EditorRouteState | null {
+  const segments = path.split('/').filter(Boolean)
+
+  if (segments[0] !== 'editor' || segments.length < 2 || segments.length > 3) {
+    return null
+  }
+
+  return {
+    conversationId: decodeURIComponent(segments[1] ?? ''),
+    artifactId: segments[2] === undefined ? null : decodeURIComponent(segments[2]),
+  }
+}
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [route, setRoute] = useState<RoutePath>(() => getRoutePath())
+
+  const navigate = useCallback((path: RoutePath) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path)
+    }
+    setRoute(path)
+  }, [])
+
+  useEffect(() => {
+    if (window.location.pathname !== route) {
+      window.history.replaceState({}, '', route)
+    }
+
+    const onPopState = () => setRoute(getRoutePath())
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [route])
+
+  if (route === '/login' || route === '/register') {
+    return <AuthPage mode={route === '/login' ? 'login' : 'register'} navigate={navigate} />
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <WorkspacePage
+      route={isWorkspaceRoute(route) ? route : '/chat'}
+      chatConversationId={route.startsWith('/chat/') ? chatConversationIdFromPath(route) : null}
+      editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
+      navigate={navigate}
+    />
   )
 }
 

@@ -10,6 +10,7 @@ interface ChatSidebarProps {
   activeRunCount: number
   agents: AgentDetails[]
   activeConversationId: string | null
+  unreadCounts: Record<string, number>
   savedOpen: boolean
   onCreateAgent: () => void
   onCreateGroup: () => void
@@ -30,6 +31,20 @@ const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 const agentAvatarFrame =
   'grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]'
+const unreadBadge =
+  'inline-grid min-w-5 place-items-center rounded-full bg-[var(--cds-support-error)] px-1.5 text-xs font-semibold leading-5 text-[var(--cds-text-on-color)]'
+
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) {
+    return null
+  }
+
+  return (
+    <span className={unreadBadge} aria-label={`${count} unread messages`}>
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
 
 export function ChatSidebar({
   conversations,
@@ -38,6 +53,7 @@ export function ChatSidebar({
   activeRunCount,
   agents,
   activeConversationId,
+  unreadCounts,
   savedOpen,
   onCreateAgent,
   onCreateGroup,
@@ -62,6 +78,11 @@ export function ChatSidebar({
     .filter((conversation) => conversation.type === 'group' && conversation.key !== 'all')
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
   const savedCount = archivedAgents.length + archivedGroupConversations.length
+  const directConversationByAgentId = new Map(
+    conversations
+      .filter((conversation) => conversation.type === 'direct' && conversation.directAgentId !== undefined)
+      .map((conversation) => [conversation.directAgentId, conversation]),
+  )
 
   return (
     <aside
@@ -177,7 +198,7 @@ export function ChatSidebar({
             <button
               className={`${sidebarButton} ${
                 groupChatSelected ? selectedListItem : transparentListItem
-              } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
+              } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-2 px-3 py-2`}
               type="button"
               key={conversation.id}
               aria-current={groupChatSelected ? 'page' : undefined}
@@ -187,7 +208,9 @@ export function ChatSidebar({
                 #
               </span>
               <span className="min-w-0 truncate text-base leading-5 text-[var(--cds-text-primary)]">{conversation.title}</span>
-              <span aria-hidden="true" />
+              <span className="flex min-w-6 justify-end">
+                <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
+              </span>
             </button>
           )
         })}
@@ -217,12 +240,15 @@ export function ChatSidebar({
               const agentSelected =
                 activeConversation?.type === 'direct' &&
                 activeConversation.directAgentId === agent.agent.id
+              const directConversation = directConversationByAgentId.get(agent.agent.id)
+              const unreadCount =
+                directConversation === undefined ? 0 : unreadCounts[directConversation.id] ?? 0
 
               return (
                 <button
                   className={`${sidebarButton} ${
                     agentSelected ? selectedListItem : transparentListItem
-                  } min-h-11 grid-cols-[2rem_minmax(0,1fr)_1.5rem] gap-2 px-3 py-2`}
+                  } min-h-11 grid-cols-[2rem_minmax(0,1fr)_auto] gap-2 px-3 py-2`}
                   type="button"
                   key={agent.agent.id}
                   aria-current={agentSelected ? 'page' : undefined}
@@ -240,7 +266,10 @@ export function ChatSidebar({
                     )}
                   </span>
                   <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
-                  <AgentStatusIndicator agent={agent} />
+                  <span className="flex min-w-6 items-center justify-end gap-2">
+                    <UnreadBadge count={unreadCount} />
+                    <AgentStatusIndicator agent={agent} />
+                  </span>
                 </button>
               )
             })}

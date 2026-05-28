@@ -1,6 +1,6 @@
 import { InlineNotification, SkeletonText } from '@carbon/react'
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgentCreateModal } from '../components/AgentCreateModal'
 import { AgentEditModal } from '../components/AgentEditModal'
 import { AppRail } from '../components/AppRail'
@@ -9,6 +9,7 @@ import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
+import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
 import { UserSettingsModal } from '../components/UserSettingsModal'
 import {
   ApiRequestError,
@@ -62,6 +63,8 @@ function workspaceViewFromRoute(route: WorkspaceRoutePath): WorkspaceView {
 }
 const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
 const authRedirectStorageKey = 'agenthub.auth.redirect'
+const realtimeToastDurationMs = 5000
+const maxRealtimeToasts = 4
 
 function userScopedStorageKey(prefix: string, userId: string): string {
   return `${prefix}.${userId}`
@@ -118,6 +121,48 @@ function isAgentReady(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
 }
 
+function compactMessagePreview(content: string): string {
+  const compacted = content.replace(/\s+/g, ' ').trim()
+
+  if (compacted.length === 0) {
+    return 'New message'
+  }
+
+  return compacted.length > 120 ? `${compacted.slice(0, 117)}...` : compacted
+}
+
+function getConversationToastTitle(conversation: Conversation | undefined, agents: AgentDetails[]): string {
+  if (conversation === undefined) {
+    return 'Conversation'
+  }
+
+  if (conversation.type === 'group') {
+    return `#${conversation.title}`
+  }
+
+  if (conversation.directAgentId !== undefined) {
+    const agent = agents.find((item) => item.agent.id === conversation.directAgentId)
+
+    if (agent !== undefined) {
+      return agent.agent.name
+    }
+  }
+
+  return conversation.title
+}
+
+function getMessageSenderName(message: ConversationMessage, agents: AgentDetails[]): string {
+  if (message.senderAgentId !== undefined) {
+    const agent = agents.find((item) => item.agent.id === message.senderAgentId)
+
+    if (agent !== undefined) {
+      return agent.agent.name
+    }
+  }
+
+  return message.senderType === 'system' ? 'AgentHub' : 'Agent'
+}
+
 function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): LocalRun {
   const runAgent = agents.find((agent) => agent.agent.id === summary.run.agentId)
 
@@ -163,6 +208,8 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
+  const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
+  const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [runs, setRuns] = useState<LocalRun[]>([])
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
@@ -175,6 +222,10 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+  const notifiedMessageIdsRef = useRef<Set<string>>(new Set())
+  const activeConversationIdRef = useRef<string | null>(null)
+  const agentsRef = useRef<AgentDetails[]>([])
+  const conversationsRef = useRef<Conversation[]>([])
 
   const routeConversationId = editorRoute?.conversationId ?? chatConversationId
   const activeView = workspaceViewFromRoute(route)
@@ -216,6 +267,19 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
     [activeConversationId, artifactsByConversation],
   )
 
+  const clearConversationUnread = useCallback((conversationId: string) => {
+    setUnreadByConversationId((current) => {
+      if ((current[conversationId] ?? 0) === 0) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[conversationId]
+
+      return next
+    })
+  }, [])
+
   const activateConversation = useCallback((conversationId: string) => {
     if (user) {
       setPrompt(readConversationDraft(user.id, conversationId))
@@ -224,7 +288,8 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
     }
 
     setActiveConversationId(conversationId)
-  }, [user])
+    clearConversationUnread(conversationId)
+  }, [clearConversationUnread, user])
 
   const clearActiveConversation = useCallback(() => {
     setPrompt('')
@@ -240,6 +305,38 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
       writeConversationDraft(user.id, activeConversationId, value)
     }
   }, [activeConversationId, user])
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId
+  }, [activeConversationId])
+
+  useEffect(() => {
+    agentsRef.current = agents
+  }, [agents])
+
+  useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+
+  useEffect(() => {
+    notifiedMessageIdsRef.current.clear()
+    setUnreadByConversationId({})
+    setRealtimeToasts([])
+  }, [user?.id])
+
+  useEffect(() => {
+    if (realtimeToasts.length === 0) {
+      return
+    }
+
+    const nextExpiry = Math.min(...realtimeToasts.map((toast) => toast.expiresAt))
+    const timeoutId = window.setTimeout(() => {
+      const now = Date.now()
+      setRealtimeToasts((current) => current.filter((toast) => toast.expiresAt > now))
+    }, Math.max(nextExpiry - Date.now(), 0))
+
+    return () => window.clearTimeout(timeoutId)
+  }, [realtimeToasts])
 
   const loadDevices = useCallback(async () => {
     try {
@@ -799,10 +896,47 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         }
       })
     }
+    const notifyRealtimeMessage = (message: ConversationMessage) => {
+      if (notifiedMessageIdsRef.current.has(message.id)) {
+        return
+      }
+
+      notifiedMessageIdsRef.current.add(message.id)
+
+      if (
+        message.senderType === 'user' ||
+        message.conversationId === activeConversationIdRef.current
+      ) {
+        return
+      }
+
+      setUnreadByConversationId((current) => ({
+        ...current,
+        [message.conversationId]: (current[message.conversationId] ?? 0) + 1,
+      }))
+
+      const agentsSnapshot = agentsRef.current
+      const conversation = conversationsRef.current.find(
+        (item) => item.id === message.conversationId,
+      )
+      const toast: RealtimeToast = {
+        id: message.id,
+        conversationId: message.conversationId,
+        title: getConversationToastTitle(conversation, agentsSnapshot),
+        senderName: getMessageSenderName(message, agentsSnapshot),
+        preview: compactMessagePreview(message.content),
+        expiresAt: Date.now() + realtimeToastDurationMs,
+      }
+
+      setRealtimeToasts((current) => [
+        ...current.filter((item) => item.id !== toast.id),
+        toast,
+      ].slice(-maxRealtimeToasts))
+    }
     const upsertRun = (event: Extract<RealtimeEvent, { type: 'run.updated' }>) => {
       setRuns((current) => {
         const existing = current.find((localRun) => localRun.run.id === event.run.id)
-        const runAgent = agents.find((agent) => agent.agent.id === event.run.agentId)
+        const runAgent = agentsRef.current.find((agent) => agent.agent.id === event.run.agentId)
         const nextRun: LocalRun = {
           channelId: event.conversationId ?? existing?.channelId ?? 'runs',
           agentName: runAgent?.agent.name ?? existing?.agentName,
@@ -887,6 +1021,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           break
         case 'conversation.message.created':
           upsertMessage(event.message)
+          notifyRealtimeMessage(event.message)
           break
         case 'run.updated':
           upsertRun(event)
@@ -1001,6 +1136,15 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         setRunError('Unable to open the conversation.')
       }
     }
+  }
+  const dismissRealtimeToast = (toastId: string) => {
+    setRealtimeToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }
+  const openRealtimeToastConversation = (conversationId: string) => {
+    setRealtimeToasts((current) =>
+      current.filter((toast) => toast.conversationId !== conversationId),
+    )
+    selectConversation(conversationId)
   }
   const openCreateAgent = (daemonDeviceId?: string) => {
     setDefaultAgentDaemonId(daemonDeviceId ?? null)
@@ -1424,6 +1568,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             activeRunCount={activeRunCount}
             agents={agents}
             activeConversationId={activeConversationId}
+            unreadCounts={unreadByConversationId}
             savedOpen={savedOpen}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
@@ -1484,6 +1629,11 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           selectRun={setSelectedRunId}
         />
       )}
+      <RealtimeToastStack
+        toasts={realtimeToasts}
+        onDismiss={dismissRealtimeToast}
+        onOpenConversation={openRealtimeToastConversation}
+      />
       {agentModalOpen && (
         <AgentCreateModal
           open={agentModalOpen}

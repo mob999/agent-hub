@@ -319,12 +319,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   }, [conversations])
 
   useEffect(() => {
-    notifiedMessageIdsRef.current.clear()
-    setUnreadByConversationId({})
-    setRealtimeToasts([])
-  }, [user?.id])
-
-  useEffect(() => {
     if (realtimeToasts.length === 0) {
       return
     }
@@ -821,6 +815,9 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
 
   const logout = async () => {
     await apiRequest<{ ok: true }>('/auth/logout', { method: 'POST' }).catch(() => null)
+    notifiedMessageIdsRef.current.clear()
+    setUnreadByConversationId({})
+    setRealtimeToasts([])
     navigate('/login')
   }
 

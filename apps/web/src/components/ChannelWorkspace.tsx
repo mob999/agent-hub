@@ -1,4 +1,4 @@
-import { Form, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
+import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
 import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -717,10 +717,14 @@ export function ChannelWorkspace({
                     ? senderAgent?.agent.avatar
                     : null
               const avatarInitial = displayNameInitial(senderName)
+              const senderIsOrchestrator =
+                activeConversation?.type === 'group' &&
+                message.senderAgentId !== undefined &&
+                activeConversation.orchestratorAgentId === message.senderAgentId
 
               return (
                 <article
-                  className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] max-[671px]:grid-cols-[1.75rem_minmax(0,1fr)] max-[671px]:px-1"
+                  className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1"
                   key={message.id}
                 >
                   <span
@@ -738,9 +742,14 @@ export function ChannelWorkspace({
                     )}
                   </span>
                   <span className="grid min-w-0 gap-1.5">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <strong>{senderName}</strong>
-                      <time className="text-xs text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
+                    <span className="flex min-w-0 flex-wrap items-baseline gap-2">
+                      {senderIsOrchestrator && (
+                        <Tag className="self-center" type="green" size="sm">
+                          Orch
+                        </Tag>
+                      )}
+                      <strong className="leading-5">{senderName}</strong>
+                      <time className="text-xs leading-5 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
                         {formatTime(message.updatedAt)}
                       </time>
                     </span>
@@ -787,30 +796,51 @@ export function ChannelWorkspace({
           </label>
           {mentionSuggestions.length > 0 && (
             <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
-              {mentionSuggestions.map((agent) => (
-                <button
-                  key={agent.agent.id}
-                  type="button"
-                  className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
-                    activeMentionSuggestion?.agent.id === agent.agent.id
-                      ? 'bg-[var(--cds-layer-selected-02)]'
-                      : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
-                  }`}
-                  onClick={() => selectMention(agent)}
-                  onMouseEnter={() => {
-                    const nextIndex = mentionSuggestions.findIndex((item) => item.agent.id === agent.agent.id)
-                    if (nextIndex >= 0) {
-                      setActiveMentionIndex(nextIndex)
-                    }
-                  }}
-                >
-                  <span className="grid h-6 w-6 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
-                    {displayNameInitial(agent.agent.name)}
-                  </span>
-                  <span className="min-w-0 truncate font-semibold">@{agent.agent.name}</span>
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--cds-support-success)]" aria-hidden="true" />
-                </button>
-              ))}
+              {mentionSuggestions.map((agent) => {
+                const agentIsOrchestrator =
+                  activeConversation?.type === 'group' &&
+                  activeConversation.orchestratorAgentId === agent.agent.id
+
+                return (
+                  <button
+                    key={agent.agent.id}
+                    type="button"
+                    className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                      activeMentionSuggestion?.agent.id === agent.agent.id
+                        ? 'bg-[var(--cds-layer-selected-02)]'
+                        : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
+                    }`}
+                    onClick={() => selectMention(agent)}
+                    onMouseEnter={() => {
+                      const nextIndex = mentionSuggestions.findIndex((item) => item.agent.id === agent.agent.id)
+                      if (nextIndex >= 0) {
+                        setActiveMentionIndex(nextIndex)
+                      }
+                    }}
+                  >
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
+                      {agent.agent.avatar ? (
+                        <img
+                          src={agent.agent.avatar}
+                          alt={agent.agent.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        displayNameInitial(agent.agent.name)
+                      )}
+                    </span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate font-semibold">@{agent.agent.name}</span>
+                      {agentIsOrchestrator && (
+                        <Tag className="m-0" type="green" size="sm">
+                          Orch
+                        </Tag>
+                      )}
+                    </span>
+                    <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--cds-support-success)]" aria-hidden="true" />
+                  </button>
+                )
+              })}
             </div>
           )}
           <textarea

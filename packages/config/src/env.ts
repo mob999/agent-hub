@@ -32,6 +32,23 @@ function normalizeWorkspaceRoot(value: unknown): string {
   return trimmed;
 }
 
+function normalizeStorageRoot(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return defaultAgentHubStorageRoot;
+  }
+
+  const trimmed = value.trim();
+  const looksLikeWindowsAbsolutePath = /^[A-Za-z]:[\\/]/.test(trimmed);
+
+  if (process.platform !== "win32" && looksLikeWindowsAbsolutePath) {
+    return defaultAgentHubStorageRoot;
+  }
+
+  return path.isAbsolute(trimmed)
+    ? trimmed
+    : path.resolve(homedir(), trimmed);
+}
+
 const workspaceRootSchema = z.preprocess(
   normalizeWorkspaceRoot,
   z.string().min(1),
@@ -69,13 +86,7 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
-  AGENTHUB_STORAGE_ROOT: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim().length > 0
-        ? value
-        : defaultAgentHubStorageRoot,
-    z.string().min(1),
-  ),
+  AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
 });
@@ -93,13 +104,7 @@ export const workerEnvSchema = z.object({
   REDIS_URL: z.string().min(1),
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_WORKER_CONSUMER_NAME: z.string().min(1).default("worker-local"),
-  AGENTHUB_STORAGE_ROOT: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim().length > 0
-        ? value
-        : defaultAgentHubStorageRoot,
-    z.string().min(1),
-  ),
+  AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
 });

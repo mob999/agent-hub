@@ -99,6 +99,13 @@ const runtimeKinds = new Set<RuntimeKind>([
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT";
+}
+
 type SseClient = {
   controller: ReadableStreamDefaultController<Uint8Array>;
   heartbeat: ReturnType<typeof setInterval> | null;
@@ -2185,6 +2192,12 @@ app.get("/artifacts/:artifactId/content", async (c) => {
     ownerUserId: user.id,
     revisionId: c.req.query("revisionId"),
     storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
   });
 
   if (content === null) {
@@ -2278,7 +2291,20 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
   const body = await readArtifactContent({
     storageKey: record.storageKey,
     storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
   });
+
+  if (body === null) {
+    return previewUnavailableResponse({
+      message: "Artifact file was not found on disk.",
+      status: 404,
+    });
+  }
   const arrayBuffer = body.buffer.slice(
     body.byteOffset,
     body.byteOffset + body.byteLength,
@@ -2450,7 +2476,25 @@ app.get("/artifacts/:artifactId/download", async (c) => {
   const content = await readArtifactContent({
     storageKey: record.storageKey,
     storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
   });
+
+  if (content === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_FILE_NOT_FOUND",
+          message: "Artifact file was not found on disk.",
+        },
+      },
+      404,
+    );
+  }
 
   return new Response(new Uint8Array(content), {
     headers: {

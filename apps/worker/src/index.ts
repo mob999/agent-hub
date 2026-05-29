@@ -88,9 +88,32 @@ const gateway = new DaemonGateway({
     const result = await appendRunEvent(db, event, {
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
     });
     await publishRealtimeEvents(result.realtimeEvents);
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+  },
+  onAgentHubToolCall: async (message) => {
+    const result = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: message.call.runId,
+      toolCallId: message.call.toolCallId,
+      name: message.call.name,
+      input: message.call.input,
+      createdAt: message.call.createdAt,
+    }, {
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    });
+    await publishRealtimeEvents(result.realtimeEvents);
+    await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+
+    if (result.toolResult !== undefined) {
+      return result.toolResult;
+    }
+
+    throw new Error(`AgentHub MCP tool call was not accepted: ${message.call.name}`);
   },
   onArtifactUpload: async (message) => {
     const artifact = await persistConversationArtifactUpload(db, {
@@ -252,6 +275,7 @@ while (!shuttingDown) {
         {
           publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
           publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+          storageRoot: env.AGENTHUB_STORAGE_ROOT,
         },
       );
       await publishRealtimeEvents(result.realtimeEvents);

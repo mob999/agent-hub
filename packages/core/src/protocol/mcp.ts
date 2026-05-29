@@ -12,21 +12,33 @@ import type { RunId } from "./run.js";
 export type AgentHubMcpToolName =
   | "send_message"
   | "list_tasks"
+  | "list_artifacts"
+  | "read_artifact"
   | "create_task"
+  | "approve_task"
+  | "cancel_task"
   | "upload_artifact"
-  | "complete_task";
+  | "complete_task"
+  | "complete_workflow";
 
 export const agentHubAllMcpTools = [
   "send_message",
   "list_tasks",
+  "list_artifacts",
+  "read_artifact",
   "create_task",
+  "approve_task",
+  "cancel_task",
   "upload_artifact",
   "complete_task",
+  "complete_workflow",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
   "list_tasks",
+  "list_artifacts",
+  "read_artifact",
   "upload_artifact",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
@@ -68,9 +80,13 @@ export interface AgentHubListTasksToolResult {
     title: string;
     assigneeAgentId: AgentId;
     assigneeRunId?: RunId;
+    workflowId?: string;
+    dependsOnTaskIds?: ConversationTaskId[];
     description?: string;
     status: ConversationTaskStatus;
+    blockedReason?: string;
     summary?: string;
+    resultArtifactIds?: ConversationArtifactId[];
   }>;
 }
 
@@ -78,6 +94,7 @@ export interface AgentHubCreateTaskToolInput {
   title: string;
   description?: string;
   assigneeAgentId: AgentId;
+  dependsOnTaskIds?: ConversationTaskId[];
   taskId?: ConversationTaskId;
 }
 
@@ -87,7 +104,61 @@ export interface AgentHubCreateTaskToolResult {
     id: ConversationTaskId;
     title: string;
     assigneeAgentId: AgentId;
+    status: ConversationTaskStatus;
+    dependsOnTaskIds?: ConversationTaskId[];
   };
+}
+
+export interface AgentHubApproveTaskToolInput {
+  taskId: ConversationTaskId;
+}
+
+export interface AgentHubApproveTaskToolResult {
+  accepted: true;
+  taskId: ConversationTaskId;
+  runId?: RunId;
+}
+
+export interface AgentHubCancelTaskToolInput {
+  taskId: ConversationTaskId;
+  reason?: string;
+}
+
+export interface AgentHubCancelTaskToolResult {
+  accepted: true;
+  taskId: ConversationTaskId;
+}
+
+export interface AgentHubCompleteWorkflowToolInput {
+  summary?: string;
+}
+
+export interface AgentHubCompleteWorkflowToolResult {
+  accepted: true;
+  workflowId: string;
+}
+
+export interface AgentHubListArtifactsToolInput {
+  taskId?: ConversationTaskId;
+  limit?: number;
+}
+
+export interface AgentHubListArtifactsToolResult {
+  accepted: true;
+  artifacts: ConversationArtifact[];
+}
+
+export interface AgentHubReadArtifactToolInput {
+  artifactId: ConversationArtifactId;
+}
+
+export interface AgentHubReadArtifactToolResult {
+  accepted: true;
+  artifact: ConversationArtifact;
+  contentBase64?: string;
+  contentText?: string;
+  encoding: "base64" | "text";
+  truncated?: boolean;
 }
 
 export interface AgentHubUploadArtifactToolInput {
@@ -115,15 +186,25 @@ export interface AgentHubCompleteTaskToolResult {
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
   | AgentHubListTasksToolInput
+  | AgentHubListArtifactsToolInput
+  | AgentHubReadArtifactToolInput
   | AgentHubCreateTaskToolInput
+  | AgentHubApproveTaskToolInput
+  | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
-  | AgentHubCompleteTaskToolInput;
+  | AgentHubCompleteTaskToolInput
+  | AgentHubCompleteWorkflowToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
   | AgentHubListTasksToolResult
+  | AgentHubListArtifactsToolResult
+  | AgentHubReadArtifactToolResult
   | AgentHubCreateTaskToolResult
+  | AgentHubApproveTaskToolResult
+  | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
-  | AgentHubCompleteTaskToolResult;
+  | AgentHubCompleteTaskToolResult
+  | AgentHubCompleteWorkflowToolResult;
 
 export interface AgentHubMcpToolCall {
   runId: RunId;

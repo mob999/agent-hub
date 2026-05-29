@@ -587,6 +587,30 @@ export function ChannelWorkspace({
                           <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
                         </div>
                       </dl>
+                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
+                        <div>
+                          <dt className="font-semibold uppercase">Workflow</dt>
+                          <dd className="truncate">{task.workflowId.slice(0, 8)}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Depends on</dt>
+                          <dd className="truncate">
+                            {task.dependsOnTaskIds && task.dependsOnTaskIds.length > 0
+                              ? task.dependsOnTaskIds.map((id) => id.slice(0, 8)).join(', ')
+                              : 'None'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Checkpoint</dt>
+                          <dd className="truncate">{task.checkpointRunId?.slice(0, 8) ?? 'Not reviewed'}</dd>
+                        </div>
+                      </dl>
+                      {task.blockedReason && (
+                        <div className="border-t border-[var(--cds-border-subtle-01)] pt-3 text-sm text-[var(--cds-text-secondary)]">
+                          <span className="font-semibold text-[var(--cds-text-primary)]">Blocked:</span>{' '}
+                          {task.blockedReason}
+                        </div>
+                      )}
                       {task.summary && (
                         <div className="border-t border-[var(--cds-border-subtle-01)] pt-3">
                           <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h4>

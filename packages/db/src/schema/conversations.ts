@@ -98,6 +98,36 @@ export const conversationMessages = pgTable(
   }),
 );
 
+export const conversationTaskWorkflows = pgTable(
+  "conversation_task_workflows",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    orchestratorAgentId: uuid("orchestrator_agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    initialRunId: uuid("initial_run_id").notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    summary: text("summary"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationTaskWorkflowsConversationCreatedAtIdx: index(
+      "conversation_task_workflows_conversation_created_at_idx",
+    ).on(table.conversationId, table.createdAt),
+    conversationTaskWorkflowsInitialRunIdIdx: index(
+      "conversation_task_workflows_initial_run_id_idx",
+    ).on(table.initialRunId),
+  }),
+);
+
 export const conversationTasks = pgTable(
   "conversation_tasks",
   {
@@ -108,6 +138,9 @@ export const conversationTasks = pgTable(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => conversationTaskWorkflows.id, { onDelete: "cascade" }),
     creatorRunId: uuid("creator_run_id").notNull(),
     orchestratorAgentId: uuid("orchestrator_agent_id")
       .notNull()
@@ -120,13 +153,16 @@ export const conversationTasks = pgTable(
       () => conversationMessages.id,
       { onDelete: "set null" },
     ),
+    dependsOnTaskIds: jsonb("depends_on_task_ids").$type<string[]>().notNull().default([]),
     title: varchar("title", { length: 160 }).notNull(),
     description: text("description"),
     status: varchar("status", { length: 32 }).notNull(),
+    blockedReason: text("blocked_reason"),
     summary: text("summary"),
     resultArtifactIds: jsonb("result_artifact_ids").$type<string[]>(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     finalizerRunId: uuid("finalizer_run_id"),
+    checkpointRunId: uuid("checkpoint_run_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -137,6 +173,9 @@ export const conversationTasks = pgTable(
     conversationTasksCreatorRunIdIdx: index(
       "conversation_tasks_creator_run_id_idx",
     ).on(table.creatorRunId),
+    conversationTasksWorkflowIdx: index(
+      "conversation_tasks_workflow_idx",
+    ).on(table.workflowId),
     conversationTasksAssigneeRunIdIdx: index(
       "conversation_tasks_assignee_run_id_idx",
     ).on(table.assigneeRunId),

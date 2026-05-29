@@ -16,10 +16,17 @@ export type ConversationMessageStatus =
   | "cancelled";
 export type ConversationTaskStatus =
   | "created"
+  | "waiting"
+  | "ready"
   | "assigned"
   | "running"
   | "succeeded"
   | "failed"
+  | "cancelled"
+  | "blocked";
+export type ConversationTaskWorkflowStatus =
+  | "active"
+  | "completed"
   | "cancelled";
 export type ConversationArtifactStatus =
   | "pending"
@@ -130,19 +137,36 @@ export interface ConversationTask {
   id: ConversationTaskId;
   ownerUserId: UserId;
   conversationId: ConversationId;
+  workflowId: string;
   creatorRunId: RunId;
   orchestratorAgentId: AgentId;
   assigneeAgentId: AgentId;
   assigneeRunId?: RunId;
   dispatchMessageId?: ConversationMessageId;
+  dependsOnTaskIds?: ConversationTaskId[];
   title: string;
   description?: string;
   status: ConversationTaskStatus;
+  blockedReason?: string;
   summary?: string;
   resultArtifactIds?: ConversationArtifactId[];
   artifacts?: ConversationArtifact[];
   completedAt?: IsoDateTime;
   finalizerRunId?: RunId;
+  checkpointRunId?: RunId;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationTaskWorkflow {
+  id: string;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  orchestratorAgentId: AgentId;
+  initialRunId: RunId;
+  status: ConversationTaskWorkflowStatus;
+  summary?: string;
+  completedAt?: IsoDateTime;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }

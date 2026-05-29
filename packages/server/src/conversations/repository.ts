@@ -2,7 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AgentHubCreateTaskToolInput,
+  AgentHubApproveTaskToolInput,
+  AgentHubCancelTaskToolInput,
+  AgentHubCompleteWorkflowToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubListArtifactsToolInput,
+  AgentHubReadArtifactToolInput,
+  AgentHubMcpToolCall,
+  AgentHubMcpToolResult,
   AgentHubListTasksToolResult,
   AgentHubSendMessageTarget,
   AgentHubUploadArtifactToolInput,
@@ -34,6 +41,7 @@ import {
   conversationMessageArtifacts,
   conversationMessages,
   conversationTasks,
+  conversationTaskWorkflows,
   conversations,
   runEvents,
   runs,
@@ -61,6 +69,7 @@ export const defaultGroupConversationTitle = "all";
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 type ConversationTaskRow = typeof conversationTasks.$inferSelect;
+type ConversationTaskWorkflowRow = typeof conversationTaskWorkflows.$inferSelect;
 type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
 type ConversationMessageArtifactRow =
   typeof conversationMessageArtifacts.$inferSelect;
@@ -106,12 +115,14 @@ export type RestoreGroupConversationResult =
 
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
+  toolResult?: AgentHubMcpToolResult;
   realtimeEvents: RealtimeEvent[];
 }
 
 export interface AppendRunEventOptions {
   publicApiBaseUrl?: string;
   publicWebBaseUrl?: string;
+  storageRoot?: string;
 }
 
 export interface PersistConversationArtifactUploadInput {
@@ -314,19 +325,23 @@ export function toConversationTask(
     id: row.id,
     ownerUserId: row.ownerUserId,
     conversationId: row.conversationId,
+    workflowId: row.workflowId,
     creatorRunId: row.creatorRunId,
     orchestratorAgentId: row.orchestratorAgentId,
     assigneeAgentId: row.assigneeAgentId,
     assigneeRunId: optionalString(row.assigneeRunId),
     dispatchMessageId: optionalString(row.dispatchMessageId),
+    dependsOnTaskIds: row.dependsOnTaskIds ?? [],
     title: row.title,
     description: optionalString(row.description),
     status: row.status as ConversationTask["status"],
+    blockedReason: optionalString(row.blockedReason),
     summary: optionalString(row.summary),
     resultArtifactIds: row.resultArtifactIds ?? undefined,
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     completedAt: row.completedAt?.toISOString(),
     finalizerRunId: optionalString(row.finalizerRunId),
+    checkpointRunId: optionalString(row.checkpointRunId),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -337,13 +352,17 @@ function toMcpTaskListFromRows(
 ): AgentHubListTasksToolResult["tasks"] {
   return rows.map((row) => ({
     id: row.id,
-    title: row.title,
-    assigneeAgentId: row.assigneeAgentId,
-    assigneeRunId: optionalString(row.assigneeRunId),
-    description: optionalString(row.description),
-    status: row.status as ConversationTask["status"],
-    summary: optionalString(row.summary),
-  }));
+      title: row.title,
+      assigneeAgentId: row.assigneeAgentId,
+      assigneeRunId: optionalString(row.assigneeRunId),
+      workflowId: row.workflowId,
+      dependsOnTaskIds: row.dependsOnTaskIds ?? [],
+      description: optionalString(row.description),
+      status: row.status as ConversationTask["status"],
+      blockedReason: optionalString(row.blockedReason),
+      summary: optionalString(row.summary),
+      resultArtifactIds: row.resultArtifactIds ?? undefined,
+    }));
 }
 
 function conversationPromptRole(
@@ -2181,6 +2200,20 @@ function readSendMessageAttachments(
   return attachments.length > 0 ? attachments : undefined;
 }
 
+function readListTasksToolInput(
+  input: unknown,
+): { status?: ConversationTask["status"] } | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const status = (input as Record<string, unknown>).status;
+
+  return typeof status === "string" && status.length > 0
+    ? { status: status as ConversationTask["status"] }
+    : {};
+}
+
 function readCreateTaskToolInput(
   input: unknown,
 ): AgentHubCreateTaskToolInput | null {
@@ -2206,8 +2239,93 @@ function readCreateTaskToolInput(
         title,
         description: description && description.length > 0 ? description : undefined,
         assigneeAgentId: taskInput.assigneeAgentId,
+        dependsOnTaskIds: Array.isArray(taskInput.dependsOnTaskIds)
+          ? compactUniqueStrings(taskInput.dependsOnTaskIds)
+          : undefined,
         taskId: taskInput.taskId,
       }
+    : null;
+}
+
+function readApproveTaskToolInput(
+  input: unknown,
+): AgentHubApproveTaskToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const taskId = (input as Record<string, unknown>).taskId;
+
+  return typeof taskId === "string" && taskId.length > 0 ? { taskId } : null;
+}
+
+function readCancelTaskToolInput(
+  input: unknown,
+): AgentHubCancelTaskToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const reason = record.reason;
+
+  return typeof taskId === "string" && taskId.length > 0
+    ? {
+        taskId,
+        reason: typeof reason === "string" && reason.trim().length > 0
+          ? reason.trim()
+          : undefined,
+      }
+    : null;
+}
+
+function readCompleteWorkflowToolInput(
+  input: unknown,
+): AgentHubCompleteWorkflowToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const summary = (input as Record<string, unknown>).summary;
+
+  return {
+    summary: typeof summary === "string" && summary.trim().length > 0
+      ? summary.trim()
+      : undefined,
+  };
+}
+
+function readListArtifactsToolInput(
+  input: unknown,
+): AgentHubListArtifactsToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const limit = record.limit;
+
+  return {
+    taskId: typeof taskId === "string" && taskId.length > 0 ? taskId : undefined,
+    limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
+      ? Math.min(limit, 50)
+      : undefined,
+  };
+}
+
+function readReadArtifactToolInput(
+  input: unknown,
+): AgentHubReadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const artifactId = (input as Record<string, unknown>).artifactId;
+
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? { artifactId }
     : null;
 }
 
@@ -2638,6 +2756,7 @@ export function buildAssignedTaskPrompt(input: {
     "",
     "You were assigned this task by the group orchestrator.",
     "Create the requested report or result file in your current workspace.",
+    "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
     "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
     "Upload the report with upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
@@ -2966,36 +3085,237 @@ function isTerminalTaskStatus(status: string): boolean {
     status === "cancelled";
 }
 
-async function maybeCreateFinalizationRun(
+function isActiveTaskStatus(status: string): boolean {
+  return status === "waiting" ||
+    status === "ready" ||
+    status === "assigned" ||
+    status === "running";
+}
+
+async function getWorkflowForRun(
   db: Db,
   input: {
-    creatorRunId: string;
+    conversation: ConversationRow;
+    createdAt: Date;
+    ownerUserId: string;
+    runAgentId: string;
+    runId: string;
+  },
+): Promise<ConversationTaskWorkflowRow | null> {
+  const [existingWorkflow] = await db
+    .select()
+    .from(conversationTaskWorkflows)
+    .where(
+      and(
+        eq(conversationTaskWorkflows.conversationId, input.conversation.id),
+        eq(conversationTaskWorkflows.ownerUserId, input.ownerUserId),
+        eq(conversationTaskWorkflows.initialRunId, input.runId),
+      ),
+    )
+    .limit(1);
+
+  if (existingWorkflow !== undefined) {
+    return existingWorkflow;
+  }
+
+  const [checkpointWorkflow] = await db
+    .select()
+    .from(conversationTaskWorkflows)
+    .innerJoin(
+      conversationTasks,
+      eq(conversationTasks.workflowId, conversationTaskWorkflows.id),
+    )
+    .where(
+      and(
+        eq(conversationTasks.checkpointRunId, input.runId),
+        eq(conversationTaskWorkflows.ownerUserId, input.ownerUserId),
+        eq(conversationTaskWorkflows.conversationId, input.conversation.id),
+      ),
+    )
+    .limit(1);
+
+  if (checkpointWorkflow?.conversation_task_workflows !== undefined) {
+    return checkpointWorkflow.conversation_task_workflows;
+  }
+
+  if (input.conversation.orchestratorAgentId !== input.runAgentId) {
+    return null;
+  }
+
+  const workflowId = randomUUID();
+  const [createdWorkflow] = await db
+    .insert(conversationTaskWorkflows)
+    .values({
+      id: workflowId,
+      ownerUserId: input.ownerUserId,
+      conversationId: input.conversation.id,
+      orchestratorAgentId: input.runAgentId,
+      initialRunId: input.runId,
+      status: "active",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    })
+    .returning();
+
+  return createdWorkflow ?? null;
+}
+
+async function listWorkflowTasks(
+  db: Db,
+  workflowId: string,
+): Promise<ConversationTaskRow[]> {
+  return db
+    .select()
+    .from(conversationTasks)
+    .where(eq(conversationTasks.workflowId, workflowId))
+    .orderBy(asc(conversationTasks.createdAt));
+}
+
+function dependencyStatusForTask(
+  taskInput: AgentHubCreateTaskToolInput,
+  existingTasks: ConversationTaskRow[],
+): { blockedReason?: string; status: ConversationTask["status"] } {
+  const dependencyIds = taskInput.dependsOnTaskIds ?? [];
+
+  if (dependencyIds.length === 0) {
+    return { status: "assigned" };
+  }
+
+  const tasksById = new Map(existingTasks.map((task) => [task.id, task]));
+  const missingDependency = dependencyIds.find((taskId) => !tasksById.has(taskId));
+
+  if (missingDependency !== undefined) {
+    return {
+      blockedReason: `Dependency task ${missingDependency} was not found.`,
+      status: "blocked",
+    };
+  }
+
+  const failedDependency = dependencyIds
+    .map((taskId) => tasksById.get(taskId))
+    .find((task) =>
+      task !== undefined &&
+      (task.status === "failed" ||
+        task.status === "cancelled" ||
+        task.status === "blocked")
+    );
+
+  if (failedDependency !== undefined) {
+    return {
+      blockedReason: `Dependency task ${failedDependency.id} is ${failedDependency.status}.`,
+      status: "blocked",
+    };
+  }
+
+  return dependencyIds.every((taskId) => tasksById.get(taskId)?.status === "succeeded")
+    ? { status: "ready" }
+    : { status: "waiting" };
+}
+
+async function updateDependentTaskReadiness(
+  db: Db,
+  input: {
+    createdAt: Date;
+    realtimeEvents: RealtimeEvent[];
+    workflowId: string;
+  },
+): Promise<void> {
+  const workflowTasks = await listWorkflowTasks(db, input.workflowId);
+  const tasksById = new Map(workflowTasks.map((task) => [task.id, task]));
+
+  for (const task of workflowTasks) {
+    if (task.status !== "waiting" && task.status !== "ready") {
+      continue;
+    }
+
+    const dependencyIds = task.dependsOnTaskIds ?? [];
+
+    if (dependencyIds.length === 0) {
+      continue;
+    }
+
+    const failedDependency = dependencyIds
+      .map((taskId) => tasksById.get(taskId))
+      .find((dependency) =>
+        dependency !== undefined &&
+        (dependency.status === "failed" ||
+          dependency.status === "cancelled" ||
+          dependency.status === "blocked")
+      );
+    const nextStatus: ConversationTask["status"] = failedDependency !== undefined
+      ? "blocked"
+      : dependencyIds.every((taskId) => tasksById.get(taskId)?.status === "succeeded")
+        ? "ready"
+        : "waiting";
+    const blockedReason = failedDependency === undefined
+      ? null
+      : `Dependency task ${failedDependency.id} is ${failedDependency.status}.`;
+
+    if (
+      task.status === nextStatus &&
+      (task.blockedReason ?? null) === blockedReason
+    ) {
+      continue;
+    }
+
+    await db
+      .update(conversationTasks)
+      .set({
+        status: nextStatus,
+        blockedReason,
+        updatedAt: input.createdAt,
+      })
+      .where(eq(conversationTasks.id, task.id));
+    input.realtimeEvents.push(
+      createRealtimeEvent({
+        conversationId: task.conversationId,
+        ownerUserId: task.ownerUserId,
+        taskId: task.id,
+        type: "task.updated",
+      }),
+    );
+  }
+}
+
+async function maybeCreateCheckpointRunForTask(
+  db: Db,
+  input: {
     createdAt: Date;
     dispatchJobs: RunQueueJob[];
     publicApiBaseUrl?: string;
     publicWebBaseUrl?: string;
-    realtimeEvents?: RealtimeEvent[];
+    realtimeEvents: RealtimeEvent[];
+    taskId: string;
   },
 ): Promise<void> {
-  const taskRows = await db
+  const [task] = await db
     .select()
     .from(conversationTasks)
-    .where(eq(conversationTasks.creatorRunId, input.creatorRunId))
-    .orderBy(asc(conversationTasks.createdAt));
+    .where(eq(conversationTasks.id, input.taskId))
+    .limit(1);
 
   if (
-    taskRows.length === 0 ||
-    taskRows.some((task) => task.finalizerRunId !== null) ||
-    taskRows.some((task) => !isTerminalTaskStatus(task.status))
+    task === undefined ||
+    task.checkpointRunId !== null ||
+    !isTerminalTaskStatus(task.status)
   ) {
     return;
   }
 
-  const firstTask = taskRows[0];
+  const [workflow] = await db
+    .select()
+    .from(conversationTaskWorkflows)
+    .where(eq(conversationTaskWorkflows.id, task.workflowId))
+    .limit(1);
+
+  if (workflow === undefined || workflow.status !== "active") {
+    return;
+  }
+
   const [conversation] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, firstTask.conversationId))
+    .where(eq(conversations.id, task.conversationId))
     .limit(1);
 
   if (
@@ -3007,17 +3327,18 @@ async function maybeCreateFinalizationRun(
 
   const runAgent = await getRunnableAgentForUser(db, {
     agentId: conversation.orchestratorAgentId,
-    ownerUserId: firstTask.ownerUserId,
+    ownerUserId: task.ownerUserId,
   });
 
   if (runAgent === null) {
     return;
   }
 
+  const workflowTasks = await listWorkflowTasks(db, workflow.id);
   const artifactRows = await db
     .select()
     .from(conversationArtifacts)
-    .where(inArray(conversationArtifacts.taskId, taskRows.map((task) => task.id)))
+    .where(inArray(conversationArtifacts.taskId, workflowTasks.map((row) => row.id)))
     .orderBy(asc(conversationArtifacts.createdAt));
   const artifactsByTask = new Map<string, ConversationArtifact[]>();
 
@@ -3036,57 +3357,48 @@ async function maybeCreateFinalizationRun(
     artifactsByTask.set(artifactRow.taskId, artifacts);
   }
 
-  const [creatorRun] = await db
-    .select({ prompt: runs.prompt })
-    .from(runs)
-    .where(eq(runs.id, input.creatorRunId))
-    .limit(1);
   const agentGroupsPrompt = buildAgentGroupsPrompt(
     await listActiveAgentGroupContexts(db, {
       agentId: runAgent.agent.id,
-      ownerUserId: firstTask.ownerUserId,
+      ownerUserId: task.ownerUserId,
     }),
   );
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
-  const taskSummaries = taskRows.map((task, index) => {
-    const artifacts = artifactsByTask.get(task.id) ?? [];
-    const artifactLines = artifacts.length === 0
-      ? ["Artifacts: none"]
-      : [
-          "Artifacts:",
-          ...artifacts.map(
-            (artifact) =>
-              `- ${artifact.title}: ${artifact.editorUrl ?? artifact.downloadUrl ?? `/editor/${artifact.conversationId}/${artifact.id}`}`,
-          ),
-        ];
+  const taskLines = workflowTasks.map((row, index) => {
+    const artifactLines = (artifactsByTask.get(row.id) ?? []).map(
+      (artifact) =>
+        `    artifact: ${artifact.title} (${artifact.id}) ${artifact.editorUrl ?? artifact.downloadUrl ?? ""}`,
+    );
 
     return [
-      `Task ${index + 1}: ${task.title}`,
-      `Assignee agent id: ${task.assigneeAgentId}`,
-      `Status: ${task.status}`,
-      task.summary ? `Summary: ${task.summary}` : "Summary: none",
+      `${index + 1}. ${row.title}`,
+      `   id: ${row.id}`,
+      `   assigneeAgentId: ${row.assigneeAgentId}`,
+      `   status: ${row.status}`,
+      `   dependsOnTaskIds: ${(row.dependsOnTaskIds ?? []).join(", ") || "none"}`,
+      row.blockedReason ? `   blockedReason: ${row.blockedReason}` : undefined,
+      row.summary ? `   summary: ${row.summary}` : undefined,
       ...artifactLines,
-    ].join("\n");
+    ].filter((line): line is string => line !== undefined).join("\n");
   });
   const prompt = [
-    "<agenthub_task_finalization>",
+    "<agenthub_task_checkpoint>",
     `Group: #${conversation.title}`,
-    "All tasks created by this Orchestrator run reached a terminal state.",
-    "Send one final Markdown summary to the user with the AgentHub MCP send_message tool.",
-    "Include any report preview/editor links listed below.",
-    "</agenthub_task_finalization>",
+    `Workflow ID: ${workflow.id}`,
+    `Completed task ID: ${task.id}`,
+    `Completed task status: ${task.status}`,
+    task.summary ? `Completed task summary: ${task.summary}` : undefined,
+    "Review the completed task and decide how to continue the workflow.",
+    "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_workflow only when the workflow is done.",
+    "</agenthub_task_checkpoint>",
     "",
     agentGroupsPrompt,
     "",
-    "<original_user_request>",
-    creatorRun?.prompt ?? "",
-    "</original_user_request>",
-    "",
-    "<task_results>",
-    taskSummaries.join("\n\n"),
-    "</task_results>",
-  ].join("\n");
+    "<task_graph>",
+    taskLines.join("\n\n"),
+    "</task_graph>",
+  ].filter((line): line is string => line !== undefined).join("\n");
   const job: RunQueueJob = {
     conversationId: conversation.id,
     daemonDeviceId: runAgent.daemonDeviceId,
@@ -3097,13 +3409,12 @@ async function maybeCreateFinalizationRun(
         agentName: runAgent.agent.name,
         conversationTitle: conversation.title,
         isOrchestrator: true,
-        scenario: "task finalization",
+        scenario: "task checkpoint",
       }),
-      "You are the Orchestrator finalizing a completed group Task mode workflow.",
-      "Use only AgentHub MCP send_message for the visible final response.",
+      "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the workflow using AgentHub MCP tools.",
     ].join("\n\n"),
     agentHubMcpTools: [...agentHubAllMcpTools],
-    agentHubMcpTasks: toMcpTaskListFromRows(taskRows),
+    agentHubMcpTasks: toMcpTaskListFromRows(workflowTasks),
     workspacePath: runAgent.workspacePath,
     run: {
       id: runId,
@@ -3124,21 +3435,23 @@ async function maybeCreateFinalizationRun(
   };
 
   await db.transaction(async (tx) => {
-    const lockedTasks = await tx
+    const [lockedTask] = await tx
       .select()
       .from(conversationTasks)
-      .where(eq(conversationTasks.creatorRunId, input.creatorRunId));
+      .where(eq(conversationTasks.id, task.id))
+      .limit(1);
 
     if (
-      lockedTasks.some((task) => task.finalizerRunId !== null) ||
-      lockedTasks.some((task) => !isTerminalTaskStatus(task.status))
+      lockedTask === undefined ||
+      lockedTask.checkpointRunId !== null ||
+      !isTerminalTaskStatus(lockedTask.status)
     ) {
       return;
     }
 
     await tx.insert(runs).values({
       id: runId,
-      ownerUserId: firstTask.ownerUserId,
+      ownerUserId: task.ownerUserId,
       conversationId: conversation.id,
       agentId: runAgent.agent.id,
       daemonDeviceId: runAgent.daemonDeviceId,
@@ -3160,28 +3473,141 @@ async function maybeCreateFinalizationRun(
     await tx
       .update(conversationTasks)
       .set({
-        finalizerRunId: runId,
+        checkpointRunId: runId,
         updatedAt: input.createdAt,
       })
-      .where(eq(conversationTasks.creatorRunId, input.creatorRunId));
+      .where(eq(conversationTasks.id, task.id));
 
     input.dispatchJobs.push(job);
-    input.realtimeEvents?.push(
+    input.realtimeEvents.push(
       createRealtimeEvent({
         conversationId: conversation.id,
-        ownerUserId: firstTask.ownerUserId,
+        ownerUserId: task.ownerUserId,
         run: job.run,
         type: "run.updated",
       }),
       createRealtimeEvent({
         conversationId: conversation.id,
         event: queuedEvent,
-        ownerUserId: firstTask.ownerUserId,
+        ownerUserId: task.ownerUserId,
         runId,
         type: "run.event.created",
       }),
+      createRealtimeEvent({
+        conversationId: conversation.id,
+        ownerUserId: task.ownerUserId,
+        taskId: task.id,
+        type: "task.updated",
+      }),
     );
   });
+}
+
+async function createAssignedTaskRunJob(
+  db: Db,
+  input: {
+    agentGroupsPrompt?: string;
+    agentHubMcpTasks: AgentHubListTasksToolResult["tasks"];
+    assigneeAgentId: string;
+    conversation: ConversationRow;
+    createdAtIso: string;
+    dispatchContent: string;
+    ownerUserId: string;
+    taskDescription?: string | null;
+    taskId: string;
+    taskTitle: string;
+  },
+): Promise<RunQueueJob | null> {
+  const runAgent = await getRunnableAgentForUser(db, {
+    agentId: input.assigneeAgentId,
+    ownerUserId: input.ownerUserId,
+  });
+
+  if (runAgent === null) {
+    return null;
+  }
+
+  const runId = randomUUID();
+  const agentGroupsPrompt = input.agentGroupsPrompt ??
+    buildAgentGroupsPrompt(
+      await listActiveAgentGroupContexts(db, {
+        agentId: runAgent.agent.id,
+        ownerUserId: input.ownerUserId,
+      }),
+    );
+
+  return {
+    conversationId: input.conversation.id,
+    daemonDeviceId: runAgent.daemonDeviceId,
+    prompt: buildAssignedTaskPrompt({
+      conversationTitle: input.conversation.title,
+      taskId: input.taskId,
+      taskTitle: input.taskTitle,
+      taskDescription: input.taskDescription ?? undefined,
+      dispatchMessage: input.dispatchContent,
+      agentGroupsPrompt,
+    }),
+    agentInstructions: buildAssignedTaskInstructions({
+      agentName: runAgent.agent.name,
+      agentDescription: runAgent.agent.description,
+      conversationTitle: input.conversation.title,
+    }),
+    agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+    agentHubMcpTasks: input.agentHubMcpTasks,
+    workspacePath: runAgent.workspacePath,
+    run: {
+      id: runId,
+      agentId: runAgent.agent.id,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      status: "queued",
+      createdAt: input.createdAtIso,
+      updatedAt: input.createdAtIso,
+    },
+    runtime: runAgent.runtime,
+  };
+}
+
+async function getToolRunContext(
+  db: Db,
+  runId: string,
+): Promise<{
+  conversation: ConversationRow;
+  run: { agentId: string; conversationId: string; ownerUserId: string };
+} | null> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      conversationId: runs.conversationId,
+      ownerUserId: runs.ownerUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+
+  if (run === undefined || run.conversationId === null) {
+    return null;
+  }
+
+  const [conversation] = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, run.conversationId),
+        eq(conversations.ownerUserId, run.ownerUserId),
+      ),
+    )
+    .limit(1);
+
+  return conversation === undefined
+    ? null
+    : {
+        conversation,
+        run: {
+          ...run,
+          conversationId: run.conversationId,
+        },
+      };
 }
 
 export async function appendRunEventToConversationMessage(
@@ -3191,7 +3617,12 @@ export async function appendRunEventToConversationMessage(
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
-  const result = (): AppendRunEventResult => ({ dispatchJobs, realtimeEvents });
+  let toolResult: AgentHubMcpToolResult | undefined;
+  const result = (): AppendRunEventResult => ({
+    dispatchJobs,
+    realtimeEvents,
+    toolResult,
+  });
 
   if (event.type === "run.started" || event.type === "run.completed") {
     const updatedAt = new Date(event.createdAt);
@@ -3211,6 +3642,7 @@ export async function appendRunEventToConversationMessage(
         creatorRunId: conversationTasks.creatorRunId,
         id: conversationTasks.id,
         ownerUserId: conversationTasks.ownerUserId,
+        workflowId: conversationTasks.workflowId,
       });
     realtimeEvents.push(
       ...updatedTasks.map((task) =>
@@ -3224,11 +3656,19 @@ export async function appendRunEventToConversationMessage(
     );
 
     if (event.type === "run.completed") {
-      for (const creatorRunId of compactUniqueStrings(
-        updatedTasks.map((task) => task.creatorRunId),
+      for (const workflowId of compactUniqueStrings(
+        updatedTasks.map((task) => task.workflowId),
       )) {
-        await maybeCreateFinalizationRun(db, {
-          creatorRunId,
+        await updateDependentTaskReadiness(db, {
+          createdAt: updatedAt,
+          realtimeEvents,
+          workflowId,
+        });
+      }
+
+      for (const task of updatedTasks) {
+        await maybeCreateCheckpointRunForTask(db, {
+          taskId: task.id,
           createdAt: updatedAt,
           dispatchJobs,
           publicApiBaseUrl: options.publicApiBaseUrl,
@@ -3240,6 +3680,125 @@ export async function appendRunEventToConversationMessage(
   }
 
   if (event.type === "agenthub.tool.call") {
+    if (event.name === "list_tasks") {
+      const context = await getToolRunContext(db, event.runId);
+
+      if (context === null) {
+        return result();
+      }
+
+      const workflow = await getWorkflowForRun(db, {
+        conversation: context.conversation,
+        createdAt: new Date(event.createdAt),
+        ownerUserId: context.run.ownerUserId,
+        runAgentId: context.run.agentId,
+        runId: event.runId,
+      });
+      const taskRows = workflow === null
+        ? []
+        : await listWorkflowTasks(db, workflow.id);
+      const input = readListTasksToolInput(event.input);
+      const status = input?.status;
+
+      toolResult = {
+        accepted: true,
+        tasks: toMcpTaskListFromRows(
+          status === undefined
+            ? taskRows
+            : taskRows.filter((task) => task.status === status),
+        ),
+      };
+      return result();
+    }
+
+    if (event.name === "list_artifacts") {
+      const input = readListArtifactsToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+
+      if (input === null || context === null) {
+        return result();
+      }
+
+      const conditions = [
+        eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
+        eq(conversationArtifacts.conversationId, context.conversation.id),
+      ];
+
+      if (input.taskId !== undefined) {
+        conditions.push(eq(conversationArtifacts.taskId, input.taskId));
+      }
+
+      const artifactRows = await db
+        .select()
+        .from(conversationArtifacts)
+        .where(and(...conditions))
+        .orderBy(desc(conversationArtifacts.createdAt))
+        .limit(input.limit ?? 20);
+
+      toolResult = {
+        accepted: true,
+        artifacts: artifactRows.map((artifact) =>
+          toConversationArtifact(artifact, {
+            publicApiBaseUrl: options.publicApiBaseUrl,
+            publicWebBaseUrl: options.publicWebBaseUrl,
+          })
+        ),
+      };
+      return result();
+    }
+
+    if (event.name === "read_artifact") {
+      const input = readReadArtifactToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+
+      if (
+        input === null ||
+        context === null ||
+        options.storageRoot === undefined
+      ) {
+        return result();
+      }
+
+      const [artifactRow] = await db
+        .select()
+        .from(conversationArtifacts)
+        .where(
+          and(
+            eq(conversationArtifacts.id, input.artifactId),
+            eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
+            eq(conversationArtifacts.conversationId, context.conversation.id),
+          ),
+        )
+        .limit(1);
+
+      if (artifactRow === undefined) {
+        return result();
+      }
+
+      const content = await readArtifactContent({
+        storageKey: artifactRow.storageKey,
+        storageRoot: options.storageRoot,
+      });
+      const maxBytes = 256 * 1024;
+      const sliced = content.subarray(0, maxBytes);
+      const looksText = /^text\/|json|markdown|xml|javascript|typescript|css|html/.test(
+        inferArtifactFileInfo({ filename: artifactRow.filename }).mimeType,
+      );
+
+      toolResult = {
+        accepted: true,
+        artifact: toConversationArtifact(artifactRow, {
+          publicApiBaseUrl: options.publicApiBaseUrl,
+          publicWebBaseUrl: options.publicWebBaseUrl,
+        }),
+        ...(looksText
+          ? { contentText: sliced.toString("utf8"), encoding: "text" as const }
+          : { contentBase64: sliced.toString("base64"), encoding: "base64" as const }),
+        truncated: content.byteLength > maxBytes ? true : undefined,
+      };
+      return result();
+    }
+
     if (event.name === "create_task") {
       const input = readCreateTaskToolInput(event.input);
 
@@ -3318,145 +3877,79 @@ export async function appendRunEventToConversationMessage(
 
       const createdAt = new Date(event.createdAt);
       const taskId = input.taskId ?? randomUUID();
-      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nTask ID: ${taskId}`;
-      const runAgent = isSelfAssigned
-        ? null
-        : await getRunnableAgentForUser(db, {
-            agentId: assigneeAgentId,
-            ownerUserId: run.ownerUserId,
-          });
+      const workflow = await getWorkflowForRun(db, {
+        conversation,
+        createdAt,
+        ownerUserId: run.ownerUserId,
+        runAgentId: run.agentId,
+        runId: event.runId,
+      });
 
-      if (!isSelfAssigned && runAgent === null) {
-        const [createdTask] = await db
-          .insert(conversationTasks)
-          .values({
-            id: taskId,
-            ownerUserId: run.ownerUserId,
-            conversationId: conversation.id,
-            creatorRunId: event.runId,
-            orchestratorAgentId: run.agentId,
-            assigneeAgentId,
-            title: input.title,
-            description: input.description,
-            status: "failed",
-            summary: "Assignee agent is not ready.",
-            createdAt,
-            updatedAt: createdAt,
-          })
-          .onConflictDoNothing()
-          .returning({ id: conversationTasks.id });
-
-        if (createdTask !== undefined) {
-          realtimeEvents.push(
-            createRealtimeEvent({
-              conversationId: conversation.id,
-              ownerUserId: run.ownerUserId,
-              taskId: createdTask.id,
-              type: "task.updated",
-            }),
-          );
-        }
-
-        await maybeCreateFinalizationRun(db, {
-          creatorRunId: event.runId,
-          createdAt,
-          dispatchJobs,
-          publicApiBaseUrl: options.publicApiBaseUrl,
-          publicWebBaseUrl: options.publicWebBaseUrl,
-          realtimeEvents,
-        });
-
+      if (workflow === null || workflow.status !== "active") {
         return result();
       }
 
-      const agentGroupsPrompt = runAgent === null
-        ? undefined
-        : buildAgentGroupsPrompt(
-            await listActiveAgentGroupContexts(db, {
-              agentId: runAgent.agent.id,
-              ownerUserId: run.ownerUserId,
-            }),
-          );
-      const runId = randomUUID();
-      const existingTaskRows = await db
-        .select()
-        .from(conversationTasks)
-        .where(eq(conversationTasks.conversationId, conversation.id))
-        .orderBy(asc(conversationTasks.createdAt));
-      const agentHubMcpTasks = toMcpTaskListFromRows([
-        ...existingTaskRows,
-        {
-          id: taskId,
-          ownerUserId: run.ownerUserId,
-          conversationId: conversation.id,
-          creatorRunId: event.runId,
-          orchestratorAgentId: run.agentId,
-          assigneeAgentId,
-          assigneeRunId: runAgent === null ? event.runId : runId,
-          dispatchMessageId: null,
-          title: input.title,
-          description: input.description ?? null,
-          status: runAgent === null ? "running" : "assigned",
-          summary: null,
-          resultArtifactIds: null,
-          completedAt: null,
-          finalizerRunId: null,
-          createdAt,
-          updatedAt: createdAt,
-        },
-      ]);
-      const job: RunQueueJob | null = runAgent === null
-        ? null
-        : {
-            conversationId: conversation.id,
-            daemonDeviceId: runAgent.daemonDeviceId,
-            prompt: buildAssignedTaskPrompt({
-              conversationTitle: conversation.title,
-              taskId,
-              taskTitle: input.title,
-              taskDescription: input.description,
-              dispatchMessage: dispatchContent,
-              agentGroupsPrompt,
-            }),
-            agentInstructions: buildAssignedTaskInstructions({
-              agentName: runAgent.agent.name,
-              agentDescription: runAgent.agent.description,
-              conversationTitle: conversation.title,
-            }),
-            agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-            agentHubMcpTasks,
-            workspacePath: runAgent.workspacePath,
-            run: {
-              id: runId,
-              agentId: runAgent.agent.id,
-              daemonDeviceId: runAgent.daemonDeviceId,
-              status: "queued",
-              createdAt: event.createdAt,
-              updatedAt: event.createdAt,
-            },
-            runtime: runAgent.runtime,
-          };
+      const existingTaskRows = await listWorkflowTasks(db, workflow.id);
+      const dependencyState = dependencyStatusForTask(input, existingTaskRows);
+      let taskStatus = dependencyState.status;
+      let blockedReason = dependencyState.blockedReason;
+      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nTask ID: ${taskId}`;
+      const shouldDispatch = taskStatus === "assigned";
+      const job = shouldDispatch && !isSelfAssigned
+        ? await createAssignedTaskRunJob(db, {
+            assigneeAgentId,
+            agentHubMcpTasks: toMcpTaskListFromRows(existingTaskRows),
+            conversation,
+            createdAtIso: event.createdAt,
+            dispatchContent,
+            ownerUserId: run.ownerUserId,
+            taskDescription: input.description,
+            taskId,
+            taskTitle: input.title,
+          })
+        : null;
+
+      if (shouldDispatch && !isSelfAssigned && job === null) {
+        taskStatus = "failed";
+        blockedReason = "Assignee agent is not ready.";
+      }
+
+      const assigneeRunId = isSelfAssigned
+        ? event.runId
+        : job?.run.id;
       const queuedEvent: RunEvent | null = job === null
         ? null
         : {
             type: "run.queued",
-            runId,
+            runId: job.run.id,
             agentId: job.run.agentId,
             daemonDeviceId: job.daemonDeviceId,
             createdAt: event.createdAt,
           };
+      toolResult = {
+        accepted: true,
+        task: {
+          id: taskId,
+          title: input.title,
+          assigneeAgentId,
+          status: taskStatus,
+          dependsOnTaskIds: input.dependsOnTaskIds,
+        },
+      };
 
       await db.transaction(async (tx) => {
-        const [message] = await tx.insert(conversationMessages).values({
-          conversationId: conversation.id,
-          senderType: "agent",
-          senderAgentId: run.agentId,
-          runId: event.runId,
-          content: dispatchContent,
-          status: "completed",
-          createdAt,
-          updatedAt: createdAt,
-        }).returning();
+        const [message] = shouldDispatch
+          ? await tx.insert(conversationMessages).values({
+              conversationId: conversation.id,
+              senderType: "agent",
+              senderAgentId: run.agentId,
+              runId: event.runId,
+              content: dispatchContent,
+              status: "completed",
+              createdAt,
+              updatedAt: createdAt,
+            }).returning()
+          : [undefined];
 
         const [createdTask] = await tx
           .insert(conversationTasks)
@@ -3464,14 +3957,17 @@ export async function appendRunEventToConversationMessage(
             id: taskId,
             ownerUserId: run.ownerUserId,
             conversationId: conversation.id,
+            workflowId: workflow.id,
             creatorRunId: event.runId,
             orchestratorAgentId: run.agentId,
             assigneeAgentId,
-            assigneeRunId: job === null ? event.runId : runId,
-            dispatchMessageId: message.id,
+            assigneeRunId,
+            dispatchMessageId: message?.id,
+            dependsOnTaskIds: input.dependsOnTaskIds ?? [],
             title: input.title,
             description: input.description,
-            status: job === null ? "running" : "assigned",
+            status: taskStatus,
+            blockedReason,
             createdAt,
             updatedAt: createdAt,
           })
@@ -3484,7 +3980,7 @@ export async function appendRunEventToConversationMessage(
 
         if (job !== null && queuedEvent !== null) {
           await tx.insert(runs).values({
-            id: runId,
+            id: job.run.id,
             ownerUserId: run.ownerUserId,
             conversationId: conversation.id,
             agentId: job.run.agentId,
@@ -3498,7 +3994,7 @@ export async function appendRunEventToConversationMessage(
           });
 
           await tx.insert(runEvents).values({
-            runId,
+            runId: job.run.id,
             eventType: queuedEvent.type,
             payload: queuedEvent,
             createdAt,
@@ -3508,18 +4004,22 @@ export async function appendRunEventToConversationMessage(
         await tx
           .update(conversations)
           .set({
-            lastMessageAt: createdAt,
+            ...(message === undefined ? {} : { lastMessageAt: createdAt }),
             updatedAt: createdAt,
           })
           .where(eq(conversations.id, conversation.id));
 
         realtimeEvents.push(
-          createRealtimeEvent({
-            conversationId: conversation.id,
-            message: toConversationMessage(message),
-            ownerUserId: run.ownerUserId,
-            type: "conversation.message.created",
-          }),
+          ...(message === undefined
+            ? []
+            : [
+                createRealtimeEvent({
+                  conversationId: conversation.id,
+                  message: toConversationMessage(message),
+                  ownerUserId: run.ownerUserId,
+                  type: "conversation.message.created" as const,
+                }),
+              ]),
           createRealtimeEvent({
             conversationId: conversation.id,
             ownerUserId: run.ownerUserId,
@@ -3546,13 +4046,298 @@ export async function appendRunEventToConversationMessage(
               conversationId: conversation.id,
               event: queuedEvent,
               ownerUserId: run.ownerUserId,
-              runId,
+              runId: job.run.id,
               type: "run.event.created",
             }),
           );
         }
       });
 
+      return result();
+    }
+
+    if (event.name === "approve_task") {
+      const input = readApproveTaskToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+
+      if (input === null || context === null) {
+        return result();
+      }
+
+      const workflow = await getWorkflowForRun(db, {
+        conversation: context.conversation,
+        createdAt: new Date(event.createdAt),
+        ownerUserId: context.run.ownerUserId,
+        runAgentId: context.run.agentId,
+        runId: event.runId,
+      });
+
+      if (
+        workflow === null ||
+        workflow.orchestratorAgentId !== context.run.agentId ||
+        workflow.status !== "active"
+      ) {
+        return result();
+      }
+
+      const [task] = await db
+        .select()
+        .from(conversationTasks)
+        .where(
+          and(
+            eq(conversationTasks.id, input.taskId),
+            eq(conversationTasks.workflowId, workflow.id),
+            eq(conversationTasks.status, "ready"),
+          ),
+        )
+        .limit(1);
+
+      if (task === undefined) {
+        return result();
+      }
+
+      const [assignee] = await db
+        .select({ name: agents.name })
+        .from(agents)
+        .where(eq(agents.id, task.assigneeAgentId))
+        .limit(1);
+      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nTask ID: ${task.id}`;
+      const workflowTasks = await listWorkflowTasks(db, workflow.id);
+      const job = await createAssignedTaskRunJob(db, {
+        assigneeAgentId: task.assigneeAgentId,
+        agentHubMcpTasks: toMcpTaskListFromRows(workflowTasks),
+        conversation: context.conversation,
+        createdAtIso: event.createdAt,
+        dispatchContent,
+        ownerUserId: context.run.ownerUserId,
+        taskDescription: task.description,
+        taskId: task.id,
+        taskTitle: task.title,
+      });
+      const updatedAt = new Date(event.createdAt);
+
+      if (job === null) {
+        await db
+          .update(conversationTasks)
+          .set({
+            status: "blocked",
+            blockedReason: "Assignee agent is not ready.",
+            updatedAt,
+          })
+          .where(eq(conversationTasks.id, task.id));
+        realtimeEvents.push(
+          createRealtimeEvent({
+            conversationId: task.conversationId,
+            ownerUserId: task.ownerUserId,
+            taskId: task.id,
+            type: "task.updated",
+          }),
+        );
+        toolResult = { accepted: true, taskId: task.id };
+        return result();
+      }
+
+      const queuedEvent: RunEvent = {
+        type: "run.queued",
+        runId: job.run.id,
+        agentId: job.run.agentId,
+        daemonDeviceId: job.daemonDeviceId,
+        createdAt: event.createdAt,
+      };
+      let createdMessage: ConversationMessage | undefined;
+
+      await db.transaction(async (tx) => {
+        const [message] = await tx.insert(conversationMessages).values({
+          conversationId: context.conversation.id,
+          senderType: "agent",
+          senderAgentId: context.run.agentId,
+          runId: event.runId,
+          content: dispatchContent,
+          status: "completed",
+          createdAt: updatedAt,
+          updatedAt,
+        }).returning();
+        createdMessage = toConversationMessage(message);
+
+        await tx.insert(runs).values({
+          id: job.run.id,
+          ownerUserId: context.run.ownerUserId,
+          conversationId: context.conversation.id,
+          agentId: job.run.agentId,
+          daemonDeviceId: job.daemonDeviceId,
+          status: "queued",
+          prompt: job.prompt,
+          workspacePath: job.workspacePath,
+          runtime: job.runtime,
+          createdAt: updatedAt,
+          updatedAt,
+        });
+
+        await tx.insert(runEvents).values({
+          runId: job.run.id,
+          eventType: queuedEvent.type,
+          payload: queuedEvent,
+          createdAt: updatedAt,
+        });
+
+        await tx
+          .update(conversationTasks)
+          .set({
+            assigneeRunId: job.run.id,
+            dispatchMessageId: message.id,
+            status: "assigned",
+            blockedReason: null,
+            updatedAt,
+          })
+          .where(eq(conversationTasks.id, task.id));
+
+        await tx
+          .update(conversations)
+          .set({ lastMessageAt: updatedAt, updatedAt })
+          .where(eq(conversations.id, context.conversation.id));
+      });
+
+      dispatchJobs.push(job);
+      realtimeEvents.push(
+        ...(createdMessage === undefined
+          ? []
+          : [
+              createRealtimeEvent({
+                conversationId: context.conversation.id,
+                message: createdMessage,
+                ownerUserId: context.run.ownerUserId,
+                type: "conversation.message.created" as const,
+              }),
+            ]),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          taskId: task.id,
+          type: "task.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          run: job.run,
+          type: "run.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          event: queuedEvent,
+          ownerUserId: context.run.ownerUserId,
+          runId: job.run.id,
+          type: "run.event.created",
+        }),
+      );
+      toolResult = { accepted: true, taskId: task.id, runId: job.run.id };
+      return result();
+    }
+
+    if (event.name === "cancel_task") {
+      const input = readCancelTaskToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+      const updatedAt = new Date(event.createdAt);
+
+      if (input === null || context === null) {
+        return result();
+      }
+
+      const workflow = await getWorkflowForRun(db, {
+        conversation: context.conversation,
+        createdAt: updatedAt,
+        ownerUserId: context.run.ownerUserId,
+        runAgentId: context.run.agentId,
+        runId: event.runId,
+      });
+
+      if (workflow === null || workflow.orchestratorAgentId !== context.run.agentId) {
+        return result();
+      }
+
+      const [task] = await db
+        .update(conversationTasks)
+        .set({
+          status: "cancelled",
+          blockedReason: input.reason ?? null,
+          updatedAt,
+        })
+        .where(
+          and(
+            eq(conversationTasks.id, input.taskId),
+            eq(conversationTasks.workflowId, workflow.id),
+          ),
+        )
+        .returning();
+
+      if (task === undefined) {
+        return result();
+      }
+
+      realtimeEvents.push(
+        createRealtimeEvent({
+          conversationId: task.conversationId,
+          ownerUserId: task.ownerUserId,
+          taskId: task.id,
+          type: "task.updated",
+        }),
+      );
+      await updateDependentTaskReadiness(db, {
+        createdAt: updatedAt,
+        realtimeEvents,
+        workflowId: workflow.id,
+      });
+      toolResult = { accepted: true, taskId: task.id };
+      return result();
+    }
+
+    if (event.name === "complete_workflow") {
+      const input = readCompleteWorkflowToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+      const updatedAt = new Date(event.createdAt);
+
+      if (input === null || context === null) {
+        return result();
+      }
+
+      const workflow = await getWorkflowForRun(db, {
+        conversation: context.conversation,
+        createdAt: updatedAt,
+        ownerUserId: context.run.ownerUserId,
+        runAgentId: context.run.agentId,
+        runId: event.runId,
+      });
+
+      if (workflow === null || workflow.orchestratorAgentId !== context.run.agentId) {
+        return result();
+      }
+
+      const workflowTasks = await listWorkflowTasks(db, workflow.id);
+
+      if (workflowTasks.some((task) => isActiveTaskStatus(task.status))) {
+        return result();
+      }
+
+      const [updatedWorkflow] = await db
+        .update(conversationTaskWorkflows)
+        .set({
+          status: "completed",
+          summary: input.summary ?? null,
+          completedAt: updatedAt,
+          updatedAt,
+        })
+        .where(eq(conversationTaskWorkflows.id, workflow.id))
+        .returning();
+
+      if (updatedWorkflow === undefined) {
+        return result();
+      }
+
+      toolResult = { accepted: true, workflowId: workflow.id };
       return result();
     }
 
@@ -3563,6 +4348,7 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
+      toolResult = { accepted: true, artifact: {} as ConversationArtifact };
       return result();
     }
 
@@ -3644,14 +4430,21 @@ export async function appendRunEventToConversationMessage(
         }),
       );
 
-      await maybeCreateFinalizationRun(db, {
-        creatorRunId: task.creatorRunId,
+      await updateDependentTaskReadiness(db, {
+        createdAt: updatedAt,
+        realtimeEvents,
+        workflowId: task.workflowId,
+      });
+
+      await maybeCreateCheckpointRunForTask(db, {
+        taskId: task.id,
         createdAt: updatedAt,
         dispatchJobs,
         publicApiBaseUrl: options.publicApiBaseUrl,
         publicWebBaseUrl: options.publicWebBaseUrl,
         realtimeEvents,
       });
+      toolResult = { accepted: true };
 
       return result();
     }
@@ -3706,6 +4499,11 @@ export async function appendRunEventToConversationMessage(
 
     dispatchJobs.push(...persisted.dispatchJobs);
     realtimeEvents.push(...persisted.realtimeEvents);
+    toolResult = {
+      accepted: true,
+      conversationId: persisted.message.conversationId,
+      messageId: persisted.message.id,
+    };
     return result();
   }
 

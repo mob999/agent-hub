@@ -475,7 +475,11 @@ export class CodexAdapter implements AgentAdapter {
       runId: input.run.id,
       workspacePath: input.workspacePath,
       onArtifactUpload: input.uploadArtifact,
-      onToolCall: (call) => {
+      onToolCall: async (call) => {
+        if (input.callAgentHubMcpTool !== undefined) {
+          return input.callAgentHubMcpTool(call);
+        }
+
         queue.push({
           type: "agenthub.tool.call",
           runId: call.runId,
@@ -526,6 +530,7 @@ export class CodexAdapter implements AgentAdapter {
               id: task.id,
               title: task.title,
               assigneeAgentId: task.assigneeAgentId,
+              status: task.status,
             },
           };
         }

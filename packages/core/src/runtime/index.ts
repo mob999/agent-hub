@@ -4,7 +4,9 @@ import type {
   AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
   AgentHubListTasksToolResult,
+  AgentHubMcpToolCall,
   AgentHubMcpToolName,
+  AgentHubMcpToolResult,
   DaemonRuntime,
 } from "../protocol/index.js";
 import type { AgentRun, RunEvent } from "../protocol/index.js";
@@ -30,6 +32,9 @@ export interface AgentRunInput {
   uploadArtifact?(
     upload: AgentRunArtifactUpload,
   ): Promise<AgentHubUploadArtifactToolResult>;
+  callAgentHubMcpTool?(
+    call: AgentHubMcpToolCall,
+  ): Promise<AgentHubMcpToolResult>;
   abortSignal?: AbortSignal;
 }
 

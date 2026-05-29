@@ -8,6 +8,7 @@ import type {
   DaemonServerMessage,
   DaemonRuntime,
   ConversationArtifact,
+  AgentHubMcpToolResult,
   RunEvent,
   RunId,
 } from "@agent-hub/core";
@@ -30,6 +31,9 @@ export interface DaemonGatewayOptions {
   onArtifactUpload?(
     message: Extract<DaemonClientMessage, { type: "artifact.upload" }>,
   ): ConversationArtifact | Promise<ConversationArtifact>;
+  onAgentHubToolCall?(
+    message: Extract<DaemonClientMessage, { type: "agenthub.tool.call" }>,
+  ): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
   onArtifactActionCompleted?(
     message: Extract<DaemonClientMessage, { type: "artifact.action.completed" }>,
   ): void | Promise<void>;
@@ -205,6 +209,40 @@ export class DaemonGateway {
               this.#options.logger?.error(
                 { err, runId: message.runId, uploadId: message.uploadId },
                 "Failed to persist artifact upload",
+              );
+            });
+          return;
+        }
+
+        if (message.type === "agenthub.tool.call") {
+          void Promise.resolve(this.#options.onAgentHubToolCall?.(message))
+            .then((result) => {
+              if (result === undefined) {
+                throw new Error("AgentHub MCP tool call handler is not configured.");
+              }
+
+              send(ws, {
+                type: "agenthub.tool.call.result",
+                requestId: message.requestId,
+                result,
+                sentAt: nowIsoDateTime(),
+              });
+            })
+            .catch((error) => {
+              const err = toError(error);
+              send(ws, {
+                type: "agenthub.tool.call.rejected",
+                requestId: message.requestId,
+                reason: err.message,
+                sentAt: nowIsoDateTime(),
+              });
+              this.#options.logger?.error(
+                {
+                  err,
+                  runId: message.call.runId,
+                  toolName: message.call.name,
+                },
+                "Failed to handle AgentHub MCP tool call",
               );
             });
           return;

@@ -5,13 +5,18 @@ import path from "node:path";
 
 import type {
   AgentRunArtifactUpload,
+  AgentHubApproveTaskToolInput,
+  AgentHubCancelTaskToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubCompleteWorkflowToolInput,
+  AgentHubListArtifactsToolInput,
   AgentHubListTasksToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolName,
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
+  AgentHubReadArtifactToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -321,8 +326,24 @@ function readToolInput(
     return readListTasksInput(input);
   }
 
+  if (toolName === "list_artifacts") {
+    return readListArtifactsInput(input);
+  }
+
+  if (toolName === "read_artifact") {
+    return readReadArtifactInput(input);
+  }
+
   if (toolName === "create_task") {
     return readCreateTaskInput(input);
+  }
+
+  if (toolName === "approve_task") {
+    return readApproveTaskInput(input);
+  }
+
+  if (toolName === "cancel_task") {
+    return readCancelTaskInput(input);
   }
 
   if (toolName === "upload_artifact") {
@@ -331,6 +352,10 @@ function readToolInput(
 
   if (toolName === "complete_task") {
     return readCompleteTaskInput(input);
+  }
+
+  if (toolName === "complete_workflow") {
+    return readCompleteWorkflowInput(input);
   }
 
   return null;
@@ -382,6 +407,43 @@ async function readArtifactUpload(input: {
     sizeBytes: content.byteLength,
     contentBase64: content.toString("base64"),
   };
+}
+
+function readListArtifactsInput(
+  input: unknown,
+): AgentHubListArtifactsToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const limit = record.limit;
+
+  return {
+    taskId:
+      typeof taskId === "string" && taskId.length > 0
+        ? taskId
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
+function readReadArtifactInput(
+  input: unknown,
+): AgentHubReadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const artifactId = (input as Record<string, unknown>).artifactId;
+
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? { artifactId }
+    : null;
 }
 
 async function readMessageAttachmentUpload(input: {
@@ -602,6 +664,9 @@ function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null
   const title = record.title;
   const description = record.description;
   const assigneeAgentId = record.assigneeAgentId;
+  const dependsOnTaskIds = Array.isArray(record.dependsOnTaskIds)
+    ? compactUniqueStrings(record.dependsOnTaskIds)
+    : undefined;
 
   if (
     typeof title !== "string" ||
@@ -621,7 +686,59 @@ function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null
         : undefined,
     assigneeAgentId,
     taskId: randomUUID(),
+    dependsOnTaskIds: dependsOnTaskIds && dependsOnTaskIds.length > 0
+      ? dependsOnTaskIds
+      : undefined,
   };
+}
+
+function readApproveTaskInput(input: unknown): AgentHubApproveTaskToolInput | null {
+  const taskId = (input as Record<string, unknown>).taskId;
+
+  return typeof taskId === "string" && taskId.length > 0
+    ? { taskId }
+    : null;
+}
+
+function readCancelTaskInput(input: unknown): AgentHubCancelTaskToolInput | null {
+  const record = input as Record<string, unknown>;
+  const taskId = record.taskId;
+  const reason = record.reason;
+
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    return null;
+  }
+
+  return {
+    taskId,
+    reason:
+      typeof reason === "string" && reason.trim().length > 0
+        ? reason.trim()
+        : undefined,
+  };
+}
+
+function readCompleteWorkflowInput(
+  input: unknown,
+): AgentHubCompleteWorkflowToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const summary = (input as Record<string, unknown>).summary;
+
+  return {
+    summary:
+      typeof summary === "string" && summary.trim().length > 0
+        ? summary.trim()
+        : undefined,
+  };
+}
+
+function compactUniqueStrings(value: unknown[]): string[] {
+  return [...new Set(value.filter((item): item is string =>
+    typeof item === "string" && item.length > 0,
+  ))];
 }
 
 function readJsonBody(request: IncomingMessage): Promise<unknown> {

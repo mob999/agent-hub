@@ -8,14 +8,24 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type {
+  AgentHubApproveTaskToolInput,
+  AgentHubApproveTaskToolResult,
+  AgentHubCancelTaskToolInput,
+  AgentHubCancelTaskToolResult,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
+  AgentHubCompleteWorkflowToolInput,
+  AgentHubCompleteWorkflowToolResult,
+  AgentHubListArtifactsToolInput,
+  AgentHubListArtifactsToolResult,
   AgentHubListTasksToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
+  AgentHubReadArtifactToolInput,
+  AgentHubReadArtifactToolResult,
   AgentHubSendMessageToolInput,
   AgentHubSendMessageToolResult,
   AgentHubUploadArtifactToolInput,
@@ -24,15 +34,25 @@ import type {
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
 const listTasksToolName = "list_tasks" satisfies AgentHubMcpToolName;
+const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
+const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
+const approveTaskToolName = "approve_task" satisfies AgentHubMcpToolName;
+const cancelTaskToolName = "cancel_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
+const completeWorkflowToolName = "complete_workflow" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
   listTasksToolName,
+  listArtifactsToolName,
+  readArtifactToolName,
   createTaskToolName,
+  approveTaskToolName,
+  cancelTaskToolName,
   uploadArtifactToolName,
   completeTaskToolName,
+  completeWorkflowToolName,
 ] as const;
 
 export async function startAgentHubMcpStdioServer(
@@ -138,11 +158,14 @@ export async function startAgentHubMcpStdioServer(
                     type: "string",
                     enum: [
                       "created",
+                      "waiting",
+                      "ready",
                       "assigned",
                       "running",
                       "succeeded",
                       "failed",
                       "cancelled",
+                      "blocked",
                     ],
                     description:
                       "Optional task status filter.",
@@ -152,12 +175,54 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
+      ...(enabledTools.has(listArtifactsToolName)
+        ? [
+            {
+              name: listArtifactsToolName,
+              description:
+                "List files and reports in the current AgentHub group workspace.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  taskId: {
+                    type: "string",
+                    description: "Optional task id filter.",
+                  },
+                  limit: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 50,
+                    description: "Maximum number of artifacts to return.",
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(readArtifactToolName)
+        ? [
+            {
+              name: readArtifactToolName,
+              description:
+                "Read one artifact from the current AgentHub group workspace. Text files return text; binary files return base64.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  artifactId: { type: "string", minLength: 1 },
+                },
+                required: ["artifactId"],
+              },
+            },
+          ]
+        : []),
       ...(enabledTools.has(createTaskToolName)
         ? [
             {
               name: createTaskToolName,
               description:
-                "Create and dispatch an AgentHub task to one group agent in the current Task mode run.",
+                "Create an AgentHub task for one group agent. Tasks without dependencies dispatch immediately; dependent tasks wait for Orchestrator approval after dependencies succeed.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -177,8 +242,49 @@ export async function startAgentHubMcpStdioServer(
                     minLength: 1,
                     description: "Agent id that should receive this task.",
                   },
+                  dependsOnTaskIds: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    description:
+                      "Optional upstream task ids that must succeed before this task can be approved.",
+                  },
                 },
                 required: ["title", "assigneeAgentId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(approveTaskToolName)
+        ? [
+            {
+              name: approveTaskToolName,
+              description:
+                "Approve and dispatch a ready downstream task after reviewing a checkpoint.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  taskId: { type: "string", minLength: 1 },
+                },
+                required: ["taskId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(cancelTaskToolName)
+        ? [
+            {
+              name: cancelTaskToolName,
+              description:
+                "Cancel an obsolete or invalid task in the current workflow.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  taskId: { type: "string", minLength: 1 },
+                  reason: { type: "string" },
+                },
+                required: ["taskId"],
               },
             },
           ]
@@ -230,6 +336,22 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
+      ...(enabledTools.has(completeWorkflowToolName)
+        ? [
+            {
+              name: completeWorkflowToolName,
+              description:
+                "Mark the current task workflow complete after all active tasks are done. Send the final user-facing summary separately with send_message.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  summary: { type: "string" },
+                },
+              },
+            },
+          ]
+        : []),
     ],
   }));
 
@@ -245,13 +367,23 @@ export async function startAgentHubMcpStdioServer(
         ? readSendMessageInput(request.params.arguments)
         : toolName === listTasksToolName
           ? readListTasksInput(request.params.arguments)
-          : toolName === createTaskToolName
-            ? readCreateTaskInput(request.params.arguments)
-            : toolName === uploadArtifactToolName
-              ? readUploadArtifactInput(request.params.arguments)
-              : toolName === completeTaskToolName
-                ? readCompleteTaskInput(request.params.arguments)
-                : undefined;
+          : toolName === listArtifactsToolName
+            ? readListArtifactsInput(request.params.arguments)
+            : toolName === readArtifactToolName
+              ? readReadArtifactInput(request.params.arguments)
+              : toolName === createTaskToolName
+                ? readCreateTaskInput(request.params.arguments)
+                : toolName === approveTaskToolName
+                  ? readApproveTaskInput(request.params.arguments)
+                  : toolName === cancelTaskToolName
+                    ? readCancelTaskInput(request.params.arguments)
+                    : toolName === uploadArtifactToolName
+                      ? readUploadArtifactInput(request.params.arguments)
+                      : toolName === completeTaskToolName
+                        ? readCompleteTaskInput(request.params.arguments)
+                        : toolName === completeWorkflowToolName
+                          ? readCompleteWorkflowInput(request.params.arguments)
+                          : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -399,6 +531,38 @@ function readListTasksInput(value: unknown): AgentHubListTasksToolInput {
     : {};
 }
 
+function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("list_artifacts arguments must be an object.");
+  }
+
+  const input = value as Record<string, unknown>;
+  const taskId = input.taskId;
+  const limit = input.limit;
+
+  return {
+    taskId:
+      typeof taskId === "string" && taskId.length > 0
+        ? taskId
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
+function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
+  const input = readObjectArguments(value, "read_artifact");
+  const artifactId = input.artifactId;
+
+  if (typeof artifactId !== "string" || artifactId.length === 0) {
+    throw new Error("read_artifact.artifactId is required.");
+  }
+
+  return { artifactId };
+}
+
 function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("create_task arguments must be an object.");
@@ -408,6 +572,11 @@ function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
   const title = input.title;
   const description = input.description;
   const assigneeAgentId = input.assigneeAgentId;
+  const dependsOnTaskIds = Array.isArray(input.dependsOnTaskIds)
+    ? [...new Set(input.dependsOnTaskIds.filter((taskId): taskId is string =>
+        typeof taskId === "string" && taskId.length > 0,
+      ))]
+    : undefined;
 
   if (typeof title !== "string" || title.trim().length === 0) {
     throw new Error("create_task.title is required.");
@@ -428,6 +597,38 @@ function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
         ? description.trim()
         : undefined,
     assigneeAgentId,
+    dependsOnTaskIds: dependsOnTaskIds && dependsOnTaskIds.length > 0
+      ? dependsOnTaskIds
+      : undefined,
+  };
+}
+
+function readApproveTaskInput(value: unknown): AgentHubApproveTaskToolInput {
+  const input = readObjectArguments(value, "approve_task");
+  const taskId = input.taskId;
+
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    throw new Error("approve_task.taskId is required.");
+  }
+
+  return { taskId };
+}
+
+function readCancelTaskInput(value: unknown): AgentHubCancelTaskToolInput {
+  const input = readObjectArguments(value, "cancel_task");
+  const taskId = input.taskId;
+  const reason = input.reason;
+
+  if (typeof taskId !== "string" || taskId.length === 0) {
+    throw new Error("cancel_task.taskId is required.");
+  }
+
+  return {
+    taskId,
+    reason:
+      typeof reason === "string" && reason.trim().length > 0
+        ? reason.trim()
+        : undefined,
   };
 }
 
@@ -494,11 +695,28 @@ function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
   };
 }
 
+function readCompleteWorkflowInput(value: unknown): AgentHubCompleteWorkflowToolInput {
+  const input = readObjectArguments(value, "complete_workflow");
+  const summary = input.summary;
+
+  return {
+    summary:
+      typeof summary === "string" && summary.trim().length > 0
+        ? summary.trim()
+        : undefined,
+  };
+}
+
 async function callRelayTool(input: {
   input:
+    | AgentHubApproveTaskToolInput
+    | AgentHubCancelTaskToolInput
     | AgentHubCreateTaskToolInput
+    | AgentHubCompleteWorkflowToolInput
     | AgentHubSendMessageToolInput
+    | AgentHubListArtifactsToolInput
     | AgentHubListTasksToolInput
+    | AgentHubReadArtifactToolInput
     | AgentHubUploadArtifactToolInput
     | AgentHubCompleteTaskToolInput;
   relayUrl: string;
@@ -525,9 +743,14 @@ async function callRelayTool(input: {
   }
 
   return (await response.json()) as
+    | AgentHubApproveTaskToolResult
+    | AgentHubCancelTaskToolResult
     | AgentHubCreateTaskToolResult
+    | AgentHubCompleteWorkflowToolResult
     | AgentHubSendMessageToolResult
+    | AgentHubListArtifactsToolResult
     | AgentHubListTasksToolResult
+    | AgentHubReadArtifactToolResult
     | AgentHubUploadArtifactToolResult
     | AgentHubCompleteTaskToolResult;
 }

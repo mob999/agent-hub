@@ -189,6 +189,53 @@ describe("DaemonGateway", () => {
     expect(events).toEqual([event]);
   });
 
+  it("round-trips AgentHub MCP tool calls through the callback", async () => {
+    const gateway = new DaemonGateway({
+      daemonToken: token,
+      onRunEvent: () => undefined,
+      onAgentHubToolCall: (message) => ({
+        accepted: true,
+        conversationId: "conversation_1",
+        messageId: `${message.call.toolCallId}_message`,
+      }),
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+    ws = new WebSocket(listening.url);
+
+    await waitForOpen(ws);
+    sendHello(ws);
+    await waitForJsonMessage(ws);
+
+    const result = waitForJsonMessage<{
+      type: string;
+      requestId: string;
+      result: { messageId: string };
+    }>(ws);
+    ws.send(
+      JSON.stringify({
+        type: "agenthub.tool.call",
+        requestId: "request_1",
+        call: {
+          runId: "00000000-0000-4000-8000-000000000001",
+          toolCallId: "tool_1",
+          name: "send_message",
+          input: { content: "hello" },
+          createdAt: "2026-05-25T00:00:00.000Z",
+        },
+        sentAt: "2026-05-25T00:00:00.000Z",
+      }),
+    );
+
+    await expect(result).resolves.toMatchObject({
+      type: "agenthub.tool.call.result",
+      requestId: "request_1",
+      result: {
+        messageId: "tool_1_message",
+      },
+    });
+  });
+
   it("acks persisted artifact uploads", async () => {
     const gateway = new DaemonGateway({
       daemonToken: token,

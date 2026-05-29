@@ -368,6 +368,10 @@ function toMcpTaskList(
     assigneeRunId: task.assigneeRunId,
     description: task.description,
     status: task.status,
+    workflowId: task.workflowId,
+    dependsOnTaskIds: task.dependsOnTaskIds,
+    blockedReason: task.blockedReason,
+    resultArtifactIds: task.resultArtifactIds,
     summary: task.summary,
   }));
 }
@@ -447,9 +451,11 @@ function buildGroupTaskOrchestratorInstructions(input: {
   return [
     input.agentIdentityInstructions,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
-    "In Task mode, break the user's request into concrete tasks for group agents.",
-    "For each task, call create_task with { title, description, assigneeAgentId }. AgentHub will create the visible @assignee dispatch message and start the assignee run automatically.",
-    "Use send_message only for optional progress updates or final user-facing notes.",
+    "In Task mode, first plan the task graph for group agents.",
+    "Use create_task with { title, description, assigneeAgentId, dependsOnTaskIds? } to declare tasks. Tasks without dependencies are dispatched immediately. Tasks with dependencies wait until upstream tasks succeed.",
+    "When a checkpoint run starts after a task completes, review the task graph, then use approve_task to launch ready downstream tasks, create_task for follow-up or recovery tasks, cancel_task for obsolete tasks, and complete_workflow only when the workflow is done.",
+    "Use list_tasks, list_artifacts, and read_artifact to inspect workflow state and group workspace artifacts.",
+    "Use send_message only for progress updates, decisions, or final user-facing notes.",
     "Do not assign a task to yourself unless you are intentionally doing part of the work.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -490,8 +496,11 @@ function buildGroupTaskOrchestratorPrompt(input: {
     ...roster,
     "",
     "Create tasks only for agents listed above.",
-    "create_task requires assigneeAgentId, creates the task, posts the visible @assignee dispatch message, and starts the assignee run automatically.",
-    "Do not use send_message to dispatch tasks. Use send_message only for optional progress updates or final notes.",
+    "create_task requires assigneeAgentId and may include dependsOnTaskIds for serial work. Tasks without dependencies start immediately; dependent tasks wait until their dependencies succeed.",
+    "Ready downstream tasks do not start automatically. In checkpoint runs, call approve_task({ taskId }) after you review and decide to continue.",
+    "Use list_artifacts/read_artifact when later tasks need reports or files uploaded by earlier tasks.",
+    "Do not use send_message to dispatch tasks. Use send_message only for progress updates, decisions, or final notes.",
+    "Call complete_workflow only after there are no waiting, ready, assigned, or running tasks.",
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",

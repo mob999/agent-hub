@@ -1,7 +1,12 @@
 import type {
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubApproveTaskToolInput,
+  AgentHubCancelTaskToolInput,
+  AgentHubCompleteWorkflowToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubListArtifactsToolInput,
+  AgentHubReadArtifactToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolCall,
   AgentHubSendMessageToolInput,
@@ -19,13 +24,20 @@ describe("AgentHub MCP protocol", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
       "list_tasks",
+      "list_artifacts",
+      "read_artifact",
       "create_task",
+      "approve_task",
+      "cancel_task",
       "upload_artifact",
       "complete_task",
+      "complete_workflow",
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
       "list_tasks",
+      "list_artifacts",
+      "read_artifact",
       "upload_artifact",
       "complete_task",
     ]);
@@ -56,7 +68,10 @@ describe("AgentHub MCP protocol", () => {
           id: "00000000-0000-4000-8000-000000000002",
           title: "Write tests",
           assigneeAgentId: "00000000-0000-4000-8000-000000000001",
+          workflowId: "00000000-0000-4000-8000-000000000004",
+          dependsOnTaskIds: ["00000000-0000-4000-8000-000000000003"],
           status: "running",
+          resultArtifactIds: [],
         },
       ],
     };
@@ -69,6 +84,7 @@ describe("AgentHub MCP protocol", () => {
       title: "Write tests",
       description: "Cover the orchestrator dispatch path.",
       assigneeAgentId: "00000000-0000-4000-8000-000000000001",
+      dependsOnTaskIds: ["00000000-0000-4000-8000-000000000010"],
       taskId: "00000000-0000-4000-8000-000000000002",
     };
     const call: AgentHubMcpToolCall = {
@@ -84,11 +100,43 @@ describe("AgentHub MCP protocol", () => {
         id: input.taskId,
         title: input.title,
         assigneeAgentId: input.assigneeAgentId,
+        dependsOnTaskIds: input.dependsOnTaskIds,
+        status: "waiting",
       },
     };
 
     expect(call.name).toBe("create_task");
     expect(result.task.id).toBe(input.taskId);
+    expect(result.task.dependsOnTaskIds).toEqual(input.dependsOnTaskIds);
+  });
+
+  it("expresses task graph control tools", () => {
+    const approve: AgentHubApproveTaskToolInput = {
+      taskId: "00000000-0000-4000-8000-000000000002",
+    };
+    const cancel: AgentHubCancelTaskToolInput = {
+      taskId: approve.taskId,
+      reason: "No longer needed.",
+    };
+    const complete: AgentHubCompleteWorkflowToolInput = {
+      summary: "Workflow completed.",
+    };
+
+    expect(approve.taskId).toBe(cancel.taskId);
+    expect(complete.summary).toContain("completed");
+  });
+
+  it("expresses group workspace artifact tools", () => {
+    const list: AgentHubListArtifactsToolInput = {
+      taskId: "00000000-0000-4000-8000-000000000010",
+      limit: 10,
+    };
+    const read: AgentHubReadArtifactToolInput = {
+      artifactId: "00000000-0000-4000-8000-000000000011",
+    };
+
+    expect(list.limit).toBe(10);
+    expect(read.artifactId).toBe("00000000-0000-4000-8000-000000000011");
   });
 
   it("expresses upload_artifact and complete_task tool calls", () => {

@@ -112,11 +112,13 @@ describe("conversation protocol", () => {
       id: "00000000-0000-4000-8000-000000000010",
       ownerUserId: "00000000-0000-4000-8000-000000000011",
       conversationId: "00000000-0000-4000-8000-000000000012",
+      workflowId: "00000000-0000-4000-8000-000000000099",
       creatorRunId: "00000000-0000-4000-8000-000000000013",
       orchestratorAgentId: "00000000-0000-4000-8000-000000000014",
       assigneeAgentId: "00000000-0000-4000-8000-000000000015",
       assigneeRunId: "00000000-0000-4000-8000-000000000016",
       dispatchMessageId: "00000000-0000-4000-8000-000000000017",
+      dependsOnTaskIds: ["00000000-0000-4000-8000-000000000009"],
       title: "Build the page",
       description: "Implement the task.",
       status: "succeeded",
@@ -130,6 +132,10 @@ describe("conversation protocol", () => {
     };
 
     expect(task.status).toBe("succeeded");
+    expect(task.workflowId).toBe("00000000-0000-4000-8000-000000000099");
+    expect(task.dependsOnTaskIds).toEqual([
+      "00000000-0000-4000-8000-000000000009",
+    ]);
     expect(task.assigneeRunId).toBeDefined();
     expect(task.artifacts?.[0]?.downloadUrl).toContain("/download");
     expect(task.artifacts?.[0]?.editorUrl).toContain("/editor/");

@@ -8,6 +8,8 @@ import type {
   DaemonRuntime,
   DaemonClientMessage,
   DaemonServerMessage,
+  AgentHubMcpToolCall,
+  AgentHubMcpToolResult,
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
   RunId,
@@ -53,6 +55,7 @@ function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | unde
 const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
+const mcpToolCallTimeoutMs = 30_000;
 
 async function handleArtifactAction(input: {
   env: ReturnType<typeof loadDaemonEnv>;
@@ -112,6 +115,14 @@ export async function startDaemon(): Promise<void> {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  const pendingMcpToolCalls = new Map<
+    string,
+    {
+      resolve(result: AgentHubMcpToolResult): void;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   let reconnectDelayMs = initialReconnectDelayMs;
 
   const handleMessage = (ws: WebSocket, data: WebSocket.RawData): void => {
@@ -150,6 +161,27 @@ export async function startDaemon(): Promise<void> {
           accepted: true,
           artifact: message.artifact,
         });
+      } else {
+        pending.reject(new Error(message.reason));
+      }
+      return;
+    }
+
+    if (
+      message.type === "agenthub.tool.call.result" ||
+      message.type === "agenthub.tool.call.rejected"
+    ) {
+      const pending = pendingMcpToolCalls.get(message.requestId);
+
+      if (pending === undefined) {
+        return;
+      }
+
+      clearTimeout(pending.timer);
+      pendingMcpToolCalls.delete(message.requestId);
+
+      if (message.type === "agenthub.tool.call.result") {
+        pending.resolve(message.result);
       } else {
         pending.reject(new Error(message.reason));
       }
@@ -311,6 +343,31 @@ export async function startDaemon(): Promise<void> {
       });
     };
 
+    const callAgentHubMcpTool = (
+      call: AgentHubMcpToolCall,
+    ): Promise<AgentHubMcpToolResult> => {
+      const requestId = randomUUID();
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingMcpToolCalls.delete(requestId);
+          reject(new Error("AgentHub MCP tool call timed out."));
+        }, mcpToolCallTimeoutMs);
+
+        pendingMcpToolCalls.set(requestId, {
+          resolve,
+          reject,
+          timer,
+        });
+        send(ws, {
+          type: "agenthub.tool.call",
+          requestId,
+          call,
+          sentAt: nowIsoDateTime(),
+        });
+      });
+    };
+
     void (async () => {
       try {
         for await (const event of adapter.run({
@@ -322,6 +379,7 @@ export async function startDaemon(): Promise<void> {
           agentHubMcpTools: message.agentHubMcpTools,
           agentHubMcpTasks: message.agentHubMcpTasks,
           uploadArtifact,
+          callAgentHubMcpTool,
           abortSignal: abortController.signal,
         })) {
           send(ws, {
@@ -406,6 +464,11 @@ export async function startDaemon(): Promise<void> {
         clearTimeout(pending.timer);
         pendingArtifactUploads.delete(uploadId);
         pending.reject(new Error("Daemon websocket closed during artifact upload."));
+      }
+      for (const [requestId, pending] of pendingMcpToolCalls) {
+        clearTimeout(pending.timer);
+        pendingMcpToolCalls.delete(requestId);
+        pending.reject(new Error("Daemon websocket closed during MCP tool call."));
       }
 
       const nextReconnectDelayMs = reconnectDelayMs;

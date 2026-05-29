@@ -279,6 +279,7 @@ describe("CodexAdapter", () => {
         id: "task_1",
         title: "Write tests",
         assigneeAgentId: "agent_2",
+        status: "assigned",
       },
     });
     await expect(eventsPromise).resolves.toEqual(

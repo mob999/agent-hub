@@ -8,7 +8,12 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
-import type { AgentHubListTasksToolResult, AgentHubSendMessageTarget } from "./mcp.js";
+import type {
+  AgentHubListTasksToolResult,
+  AgentHubMcpToolCall,
+  AgentHubMcpToolResult,
+  AgentHubSendMessageTarget,
+} from "./mcp.js";
 import type {
   ConversationArtifact,
   ConversationArtifactActionId,
@@ -57,6 +62,12 @@ export type DaemonClientMessage =
       type: "run.event";
       runId: RunId;
       event: RunEvent;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call";
+      requestId: string;
+      call: AgentHubMcpToolCall;
       sentAt: IsoDateTime;
     }
   | {
@@ -139,6 +150,18 @@ export type DaemonServerMessage =
   | {
       type: "artifact.upload.rejected";
       uploadId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call.result";
+      requestId: string;
+      result: AgentHubMcpToolResult;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call.rejected";
+      requestId: string;
       reason: string;
       sentAt: IsoDateTime;
     };

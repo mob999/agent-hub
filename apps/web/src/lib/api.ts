@@ -132,7 +132,15 @@ export type ConversationType = 'group' | 'direct'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
-export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type ConversationTaskStatus =
+  | 'waiting'
+  | 'ready'
+  | 'assigned'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'blocked'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
 export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
 export type ConversationArtifactActionStatus =
@@ -162,6 +170,7 @@ export interface ConversationTask {
   id: string
   ownerUserId: string
   conversationId: string
+  workflowId: string
   creatorRunId: string
   orchestratorAgentId: string
   assigneeAgentId: string
@@ -170,10 +179,13 @@ export interface ConversationTask {
   title: string
   description?: string
   status: ConversationTaskStatus
+  dependsOnTaskIds?: string[]
+  blockedReason?: string
   summary?: string
   resultArtifactIds?: string[]
   artifacts?: ConversationArtifact[]
   completedAt?: string
+  checkpointRunId?: string
   finalizerRunId?: string
   createdAt: string
   updatedAt: string

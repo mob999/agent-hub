@@ -92,7 +92,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: sendMessageToolName,
               description:
-                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. If this is a direct reply, do not @mention; @mentioning another agent forces that agent to run.",
+                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. In group targets, content containing @AgentName forces that agent to run, and content containing @all forces all other ready agents in the target group to run. If this is an ordinary reply, progress update, or final summary, do not include @AgentName or @all.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,

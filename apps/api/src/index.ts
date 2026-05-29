@@ -393,7 +393,7 @@ function buildGroupChatAgentInstructions(input: {
       ? "You are the configured Orchestrator for this group, even in Chat mode."
       : undefined,
     "Visible group replies must be sent with the AgentHub MCP tool send_message.",
-    "For ordinary replies or progress updates, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
+    "For ordinary replies or progress updates, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "Do not answer a group chat by writing normal assistant text.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -421,11 +421,11 @@ function buildGroupChatRunPrompt(input: {
       ? "You are the configured Orchestrator for this group, even in Chat mode."
       : undefined,
     input.isOrchestrator === true
-      ? "You may coordinate other agents by sending visible messages with @AgentName, but only reply when useful."
+      ? "You may coordinate other agents by sending visible messages with @AgentName or @all, but only reply when useful."
       : undefined,
     "Decide whether you should reply to the user's latest message.",
     "If you should reply, call the MCP tool send_message with { content: string }.",
-    "For ordinary replies, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
+    "For ordinary replies, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "If the user explicitly asks you to reply, you should normally call send_message.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",

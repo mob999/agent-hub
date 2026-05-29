@@ -673,8 +673,8 @@ export function buildAgentGroupsPrompt(
     ...groupLines,
     "Only the current group includes member details. Other groups are listed without member rosters.",
     "Use send_message with target { type: \"group\", groupName } to send a visible message to one of these groups.",
-    "To wake another agent in a group, include @AgentName in the message content.",
-    "If you are only replying to the current conversation or giving a status update, do not mention @AgentName; mentioning an agent forces AgentHub to start that agent's reply run.",
+    "To wake another agent in a group, include @AgentName in the message content. To wake all other ready agents in the target group, include @all.",
+    "If you are only replying to the current conversation or giving a status update, do not mention @AgentName or @all; mentioning an agent or @all forces AgentHub to start reply runs.",
     "Use send_message with target { type: \"user\" } to send a visible private message to the current user.",
     "Archived groups are not listed and cannot be targeted.",
     "</agenthub_agent_groups>",
@@ -2670,6 +2670,22 @@ export function resolveTextMentionedAgentIds(
       first.name.localeCompare(second.name),
     );
   const matchedMentions: Array<{ agentId: string; start: number; end: number }> = [];
+  const allPattern = /@all/gi;
+  let allMatch: RegExpExecArray | null;
+
+  while ((allMatch = allPattern.exec(content)) !== null) {
+    const start = allMatch.index;
+    const end = start + allMatch[0].length;
+
+    if (!hasMentionBoundary(content, end)) {
+      continue;
+    }
+
+    matchedMentions.push(
+      ...refs.map((agent) => ({ agentId: agent.id, start, end })),
+    );
+    break;
+  }
 
   for (const agent of refs) {
     const pattern = new RegExp(`@${escapeRegExp(agent.name)}`, "gi");
@@ -3069,7 +3085,7 @@ function buildMentionedGroupChatAgentInstructions(input: {
       ? "You are the configured Orchestrator for this group, even in Chat mode."
       : undefined,
     "Visible group replies must be sent with the AgentHub MCP tool send_message.",
-    "For ordinary replies or progress updates, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
+    "For ordinary replies or progress updates, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "Do not answer a group chat by writing normal assistant text.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -3105,11 +3121,11 @@ export function buildMentionedGroupChatRunPrompt(input: {
       ? "You are the configured Orchestrator for this group, even in Chat mode."
       : undefined,
     input.isOrchestrator === true
-      ? "You may coordinate other agents by sending visible messages with @AgentName, but only reply when useful."
+      ? "You may coordinate other agents by sending visible messages with @AgentName or @all, but only reply when useful."
       : undefined,
     `${input.senderAgentName} explicitly mentioned you in the latest message.`,
     "If you should reply, call the MCP tool send_message with { content: string }.",
-    "For ordinary replies, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
+    "For ordinary replies, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
     "</agenthub_group_chat_protocol>",

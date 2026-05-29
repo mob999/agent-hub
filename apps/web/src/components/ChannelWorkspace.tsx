@@ -144,6 +144,10 @@ function replaceActiveMention(value: string, agentName: string): string {
   })
 }
 
+type MentionSuggestion =
+  | { id: 'all'; type: 'all' }
+  | { agent: AgentDetails; id: string; type: 'agent' }
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -162,6 +166,10 @@ function mentionsFromPrompt(
       return pattern.test(value)
     })
     .map((agent) => agent.agent.id)
+}
+
+function mentionsAllFromPrompt(value: string): boolean {
+  return /(^|\s)@all(?=$|\s|[.,!?;:])/i.test(value)
 }
 
 export function ChannelWorkspace({
@@ -262,17 +270,28 @@ export function ChannelWorkspace({
     () => mentionsFromPrompt(prompt, mentionableAgents),
     [mentionableAgents, prompt],
   )
+  const promptMentionsAll = useMemo(() => mentionsAllFromPrompt(prompt), [prompt])
   const mentionTerm = hasSelectedConversation && !isAgentDirectMessage ? mentionSearchTerm(prompt) : null
-  const mentionSuggestions =
+  const mentionSuggestions: MentionSuggestion[] =
     mentionTerm === null
       ? []
-      : mentionableAgents
-          .filter(
-            (agent) =>
-              agent.agent.name.toLowerCase().includes(mentionTerm) &&
-              !promptMentionIds.includes(agent.agent.id),
-          )
-          .slice(0, 6)
+      : [
+          ...(!promptMentionsAll && 'all'.includes(mentionTerm)
+            ? [{ id: 'all', type: 'all' } satisfies MentionSuggestion]
+            : []),
+          ...mentionableAgents
+            .filter(
+              (agent) =>
+                agent.agent.name.toLowerCase().includes(mentionTerm) &&
+                !promptMentionIds.includes(agent.agent.id),
+            )
+            .slice(0, promptMentionsAll || !'all'.includes(mentionTerm) ? 6 : 5)
+            .map((agent) => ({
+              agent,
+              id: agent.agent.id,
+              type: 'agent',
+            }) satisfies MentionSuggestion),
+        ]
   const normalizedMentionIndex = mentionSuggestions.length === 0
     ? 0
     : Math.min(activeMentionIndex, mentionSuggestions.length - 1)
@@ -403,8 +422,8 @@ export function ChannelWorkspace({
       event.currentTarget.form?.requestSubmit()
     }
   }
-  const selectMention = (agent: AgentDetails) => {
-    setPrompt(replaceActiveMention(prompt, agent.agent.name))
+  const selectMention = (suggestion: MentionSuggestion) => {
+    setPrompt(replaceActiveMention(prompt, suggestion.type === 'all' ? 'all' : suggestion.agent.agent.name))
   }
   const appendMention = (agent: AgentDetails) => {
     const separator = prompt.length === 0 || /\s$/.test(prompt) ? '' : ' '
@@ -1221,23 +1240,53 @@ export function ChannelWorkspace({
           </label>
           {mentionSuggestions.length > 0 && (
             <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
-              {mentionSuggestions.map((agent) => {
+              {mentionSuggestions.map((suggestion) => {
+                if (suggestion.type === 'all') {
+                  return (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                        activeMentionSuggestion?.id === suggestion.id
+                          ? 'bg-[var(--cds-layer-selected-02)]'
+                          : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
+                      }`}
+                      onClick={() => selectMention(suggestion)}
+                      onMouseEnter={() => {
+                        const nextIndex = mentionSuggestions.findIndex((item) => item.id === suggestion.id)
+                        if (nextIndex >= 0) {
+                          setActiveMentionIndex(nextIndex)
+                        }
+                      }}
+                    >
+                      <span className="grid h-7 w-7 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
+                        @
+                      </span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate font-semibold">@all</span>
+                        <span className="truncate text-xs text-[var(--cds-text-secondary)]">All ready agents</span>
+                      </span>
+                    </button>
+                  )
+                }
+
+                const agent = suggestion.agent
                 const agentIsOrchestrator =
                   activeConversation?.type === 'group' &&
                   activeConversation.orchestratorAgentId === agent.agent.id
 
                 return (
                   <button
-                    key={agent.agent.id}
+                    key={suggestion.id}
                     type="button"
                     className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
-                      activeMentionSuggestion?.agent.id === agent.agent.id
+                      activeMentionSuggestion?.id === suggestion.id
                         ? 'bg-[var(--cds-layer-selected-02)]'
                         : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
                     }`}
-                    onClick={() => selectMention(agent)}
+                    onClick={() => selectMention(suggestion)}
                     onMouseEnter={() => {
-                      const nextIndex = mentionSuggestions.findIndex((item) => item.agent.id === agent.agent.id)
+                      const nextIndex = mentionSuggestions.findIndex((item) => item.id === suggestion.id)
                       if (nextIndex >= 0) {
                         setActiveMentionIndex(nextIndex)
                       }

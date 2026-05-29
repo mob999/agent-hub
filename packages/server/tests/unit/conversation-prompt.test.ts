@@ -181,8 +181,9 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("@jojo: No description provided.");
     expect(prompt).toContain("Only the current group includes member details.");
     expect(prompt).toContain("target { type: \"group\", groupName }");
-    expect(prompt).toContain("do not mention @AgentName");
-    expect(prompt).toContain("forces AgentHub to start that agent's reply run");
+    expect(prompt).toContain("include @all");
+    expect(prompt).toContain("do not mention @AgentName or @all");
+    expect(prompt).toContain("forces AgentHub to start reply runs");
     expect(prompt).toContain("target { type: \"user\" }");
   });
 
@@ -220,10 +221,10 @@ describe("conversation prompt builder", () => {
       "You are the configured Orchestrator for this group, even in Chat mode.",
     );
     expect(prompt).toContain(
-      "You may coordinate other agents by sending visible messages with @AgentName",
+      "You may coordinate other agents by sending visible messages with @AgentName or @all",
     );
     expect(prompt).toContain(
-      "Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
+      "Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     );
   });
 
@@ -321,6 +322,55 @@ describe("conversation prompt builder", () => {
         { excludeAgentId: "agent-dudu" },
       ),
     ).toEqual([]);
+  });
+
+  it("resolves @all to every mentioned-scope agent", () => {
+    expect(
+      resolveTextMentionedAgentIds("@all please review", [
+        { id: "agent-coco", name: "coco" },
+        { id: "agent-dudu", name: "dudu" },
+      ]),
+    ).toEqual(["agent-coco", "agent-dudu"]);
+  });
+
+  it("resolves @all case-insensitively", () => {
+    expect(
+      resolveTextMentionedAgentIds("@ALL please review", [
+        { id: "agent-coco", name: "coco" },
+        { id: "agent-dudu", name: "dudu" },
+      ]),
+    ).toEqual(["agent-coco", "agent-dudu"]);
+  });
+
+  it("does not resolve @all inside longer words", () => {
+    expect(
+      resolveTextMentionedAgentIds("@alligator please review", [
+        { id: "agent-coco", name: "coco" },
+        { id: "agent-dudu", name: "dudu" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("excludes the sender from @all mentions", () => {
+    expect(
+      resolveTextMentionedAgentIds(
+        "@all please review",
+        [
+          { id: "agent-coco", name: "coco" },
+          { id: "agent-dudu", name: "dudu" },
+        ],
+        { excludeAgentId: "agent-coco" },
+      ),
+    ).toEqual(["agent-dudu"]);
+  });
+
+  it("deduplicates explicit mentions mixed with @all", () => {
+    expect(
+      resolveTextMentionedAgentIds("@all @dudu please review", [
+        { id: "agent-coco", name: "coco" },
+        { id: "agent-dudu", name: "dudu" },
+      ]),
+    ).toEqual(["agent-coco", "agent-dudu"]);
   });
 });
 

@@ -26,6 +26,7 @@ import {
   getConversationForUser,
   listConversationMessagesForUser,
   listActiveAgentGroupContexts,
+  listConversationTasksForUser,
   listConversationsForUser,
   updateGroupConversation,
 } from "@agent-hub/server";
@@ -515,24 +516,30 @@ describeDb("conversation repository integration", () => {
       type: "agenthub.tool.call",
       runId: job.run.id,
       toolCallId: "tool_group",
-      name: "send_message_to_group",
-      input: { groupName: "#Design", content: "Cross-group note." },
+      name: "send_message",
+      input: {
+        target: { type: "group", groupName: "#Design" },
+        content: "Cross-group note.",
+      },
       createdAt: "2026-05-26T00:00:01.000Z",
     });
     await appendRunEvent(db, {
       type: "agenthub.tool.call",
       runId: job.run.id,
       toolCallId: "tool_archived",
-      name: "send_message_to_group",
-      input: { groupName: "Archive Me", content: "Should not appear." },
+      name: "send_message",
+      input: {
+        target: { type: "group", groupName: "Archive Me" },
+        content: "Should not appear.",
+      },
       createdAt: "2026-05-26T00:00:02.000Z",
     });
     await appendRunEvent(db, {
       type: "agenthub.tool.call",
       runId: job.run.id,
       toolCallId: "tool_user",
-      name: "send_message_to_user",
-      input: { content: "Private note." },
+      name: "send_message",
+      input: { target: { type: "user" }, content: "Private note." },
       createdAt: "2026-05-26T00:00:03.000Z",
     });
 
@@ -611,8 +618,11 @@ describeDb("conversation repository integration", () => {
       type: "agenthub.tool.call",
       runId: directJob.run.id,
       toolCallId: "tool_group_mention",
-      name: "send_message_to_group",
-      input: { groupName: "Design", content: "@dudu 看一下这个问题" },
+      name: "send_message",
+      input: {
+        target: { type: "group", groupName: "Design" },
+        content: "@dudu 看一下这个问题",
+      },
       createdAt: "2026-05-26T00:00:01.000Z",
     });
 
@@ -657,5 +667,79 @@ describeDb("conversation repository integration", () => {
     if (groupResult.dispatchJobs[0] !== undefined) {
       runIds.push(groupResult.dispatchJobs[0].run.id);
     }
+  });
+
+  it("creates and dispatches assigned task runs from create_task", async () => {
+    const ownerUserId = await createUser(
+      `conversation-task-owner-${randomUUID()}@example.com`,
+    );
+    const orchestratorAgentId = await createAgent(ownerUserId, "orch");
+    const assigneeAgentId = await createAgent(ownerUserId, "dudu");
+    await markAgentReady(orchestratorAgentId);
+    await markAgentReady(assigneeAgentId);
+    const group = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Tasks",
+      agentIds: [orchestratorAgentId, assigneeAgentId],
+      orchestratorAgentId,
+    });
+
+    expect(group.status).toBe("created");
+    if (group.status !== "created") {
+      return;
+    }
+
+    conversationIds.push(group.conversation.id);
+
+    const orchestratorJob = createJob({
+      agentId: orchestratorAgentId,
+      conversationId: group.conversation.id,
+    });
+    runIds.push(orchestratorJob.run.id);
+    await createUserMessageAndRuns(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+      jobs: [orchestratorJob],
+      userMessageContent: "make a report",
+    });
+
+    const result = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: orchestratorJob.run.id,
+      toolCallId: "tool_create_task",
+      name: "create_task",
+      input: {
+        title: "Write the report",
+        description: "Summarize the result.",
+        assigneeAgentId,
+        taskId: "00000000-0000-4000-8000-000000000099",
+      },
+      createdAt: "2026-05-26T00:00:01.000Z",
+    });
+
+    expect(result.dispatchJobs).toHaveLength(1);
+    expect(result.dispatchJobs[0]?.run.agentId).toBe(assigneeAgentId);
+    if (result.dispatchJobs[0] !== undefined) {
+      runIds.push(result.dispatchJobs[0].run.id);
+    }
+
+    const tasks = await listConversationTasksForUser(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+    });
+    const messages = await listConversationMessagesForUser(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+    });
+
+    expect(tasks?.[0]).toMatchObject({
+      id: "00000000-0000-4000-8000-000000000099",
+      assigneeAgentId,
+      status: "assigned",
+    });
+    expect(tasks?.[0]?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
+    expect(messages?.map((message) => message.content)).toContain(
+      "@dudu 已创建任务：Write the report\nTask ID: 00000000-0000-4000-8000-000000000099",
+    );
   });
 });

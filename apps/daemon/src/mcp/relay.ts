@@ -12,8 +12,6 @@ import type {
   AgentHubMcpToolName,
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
-  AgentHubSendMessageToGroupToolInput,
-  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -23,6 +21,18 @@ import type {
 import { isPathInsideWorkspace } from "../workspace";
 
 const maxArtifactUploadBytes = 5 * 1024 * 1024;
+const fetchBlockedPorts = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77,
+  79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123,
+  135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526,
+  530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993,
+  995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566,
+  6665, 6666, 6667, 6668, 6669, 6697, 10080,
+]);
+
+function isFetchBlockedPort(port: number): boolean {
+  return fetchBlockedPorts.has(port);
+}
 
 interface AgentHubMcpSession {
   enabledTools: Set<AgentHubMcpToolName>;
@@ -65,17 +75,35 @@ export class AgentHubMcpRelay {
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      this.#server.listen(0, "127.0.0.1", resolve);
-    });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise<void>((resolve) => {
+        this.#server.listen(0, "127.0.0.1", resolve);
+      });
 
-    const address = this.#server.address();
+      const address = this.#server.address();
 
-    if (address === null || typeof address === "string") {
-      throw new Error("AgentHub MCP relay did not bind to a TCP port.");
+      if (address === null || typeof address === "string") {
+        throw new Error("AgentHub MCP relay did not bind to a TCP port.");
+      }
+
+      if (!isFetchBlockedPort(address.port)) {
+        this.#url = `http://127.0.0.1:${address.port}`;
+        return;
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        this.#server.close((error) => {
+          if (error === undefined) {
+            resolve();
+            return;
+          }
+
+          reject(error);
+        });
+      });
     }
 
-    this.#url = `http://127.0.0.1:${address.port}`;
+    throw new Error("AgentHub MCP relay could not bind to a fetch-safe port.");
   }
 
   async stop(): Promise<void> {
@@ -188,6 +216,60 @@ export class AgentHubMcpRelay {
         return;
       }
 
+      if (toolName === "send_message") {
+        const sendMessageInput = input as AgentHubSendMessageToolInput;
+        const attachments = sendMessageInput.attachments ?? [];
+
+        if (attachments.some((attachment) => attachment.localPath !== undefined)) {
+          if (session.onArtifactUpload === undefined) {
+            writeJson(response, 404, { error: "Message attachments are not available." });
+            return;
+          }
+
+          const uploadedAttachments = [];
+          const uploadedArtifacts = [];
+
+          for (const [index, attachment] of attachments.entries()) {
+            if (attachment.localPath === undefined) {
+              uploadedAttachments.push(attachment);
+              continue;
+            }
+
+            const upload = await readMessageAttachmentUpload({
+              attachment,
+              index,
+              messageTarget: sendMessageInput.target,
+              runId: session.runId,
+              workspacePath: session.workspacePath,
+            });
+            const uploadResult = await session.onArtifactUpload(upload);
+            uploadedArtifacts.push(uploadResult.artifact);
+            uploadedAttachments.push({
+              ...attachment,
+              artifactId: uploadResult.artifact.id,
+              localPath: undefined,
+            });
+          }
+
+          const relayedInput: AgentHubSendMessageToolInput = {
+            ...sendMessageInput,
+            attachments: uploadedAttachments,
+          };
+          const result = await session.onToolCall({
+            runId: session.runId,
+            toolCallId,
+            name: toolName,
+            input: relayedInput,
+            createdAt: new Date().toISOString(),
+          });
+          writeJson(response, 200, {
+            ...result,
+            attachments: uploadedArtifacts,
+          });
+          return;
+        }
+      }
+
       const result = await session.onToolCall({
         runId: session.runId,
         toolCallId,
@@ -233,14 +315,6 @@ function readToolInput(
 
   if (toolName === "send_message") {
     return readSendMessageInput(input);
-  }
-
-  if (toolName === "send_message_to_group") {
-    return readSendMessageToGroupInput(input);
-  }
-
-  if (toolName === "send_message_to_user") {
-    return readSendMessageToUserInput(input);
   }
 
   if (toolName === "list_tasks") {
@@ -304,6 +378,57 @@ async function readArtifactUpload(input: {
   return {
     ...input.input,
     filename: input.input.filename ?? path.basename(resolvedPath),
+    sourcePath,
+    sizeBytes: content.byteLength,
+    contentBase64: content.toString("base64"),
+  };
+}
+
+async function readMessageAttachmentUpload(input: {
+  attachment: NonNullable<AgentHubSendMessageToolInput["attachments"]>[number];
+  index: number;
+  messageTarget?: AgentHubSendMessageToolInput["target"];
+  runId: RunId;
+  workspacePath: string;
+}): Promise<AgentRunArtifactUpload> {
+  if (input.attachment.localPath === undefined) {
+    throw new Error("send_message image attachment localPath is required.");
+  }
+
+  const resolvedPath = path.resolve(input.workspacePath, input.attachment.localPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, resolvedPath)) {
+    throw new Error("send_message attachment localPath must stay inside this run workspace.");
+  }
+
+  const info = await stat(resolvedPath);
+
+  if (!info.isFile()) {
+    throw new Error("send_message attachment localPath must point to a file.");
+  }
+
+  if (info.size > maxArtifactUploadBytes) {
+    throw new Error("send_message attachment file is too large.");
+  }
+
+  const ext = path.extname(resolvedPath).toLowerCase();
+
+  if (![".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext)) {
+    throw new Error("send_message attachment must be an image file.");
+  }
+
+  const content = await readFile(resolvedPath);
+  const sourcePath = path
+    .relative(input.workspacePath, resolvedPath)
+    .split(path.sep)
+    .join("/");
+  const filename = input.attachment.filename ?? path.basename(resolvedPath);
+
+  return {
+    title: input.attachment.title ?? filename,
+    localPath: input.attachment.localPath,
+    messageTarget: input.messageTarget,
+    filename,
     sourcePath,
     sizeBytes: content.byteLength,
     contentBase64: content.toString("base64"),
@@ -376,77 +501,100 @@ function readSendMessageInput(input: unknown): AgentHubSendMessageToolInput | nu
   }
 
   const record = input as Record<string, unknown>;
-  const mentions = Array.isArray(record.mentions)
-    ? record.mentions.flatMap((mention) => {
-        if (
-          typeof mention !== "object" ||
-          mention === null ||
-          Array.isArray(mention)
-        ) {
-          return [];
-        }
+  const target = readSendMessageTarget(record.target);
 
-        const mentionRecord = mention as Record<string, unknown>;
+  if (record.target !== undefined && target === undefined) {
+    return null;
+  }
 
-        return mentionRecord.type === "agent" &&
-          typeof mentionRecord.agentId === "string"
-          ? [
-              {
-                type: "agent" as const,
-                agentId: mentionRecord.agentId,
-                label: typeof mentionRecord.label === "string"
-                  ? mentionRecord.label
-                  : undefined,
-              },
-            ]
-          : [];
-      })
-    : undefined;
-  const taskIds = Array.isArray(record.taskIds)
-    ? record.taskIds.filter((taskId): taskId is string => typeof taskId === "string")
-    : undefined;
+  const attachments = readSendMessageAttachments(record.attachments);
 
   return {
     content: content.trim(),
-    mentions: mentions && mentions.length > 0 ? mentions : undefined,
-    taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+    target,
+    attachments,
   };
 }
 
-function readSendMessageToGroupInput(
-  input: unknown,
-): AgentHubSendMessageToGroupToolInput | null {
-  const record = input as Record<string, unknown>;
-  const groupName = record.groupName;
-  const content = record.content;
+function readSendMessageTarget(
+  value: unknown,
+): AgentHubSendMessageToolInput["target"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (record.type === "current") {
+    return { type: "current" };
+  }
+
+  if (record.type === "user") {
+    return { type: "user" };
+  }
 
   if (
-    typeof groupName !== "string" ||
-    groupName.trim().length === 0 ||
-    typeof content !== "string" ||
-    content.trim().length === 0
+    record.type === "group" &&
+    typeof record.groupName === "string" &&
+    record.groupName.trim().length > 0
   ) {
-    return null;
+    return { type: "group", groupName: record.groupName.trim() };
   }
 
-  return {
-    groupName: groupName.trim(),
-    content: content.trim(),
-  };
+  return undefined;
 }
 
-function readSendMessageToUserInput(
-  input: unknown,
-): AgentHubSendMessageToUserToolInput | null {
-  const content = (input as Record<string, unknown>).content;
-
-  if (typeof content !== "string" || content.trim().length === 0) {
-    return null;
+function readSendMessageAttachments(
+  value: unknown,
+): AgentHubSendMessageToolInput["attachments"] | undefined {
+  if (value === undefined || !Array.isArray(value)) {
+    return undefined;
   }
 
-  return {
-    content: content.trim(),
-  };
+  const attachments = value.flatMap((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (record.type !== "image") {
+      return [];
+    }
+
+    const localPath = typeof record.localPath === "string"
+      ? record.localPath.trim()
+      : undefined;
+    const artifactId = typeof record.artifactId === "string" && record.artifactId.length > 0
+      ? record.artifactId
+      : undefined;
+
+    if ((localPath === undefined || localPath.length === 0) && artifactId === undefined) {
+      return [];
+    }
+
+    return [
+      {
+        type: "image" as const,
+        localPath: localPath && localPath.length > 0 ? localPath : undefined,
+        artifactId,
+        title:
+          typeof record.title === "string" && record.title.trim().length > 0
+            ? record.title.trim()
+            : undefined,
+        filename:
+          typeof record.filename === "string" && record.filename.trim().length > 0
+            ? record.filename.trim()
+            : undefined,
+      },
+    ];
+  });
+
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null {

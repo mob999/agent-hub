@@ -12,13 +12,10 @@ import type {
   AgentHubCreateTaskToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
-  AgentHubCrossConversationMessageToolResult,
   AgentHubListTasksToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
-  AgentHubSendMessageToGroupToolInput,
-  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubSendMessageToolResult,
   AgentHubUploadArtifactToolInput,
@@ -26,18 +23,12 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
-const sendMessageToGroupToolName =
-  "send_message_to_group" satisfies AgentHubMcpToolName;
-const sendMessageToUserToolName =
-  "send_message_to_user" satisfies AgentHubMcpToolName;
 const listTasksToolName = "list_tasks" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
-  sendMessageToGroupToolName,
-  sendMessageToUserToolName,
   listTasksToolName,
   createTaskToolName,
   uploadArtifactToolName,
@@ -77,84 +68,55 @@ export async function startAgentHubMcpStdioServer(
             {
               name: sendMessageToolName,
               description:
-                "Send a visible message to the current AgentHub group conversation. Use this only when you intentionally want to speak in the chat.",
+                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
+                  target: {
+                    type: "object",
+                    additionalProperties: false,
+                    description:
+                      "Optional target. Omit or use { type: 'current' } for the current conversation.",
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: ["current", "group", "user"],
+                      },
+                      groupName: {
+                        type: "string",
+                        minLength: 1,
+                        description:
+                          "Required when type is group. Use the visible group name, with or without #.",
+                      },
+                    },
+                    required: ["type"],
+                  },
                   content: {
                     type: "string",
                     minLength: 1,
                     description: "The chat message content to send.",
                   },
-                  mentions: {
+                  attachments: {
                     type: "array",
                     description:
-                      "Optional AgentHub mentions, usually one per assigned agent.",
+                      "Optional image attachments from the current run workspace.",
                     items: {
                       type: "object",
                       additionalProperties: false,
                       properties: {
-                        type: { const: "agent" },
-                        agentId: { type: "string", minLength: 1 },
-                        label: { type: "string" },
+                        type: { const: "image" },
+                        localPath: {
+                          type: "string",
+                          minLength: 1,
+                          description:
+                            "Path to an image file inside the current run workspace.",
+                        },
+                        title: { type: "string" },
+                        filename: { type: "string" },
                       },
-                      required: ["type", "agentId"],
+                      required: ["type", "localPath"],
                     },
-                  },
-                  taskIds: {
-                    type: "array",
-                    description:
-                      "Task ids created with create_task that this message dispatches.",
-                    items: { type: "string", minLength: 1 },
-                  },
-                },
-                required: ["content"],
-              },
-            },
-          ]
-        : []),
-      ...(enabledTools.has(sendMessageToGroupToolName)
-        ? [
-            {
-              name: sendMessageToGroupToolName,
-              description:
-                "Send a visible message to another active AgentHub group by group name. The current run's agent must be a member of that group.",
-              inputSchema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  groupName: {
-                    type: "string",
-                    minLength: 1,
-                    description:
-                      "The target group name, with or without a leading #.",
-                  },
-                  content: {
-                    type: "string",
-                    minLength: 1,
-                    description: "The chat message content to send.",
-                  },
-                },
-                required: ["groupName", "content"],
-              },
-            },
-          ]
-        : []),
-      ...(enabledTools.has(sendMessageToUserToolName)
-        ? [
-            {
-              name: sendMessageToUserToolName,
-              description:
-                "Send a visible private message to the current AgentHub user.",
-              inputSchema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  content: {
-                    type: "string",
-                    minLength: 1,
-                    description: "The private message content to send.",
                   },
                 },
                 required: ["content"],
@@ -182,7 +144,8 @@ export async function startAgentHubMcpStdioServer(
                       "failed",
                       "cancelled",
                     ],
-                    description: "Optional task status filter.",
+                    description:
+                      "Optional task status filter.",
                   },
                 },
               },
@@ -194,7 +157,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task for one group agent in the current Task mode run.",
+                "Create and dispatch an AgentHub task to one group agent in the current Task mode run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -280,19 +243,15 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
-        : toolName === sendMessageToGroupToolName
-          ? readSendMessageToGroupInput(request.params.arguments)
-          : toolName === sendMessageToUserToolName
-            ? readSendMessageToUserInput(request.params.arguments)
-            : toolName === listTasksToolName
-              ? readListTasksInput(request.params.arguments)
-              : toolName === createTaskToolName
-                ? readCreateTaskInput(request.params.arguments)
-                : toolName === uploadArtifactToolName
-                  ? readUploadArtifactInput(request.params.arguments)
-                  : toolName === completeTaskToolName
-                    ? readCompleteTaskInput(request.params.arguments)
-                    : undefined;
+        : toolName === listTasksToolName
+          ? readListTasksInput(request.params.arguments)
+          : toolName === createTaskToolName
+            ? readCreateTaskInput(request.params.arguments)
+            : toolName === uploadArtifactToolName
+              ? readUploadArtifactInput(request.params.arguments)
+              : toolName === completeTaskToolName
+                ? readCompleteTaskInput(request.params.arguments)
+                : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -346,74 +305,86 @@ function readSendMessageInput(value: unknown): AgentHubSendMessageToolInput {
     throw new Error("send_message.content is required.");
   }
 
-  const mentions = Array.isArray(input.mentions)
-    ? input.mentions.flatMap((mention) => {
-        if (
-          typeof mention !== "object" ||
-          mention === null ||
-          Array.isArray(mention)
-        ) {
-          return [];
-        }
-
-        const record = mention as Record<string, unknown>;
-
-        return record.type === "agent" && typeof record.agentId === "string"
-          ? [
-              {
-                type: "agent" as const,
-                agentId: record.agentId,
-                label: typeof record.label === "string" ? record.label : undefined,
-              },
-            ]
-          : [];
-      })
-    : undefined;
-  const taskIds = Array.isArray(input.taskIds)
-    ? input.taskIds.filter((taskId): taskId is string => typeof taskId === "string")
-    : undefined;
-
   return {
     content: content.trim(),
-    mentions: mentions && mentions.length > 0 ? mentions : undefined,
-    taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+    target: readSendMessageTarget(input.target),
+    attachments: readSendMessageAttachments(input.attachments),
   };
 }
 
-function readSendMessageToGroupInput(
+function readSendMessageTarget(
   value: unknown,
-): AgentHubSendMessageToGroupToolInput {
-  const input = readObjectArguments(value, "send_message_to_group");
-  const groupName = input.groupName;
-  const content = input.content;
-
-  if (typeof groupName !== "string" || groupName.trim().length === 0) {
-    throw new Error("send_message_to_group.groupName is required.");
+): AgentHubSendMessageToolInput["target"] {
+  if (value === undefined) {
+    return undefined;
   }
 
-  if (typeof content !== "string" || content.trim().length === 0) {
-    throw new Error("send_message_to_group.content is required.");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("send_message.target must be an object.");
   }
 
-  return {
-    groupName: groupName.trim(),
-    content: content.trim(),
-  };
+  const record = value as Record<string, unknown>;
+
+  if (record.type === "current") {
+    return { type: "current" };
+  }
+
+  if (record.type === "user") {
+    return { type: "user" };
+  }
+
+  if (record.type === "group") {
+    if (typeof record.groupName !== "string" || record.groupName.trim().length === 0) {
+      throw new Error("send_message.target.groupName is required for group targets.");
+    }
+
+    return { type: "group", groupName: record.groupName.trim() };
+  }
+
+  throw new Error("send_message.target.type must be current, group, or user.");
 }
 
-function readSendMessageToUserInput(
+function readSendMessageAttachments(
   value: unknown,
-): AgentHubSendMessageToUserToolInput {
-  const input = readObjectArguments(value, "send_message_to_user");
-  const content = input.content;
-
-  if (typeof content !== "string" || content.trim().length === 0) {
-    throw new Error("send_message_to_user.content is required.");
+): AgentHubSendMessageToolInput["attachments"] {
+  if (value === undefined) {
+    return undefined;
   }
 
-  return {
-    content: content.trim(),
-  };
+  if (!Array.isArray(value)) {
+    throw new Error("send_message.attachments must be an array.");
+  }
+
+  const attachments = value.map((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new Error("send_message attachment must be an object.");
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (record.type !== "image") {
+      throw new Error("send_message attachment type must be image.");
+    }
+
+    if (typeof record.localPath !== "string" || record.localPath.trim().length === 0) {
+      throw new Error("send_message image attachment localPath is required.");
+    }
+
+    return {
+      type: "image" as const,
+      localPath: record.localPath.trim(),
+      title:
+        typeof record.title === "string" && record.title.trim().length > 0
+          ? record.title.trim()
+          : undefined,
+      filename:
+        typeof record.filename === "string" && record.filename.trim().length > 0
+          ? record.filename.trim()
+          : undefined,
+    };
+  });
+
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 function readListTasksInput(value: unknown): AgentHubListTasksToolInput {
@@ -527,8 +498,6 @@ async function callRelayTool(input: {
   input:
     | AgentHubCreateTaskToolInput
     | AgentHubSendMessageToolInput
-    | AgentHubSendMessageToGroupToolInput
-    | AgentHubSendMessageToUserToolInput
     | AgentHubListTasksToolInput
     | AgentHubUploadArtifactToolInput
     | AgentHubCompleteTaskToolInput;
@@ -558,7 +527,6 @@ async function callRelayTool(input: {
   return (await response.json()) as
     | AgentHubCreateTaskToolResult
     | AgentHubSendMessageToolResult
-    | AgentHubCrossConversationMessageToolResult
     | AgentHubListTasksToolResult
     | AgentHubUploadArtifactToolResult
     | AgentHubCompleteTaskToolResult;

@@ -78,6 +78,13 @@
       "when": 1780000000000,
       "tag": "0010_bitter_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780025154323,
+      "tag": "0011_youthful_centennial",
+      "breakpoints": true
     }
   ]
 }

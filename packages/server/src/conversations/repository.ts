@@ -4,8 +4,7 @@ import type {
   AgentHubCreateTaskToolInput,
   AgentHubCompleteTaskToolInput,
   AgentHubListTasksToolResult,
-  AgentHubSendMessageToGroupToolInput,
-  AgentHubSendMessageToUserToolInput,
+  AgentHubSendMessageTarget,
   AgentHubUploadArtifactToolInput,
   AgentHubSendMessageToolInput,
   Conversation,
@@ -14,6 +13,7 @@ import type {
   ConversationArtifactActionType,
   ConversationId,
   ConversationMessage,
+  ConversationMessageAttachment,
   ConversationArtifactDetails,
   ConversationArtifactRevision,
   ConversationTask,
@@ -31,6 +31,7 @@ import {
   conversationArtifactActions,
   conversationArtifacts,
   conversationArtifactRevisions,
+  conversationMessageArtifacts,
   conversationMessages,
   conversationTasks,
   conversations,
@@ -61,6 +62,8 @@ type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 type ConversationTaskRow = typeof conversationTasks.$inferSelect;
 type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
+type ConversationMessageArtifactRow =
+  typeof conversationMessageArtifacts.$inferSelect;
 type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
@@ -117,10 +120,11 @@ export interface PersistConversationArtifactUploadInput {
   publicApiBaseUrl?: string;
   publicWebBaseUrl?: string;
   runId: string;
+  messageTarget?: AgentHubSendMessageTarget;
   sizeBytes: number;
   sourcePath?: string;
   storageRoot: string;
-  taskId: string;
+  taskId?: string;
   title: string;
 }
 
@@ -175,6 +179,7 @@ export function toConversation(
 
 export function toConversationMessage(
   row: ConversationMessageRow,
+  attachments: ConversationMessageAttachment[] = [],
 ): ConversationMessage {
   return {
     id: row.id,
@@ -185,6 +190,7 @@ export function toConversationMessage(
     content: row.content,
     status: row.status as ConversationMessage["status"],
     error: optionalString(row.error),
+    attachments: attachments.length > 0 ? attachments : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -250,6 +256,20 @@ export function toConversationArtifact(
           }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function toConversationMessageAttachment(
+  row: ConversationMessageArtifactRow,
+  artifact: ConversationArtifact,
+): ConversationMessageAttachment {
+  return {
+    id: row.id,
+    messageId: row.messageId,
+    artifactId: row.artifactId,
+    type: row.type as ConversationMessageAttachment["type"],
+    artifact,
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -465,9 +485,9 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
   return [
     "<agenthub_agent_groups>",
     ...groupLines,
-    "Use send_message_to_group with a listed groupName to send a visible message to one of these groups.",
+    "Use send_message with target { type: \"group\", groupName } to send a visible message to one of these groups.",
     "To wake another agent in a group, include @AgentName in the message content.",
-    "Use send_message_to_user to send a visible private message to the current user.",
+    "Use send_message with target { type: \"user\" } to send a visible private message to the current user.",
     "Archived groups are not listed and cannot be targeted.",
     "</agenthub_agent_groups>",
   ].join("\n");
@@ -1142,6 +1162,8 @@ export async function listConversationMessagesForUser(
     ownerUserId: string;
     limit?: number;
     before?: Date;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<ConversationMessage[] | null> {
   const conversation = await getConversationForUser(db, input);
@@ -1163,7 +1185,46 @@ export async function listConversationMessagesForUser(
     .orderBy(desc(conversationMessages.createdAt))
     .limit(input.limit ?? 50);
 
-  return rows.reverse().map(toConversationMessage);
+  const orderedRows = rows.reverse();
+  const messageIds = orderedRows.map((row) => row.id);
+
+  if (messageIds.length === 0) {
+    return [];
+  }
+
+  const attachmentRows = await db
+    .select({
+      attachment: conversationMessageArtifacts,
+      artifact: conversationArtifacts,
+    })
+    .from(conversationMessageArtifacts)
+    .innerJoin(
+      conversationArtifacts,
+      eq(conversationArtifacts.id, conversationMessageArtifacts.artifactId),
+    )
+    .where(inArray(conversationMessageArtifacts.messageId, messageIds))
+    .orderBy(
+      asc(conversationMessageArtifacts.messageId),
+      asc(conversationMessageArtifacts.position),
+    );
+  const attachmentsByMessage = new Map<string, ConversationMessageAttachment[]>();
+
+  for (const row of attachmentRows) {
+    const attachment = toConversationMessageAttachment(
+      row.attachment,
+      toConversationArtifact(row.artifact, {
+        publicApiBaseUrl: input.publicApiBaseUrl,
+        publicWebBaseUrl: input.publicWebBaseUrl,
+      }),
+    );
+    const attachments = attachmentsByMessage.get(row.attachment.messageId) ?? [];
+    attachments.push(attachment);
+    attachmentsByMessage.set(row.attachment.messageId, attachments);
+  }
+
+  return orderedRows.map((row) =>
+    toConversationMessage(row, attachmentsByMessage.get(row.id)),
+  );
 }
 
 export async function listConversationTasksForUser(
@@ -1669,28 +1730,46 @@ export async function persistConversationArtifactUpload(
     throw new Error("Artifact upload run was not found.");
   }
 
-  const [task] = await db
-    .select()
-    .from(conversationTasks)
-    .where(
-      and(
-        eq(conversationTasks.id, input.taskId),
-        eq(conversationTasks.conversationId, run.conversationId),
-        eq(conversationTasks.assigneeRunId, input.runId),
-        eq(conversationTasks.assigneeAgentId, run.agentId),
-      ),
-    )
-    .limit(1);
+  const targetConversation = input.taskId === undefined
+    ? await getSendMessageTargetConversation(db, {
+        currentConversationId: run.conversationId,
+        ownerUserId: run.ownerUserId,
+        runAgentId: run.agentId,
+        target: input.messageTarget,
+      })
+    : null;
+  const artifactConversationId = input.taskId === undefined
+    ? targetConversation?.id
+    : run.conversationId;
 
-  if (task === undefined) {
-    throw new Error("Artifact task does not belong to this run.");
+  if (artifactConversationId === undefined) {
+    throw new Error("Artifact upload target conversation was not found.");
+  }
+
+  if (input.taskId !== undefined) {
+    const [task] = await db
+      .select()
+      .from(conversationTasks)
+      .where(
+        and(
+          eq(conversationTasks.id, input.taskId),
+          eq(conversationTasks.conversationId, artifactConversationId),
+          eq(conversationTasks.assigneeRunId, input.runId),
+          eq(conversationTasks.assigneeAgentId, run.agentId),
+        ),
+      )
+      .limit(1);
+
+    if (task === undefined) {
+      throw new Error("Artifact task does not belong to this run.");
+    }
   }
 
   const artifactId = randomUUID();
   const filename = sanitizeArtifactFilename(input.filename);
   const storageKey = conversationArtifactStorageKey({
     artifactId,
-    conversationId: run.conversationId,
+    conversationId: artifactConversationId,
     filename,
   });
   const writtenBytes = await writeArtifactContent({
@@ -1709,8 +1788,8 @@ export async function persistConversationArtifactUpload(
     .values({
       id: artifactId,
       ownerUserId: run.ownerUserId,
-      conversationId: run.conversationId,
-      taskId: task.id,
+      conversationId: artifactConversationId,
+      taskId: input.taskId,
       runId: input.runId,
       creatorAgentId: run.agentId,
       status: "ready",
@@ -1962,56 +2041,81 @@ function readSendMessageToolInput(
   }
 
   const content = (input as AgentHubSendMessageToolInput).content;
+  const record = input as Record<string, unknown>;
 
   return typeof content === "string" && content.trim().length > 0
-    ? (input as AgentHubSendMessageToolInput)
-    : null;
-}
-
-function readSendMessageToGroupToolInput(
-  input: unknown,
-): AgentHubSendMessageToGroupToolInput | null {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    Array.isArray(input) ||
-    !("groupName" in input) ||
-    !("content" in input)
-  ) {
-    return null;
-  }
-
-  const groupName = (input as AgentHubSendMessageToGroupToolInput).groupName;
-  const content = (input as AgentHubSendMessageToGroupToolInput).content;
-
-  return typeof groupName === "string" &&
-    groupName.trim().length > 0 &&
-    typeof content === "string" &&
-    content.trim().length > 0
     ? {
-        groupName: groupName.trim(),
         content: content.trim(),
+        target: readSendMessageTarget(record.target),
+        attachments: readSendMessageAttachments(record.attachments),
       }
     : null;
 }
 
-function readSendMessageToUserToolInput(
-  input: unknown,
-): AgentHubSendMessageToUserToolInput | null {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    Array.isArray(input) ||
-    !("content" in input)
-  ) {
-    return null;
+function readSendMessageTarget(
+  value: unknown,
+): AgentHubSendMessageToolInput["target"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
   }
 
-  const content = (input as AgentHubSendMessageToUserToolInput).content;
+  const record = value as Record<string, unknown>;
 
-  return typeof content === "string" && content.trim().length > 0
-    ? { content: content.trim() }
-    : null;
+  if (record.type === "current") {
+    return { type: "current" };
+  }
+
+  if (record.type === "user") {
+    return { type: "user" };
+  }
+
+  if (
+    record.type === "group" &&
+    typeof record.groupName === "string" &&
+    record.groupName.trim().length > 0
+  ) {
+    return { type: "group", groupName: record.groupName.trim() };
+  }
+
+  return undefined;
+}
+
+function readSendMessageAttachments(
+  value: unknown,
+): AgentHubSendMessageToolInput["attachments"] {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const attachments = value.flatMap((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (record.type !== "image") {
+      return [];
+    }
+
+    const artifactId = typeof record.artifactId === "string" &&
+      record.artifactId.length > 0
+      ? record.artifactId
+      : undefined;
+
+    if (artifactId === undefined) {
+      return [];
+    }
+
+    return [{
+      type: "image" as const,
+      artifactId,
+      title: typeof record.title === "string" ? record.title.trim() : undefined,
+      filename: typeof record.filename === "string" ? record.filename.trim() : undefined,
+    }];
+  });
+
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 function readCreateTaskToolInput(
@@ -2107,18 +2211,6 @@ function readCompleteTaskToolInput(
     : null;
 }
 
-function mentionAgentReferences(input: AgentHubSendMessageToolInput): string[] {
-  return compactUniqueStrings(
-    input.mentions?.flatMap((mention) => {
-      if (mention.type !== "agent") {
-        return [];
-      }
-
-      return [mention.agentId, mention.label];
-    }) ?? [],
-  );
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -2178,16 +2270,110 @@ function groupToolNameToKey(groupName: string): string {
   return groupName.replace(/^#+/, "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function sendMessageAttachmentArtifactIds(
+  input: AgentHubSendMessageToolInput,
+): string[] {
+  return compactUniqueStrings(
+    input.attachments?.flatMap((attachment) =>
+      attachment.type === "image" && attachment.artifactId !== undefined
+        ? [attachment.artifactId]
+        : [],
+    ) ?? [],
+  );
+}
+
+async function getSendMessageTargetConversation(
+  db: Db,
+  input: {
+    currentConversationId: string | null;
+    ownerUserId: string;
+    runAgentId: string;
+    target?: AgentHubSendMessageToolInput["target"];
+  },
+): Promise<ConversationRow | null> {
+  const target = input.target ?? { type: "current" as const };
+
+  if (target.type === "user") {
+    const conversation = await ensureDirectConversation(db, {
+      agentId: input.runAgentId,
+      ownerUserId: input.ownerUserId,
+    });
+
+    if (conversation === null) {
+      return null;
+    }
+
+    const [row] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversation.id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  if (target.type === "group") {
+    const [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+          eq(conversations.status, "active"),
+          eq(conversations.key, groupToolNameToKey(target.groupName)),
+        ),
+      )
+      .limit(1);
+
+    if (
+      conversation === undefined ||
+      !(await isConversationAgentMember(db, {
+        agentId: input.runAgentId,
+        conversation,
+      }))
+    ) {
+      return null;
+    }
+
+    return conversation;
+  }
+
+  if (input.currentConversationId === null) {
+    return null;
+  }
+
+  const [conversation] = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, input.currentConversationId),
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.status, "active"),
+      ),
+    )
+    .limit(1);
+
+  return conversation ?? null;
+}
+
 async function insertCompletedAgentMessage(
   db: Db,
   input: {
     agentId: string;
+    artifactIds?: string[];
     content: string;
     conversationId: string;
     createdAt: Date;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
     runId: string;
   },
-): Promise<ConversationMessageRow> {
+): Promise<{
+  attachments: ConversationMessageAttachment[];
+  message: ConversationMessageRow;
+}> {
   return db.transaction(async (tx) => {
     const [message] = await tx.insert(conversationMessages).values({
       conversationId: input.conversationId,
@@ -2199,6 +2385,59 @@ async function insertCompletedAgentMessage(
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
     }).returning();
+    const artifactIds = compactUniqueStrings(input.artifactIds ?? []);
+    const attachments: ConversationMessageAttachment[] = [];
+
+    if (artifactIds.length > 0) {
+      const artifactRows = await tx
+        .select()
+        .from(conversationArtifacts)
+        .where(
+          and(
+            eq(conversationArtifacts.conversationId, input.conversationId),
+            eq(conversationArtifacts.runId, input.runId),
+            eq(conversationArtifacts.creatorAgentId, input.agentId),
+            inArray(conversationArtifacts.id, artifactIds),
+          ),
+        );
+      const artifactById = new Map(artifactRows.map((artifact) => [artifact.id, artifact]));
+      const orderedArtifactRows = artifactIds.flatMap((artifactId) => {
+        const artifact = artifactById.get(artifactId);
+
+        return artifact === undefined ? [] : [artifact];
+      });
+
+      if (orderedArtifactRows.length > 0) {
+        const attachmentRows = await tx
+          .insert(conversationMessageArtifacts)
+          .values(
+            orderedArtifactRows.map((artifact, index) => ({
+              messageId: message.id,
+              artifactId: artifact.id,
+              type: "image",
+              position: index,
+              createdAt: input.createdAt,
+            })),
+          )
+          .returning();
+
+        for (const attachmentRow of attachmentRows) {
+          const artifact = artifactById.get(attachmentRow.artifactId);
+
+          if (artifact !== undefined) {
+            attachments.push(
+              toConversationMessageAttachment(
+                attachmentRow,
+                toConversationArtifact(artifact, {
+                  publicApiBaseUrl: input.publicApiBaseUrl,
+                  publicWebBaseUrl: input.publicWebBaseUrl,
+                }),
+              ),
+            );
+          }
+        }
+      }
+    }
 
     await tx
       .update(conversations)
@@ -2208,7 +2447,7 @@ async function insertCompletedAgentMessage(
       })
       .where(eq(conversations.id, input.conversationId));
 
-    return message;
+    return { attachments, message };
   });
 }
 
@@ -2317,29 +2556,6 @@ async function resolveConversationAgentReference(
   );
 
   return match?.id ?? null;
-}
-
-async function resolveMentionedAgentIds(
-  db: Db,
-  input: {
-    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">;
-    message: AgentHubSendMessageToolInput;
-  },
-): Promise<string[]> {
-  const resolvedAgentIds: string[] = [];
-
-  for (const reference of mentionAgentReferences(input.message)) {
-    const agentId = await resolveConversationAgentReference(db, {
-      conversation: input.conversation,
-      reference,
-    });
-
-    if (agentId !== null) {
-      resolvedAgentIds.push(agentId);
-    }
-  }
-
-  return compactUniqueStrings(resolvedAgentIds);
 }
 
 export function buildAssignedTaskPrompt(input: {
@@ -2609,23 +2825,29 @@ async function persistVisibleAgentMessageAndDispatchMentions(
   db: Db,
   input: {
     agentId: string;
+    artifactIds?: string[];
     content: string;
     conversation: ConversationRow;
     createdAt: Date;
     eventCreatedAt: string;
     ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
     runId: string;
   },
 ): Promise<{
   dispatchJobs: RunQueueJob[];
-  message: ConversationMessageRow;
+  message: ConversationMessage;
   realtimeEvents: RealtimeEvent[];
 }> {
-  const message = await insertCompletedAgentMessage(db, {
+  const { attachments, message } = await insertCompletedAgentMessage(db, {
     agentId: input.agentId,
+    artifactIds: input.artifactIds,
     content: input.content,
     conversationId: input.conversation.id,
     createdAt: input.createdAt,
+    publicApiBaseUrl: input.publicApiBaseUrl,
+    publicWebBaseUrl: input.publicWebBaseUrl,
     runId: input.runId,
   });
   const mentionResult = await createMentionedGroupChatRuns(db, {
@@ -2640,7 +2862,7 @@ async function persistVisibleAgentMessageAndDispatchMentions(
   const realtimeEvents: RealtimeEvent[] = [
     createRealtimeEvent({
       conversationId: input.conversation.id,
-      message: toConversationMessage(message),
+      message: toConversationMessage(message, attachments),
       ownerUserId: input.ownerUserId,
       type: "conversation.message.created",
     }),
@@ -2652,7 +2874,11 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     ...mentionResult.realtimeEvents,
   ];
 
-  return { dispatchJobs: mentionResult.dispatchJobs, message, realtimeEvents };
+  return {
+    dispatchJobs: mentionResult.dispatchJobs,
+    message: toConversationMessage(message, attachments),
+    realtimeEvents,
+  };
 }
 
 function isTerminalTaskStatus(status: string): boolean {
@@ -2992,36 +3218,256 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
+      const [assignee] = await db
+        .select({ id: agents.id, name: agents.name })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.id, assigneeAgentId),
+            eq(agents.ownerUserId, run.ownerUserId),
+          ),
+        )
+        .limit(1);
+
+      if (assignee === undefined) {
+        return result();
+      }
+
       const createdAt = new Date(event.createdAt);
-      const [createdTask] = await db
-        .insert(conversationTasks)
-        .values({
-          id: input.taskId ?? randomUUID(),
+      const taskId = input.taskId ?? randomUUID();
+      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nTask ID: ${taskId}`;
+      const runAgent = isSelfAssigned
+        ? null
+        : await getRunnableAgentForUser(db, {
+            agentId: assigneeAgentId,
+            ownerUserId: run.ownerUserId,
+          });
+
+      if (!isSelfAssigned && runAgent === null) {
+        const [createdTask] = await db
+          .insert(conversationTasks)
+          .values({
+            id: taskId,
+            ownerUserId: run.ownerUserId,
+            conversationId: conversation.id,
+            creatorRunId: event.runId,
+            orchestratorAgentId: run.agentId,
+            assigneeAgentId,
+            title: input.title,
+            description: input.description,
+            status: "failed",
+            summary: "Assignee agent is not ready.",
+            createdAt,
+            updatedAt: createdAt,
+          })
+          .onConflictDoNothing()
+          .returning({ id: conversationTasks.id });
+
+        if (createdTask !== undefined) {
+          realtimeEvents.push(
+            createRealtimeEvent({
+              conversationId: conversation.id,
+              ownerUserId: run.ownerUserId,
+              taskId: createdTask.id,
+              type: "task.updated",
+            }),
+          );
+        }
+
+        await maybeCreateFinalizationRun(db, {
+          creatorRunId: event.runId,
+          createdAt,
+          dispatchJobs,
+          publicApiBaseUrl: options.publicApiBaseUrl,
+          publicWebBaseUrl: options.publicWebBaseUrl,
+          realtimeEvents,
+        });
+
+        return result();
+      }
+
+      const agentGroupsPrompt = runAgent === null
+        ? undefined
+        : buildAgentGroupsPrompt(
+            await listActiveAgentGroupContexts(db, {
+              agentId: runAgent.agent.id,
+              ownerUserId: run.ownerUserId,
+            }),
+          );
+      const runId = randomUUID();
+      const existingTaskRows = await db
+        .select()
+        .from(conversationTasks)
+        .where(eq(conversationTasks.conversationId, conversation.id))
+        .orderBy(asc(conversationTasks.createdAt));
+      const agentHubMcpTasks = toMcpTaskListFromRows([
+        ...existingTaskRows,
+        {
+          id: taskId,
           ownerUserId: run.ownerUserId,
           conversationId: conversation.id,
           creatorRunId: event.runId,
           orchestratorAgentId: run.agentId,
           assigneeAgentId,
-          assigneeRunId: isSelfAssigned ? event.runId : undefined,
+          assigneeRunId: runAgent === null ? event.runId : runId,
+          dispatchMessageId: null,
           title: input.title,
-          description: input.description,
-          status: isSelfAssigned ? "running" : "created",
+          description: input.description ?? null,
+          status: runAgent === null ? "running" : "assigned",
+          summary: null,
+          resultArtifactIds: null,
+          completedAt: null,
+          finalizerRunId: null,
           createdAt,
           updatedAt: createdAt,
-        })
-        .onConflictDoNothing()
-        .returning({ id: conversationTasks.id });
+        },
+      ]);
+      const job: RunQueueJob | null = runAgent === null
+        ? null
+        : {
+            conversationId: conversation.id,
+            daemonDeviceId: runAgent.daemonDeviceId,
+            prompt: buildAssignedTaskPrompt({
+              conversationTitle: conversation.title,
+              taskId,
+              taskTitle: input.title,
+              taskDescription: input.description,
+              dispatchMessage: dispatchContent,
+              agentGroupsPrompt,
+            }),
+            agentInstructions: buildAssignedTaskInstructions({
+              agentDescription: runAgent.agent.description,
+              conversationTitle: conversation.title,
+            }),
+            agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+            agentHubMcpTasks,
+            workspacePath: runAgent.workspacePath,
+            run: {
+              id: runId,
+              agentId: runAgent.agent.id,
+              daemonDeviceId: runAgent.daemonDeviceId,
+              status: "queued",
+              createdAt: event.createdAt,
+              updatedAt: event.createdAt,
+            },
+            runtime: runAgent.runtime,
+          };
+      const queuedEvent: RunEvent | null = job === null
+        ? null
+        : {
+            type: "run.queued",
+            runId,
+            agentId: job.run.agentId,
+            daemonDeviceId: job.daemonDeviceId,
+            createdAt: event.createdAt,
+          };
 
-      if (createdTask !== undefined) {
+      await db.transaction(async (tx) => {
+        const [message] = await tx.insert(conversationMessages).values({
+          conversationId: conversation.id,
+          senderType: "agent",
+          senderAgentId: run.agentId,
+          runId: event.runId,
+          content: dispatchContent,
+          status: "completed",
+          createdAt,
+          updatedAt: createdAt,
+        }).returning();
+
+        const [createdTask] = await tx
+          .insert(conversationTasks)
+          .values({
+            id: taskId,
+            ownerUserId: run.ownerUserId,
+            conversationId: conversation.id,
+            creatorRunId: event.runId,
+            orchestratorAgentId: run.agentId,
+            assigneeAgentId,
+            assigneeRunId: job === null ? event.runId : runId,
+            dispatchMessageId: message.id,
+            title: input.title,
+            description: input.description,
+            status: job === null ? "running" : "assigned",
+            createdAt,
+            updatedAt: createdAt,
+          })
+          .onConflictDoNothing()
+          .returning({ id: conversationTasks.id });
+
+        if (createdTask === undefined) {
+          return;
+        }
+
+        if (job !== null && queuedEvent !== null) {
+          await tx.insert(runs).values({
+            id: runId,
+            ownerUserId: run.ownerUserId,
+            conversationId: conversation.id,
+            agentId: job.run.agentId,
+            daemonDeviceId: job.daemonDeviceId,
+            status: "queued",
+            prompt: job.prompt,
+            workspacePath: job.workspacePath,
+            runtime: job.runtime,
+            createdAt,
+            updatedAt: createdAt,
+          });
+
+          await tx.insert(runEvents).values({
+            runId,
+            eventType: queuedEvent.type,
+            payload: queuedEvent,
+            createdAt,
+          });
+        }
+
+        await tx
+          .update(conversations)
+          .set({
+            lastMessageAt: createdAt,
+            updatedAt: createdAt,
+          })
+          .where(eq(conversations.id, conversation.id));
+
         realtimeEvents.push(
           createRealtimeEvent({
             conversationId: conversation.id,
+            message: toConversationMessage(message),
             ownerUserId: run.ownerUserId,
-            taskId: createdTask.id,
+            type: "conversation.message.created",
+          }),
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            ownerUserId: run.ownerUserId,
+            type: "conversation.updated",
+          }),
+          createRealtimeEvent({
+            conversationId: conversation.id,
+            ownerUserId: run.ownerUserId,
+            taskId,
             type: "task.updated",
           }),
         );
-      }
+
+        if (job !== null && queuedEvent !== null) {
+          dispatchJobs.push(job);
+          realtimeEvents.push(
+            createRealtimeEvent({
+              conversationId: conversation.id,
+              ownerUserId: run.ownerUserId,
+              run: job.run,
+              type: "run.updated",
+            }),
+            createRealtimeEvent({
+              conversationId: conversation.id,
+              event: queuedEvent,
+              ownerUserId: run.ownerUserId,
+              runId,
+              type: "run.event.created",
+            }),
+          );
+        }
+      });
 
       return result();
     }
@@ -3126,117 +3572,6 @@ export async function appendRunEventToConversationMessage(
       return result();
     }
 
-    if (event.name === "send_message_to_group") {
-      const input = readSendMessageToGroupToolInput(event.input);
-
-      if (input === null) {
-        return result();
-      }
-
-      const [run] = await db
-        .select({
-          agentId: runs.agentId,
-          ownerUserId: runs.ownerUserId,
-        })
-        .from(runs)
-        .where(eq(runs.id, event.runId))
-        .limit(1);
-
-      if (run === undefined) {
-        return result();
-      }
-
-      const [targetConversation] = await db
-        .select()
-        .from(conversations)
-        .where(
-          and(
-            eq(conversations.ownerUserId, run.ownerUserId),
-            eq(conversations.type, "group"),
-            eq(conversations.status, "active"),
-            eq(conversations.key, groupToolNameToKey(input.groupName)),
-          ),
-        )
-        .limit(1);
-
-      if (
-        targetConversation === undefined ||
-        !(await isConversationAgentMember(db, {
-          agentId: run.agentId,
-          conversation: targetConversation,
-        }))
-      ) {
-        return result();
-      }
-
-      const persisted = await persistVisibleAgentMessageAndDispatchMentions(db, {
-        agentId: run.agentId,
-        content: input.content,
-        conversation: targetConversation,
-        createdAt: new Date(event.createdAt),
-        eventCreatedAt: event.createdAt,
-        ownerUserId: run.ownerUserId,
-        runId: event.runId,
-      });
-      dispatchJobs.push(...persisted.dispatchJobs);
-      realtimeEvents.push(...persisted.realtimeEvents);
-
-      return result();
-    }
-
-    if (event.name === "send_message_to_user") {
-      const input = readSendMessageToUserToolInput(event.input);
-
-      if (input === null) {
-        return result();
-      }
-
-      const [run] = await db
-        .select({
-          agentId: runs.agentId,
-          ownerUserId: runs.ownerUserId,
-        })
-        .from(runs)
-        .where(eq(runs.id, event.runId))
-        .limit(1);
-
-      if (run === undefined) {
-        return result();
-      }
-
-      const conversation = await ensureDirectConversation(db, {
-        agentId: run.agentId,
-        ownerUserId: run.ownerUserId,
-      });
-
-      if (conversation === null) {
-        return result();
-      }
-
-      const message = await insertCompletedAgentMessage(db, {
-        agentId: run.agentId,
-        content: input.content,
-        conversationId: conversation.id,
-        createdAt: new Date(event.createdAt),
-        runId: event.runId,
-      });
-      realtimeEvents.push(
-        createRealtimeEvent({
-          conversationId: conversation.id,
-          ownerUserId: run.ownerUserId,
-          type: "conversation.updated",
-        }),
-        createRealtimeEvent({
-          conversationId: conversation.id,
-          message: toConversationMessage(message),
-          ownerUserId: run.ownerUserId,
-          type: "conversation.message.created",
-        }),
-      );
-
-      return result();
-    }
-
     if (event.name !== "send_message") {
       return result();
     }
@@ -3244,12 +3579,6 @@ export async function appendRunEventToConversationMessage(
     const input = readSendMessageToolInput(event.input);
 
     if (input === null) {
-      return result();
-    }
-
-    const content = input.content.trim();
-
-    if (content.length === 0) {
       return result();
     }
 
@@ -3263,213 +3592,36 @@ export async function appendRunEventToConversationMessage(
       .where(eq(runs.id, event.runId))
       .limit(1);
 
-    if (run === undefined || run.conversationId === null) {
+    if (run === undefined) {
       return result();
     }
 
-    const conversationId = run.conversationId;
-    const createdAt = new Date(event.createdAt);
-    const [conversation] = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .limit(1);
-
-    if (conversation === undefined) {
-      return result();
-    }
-
-    const taskIds = compactUniqueStrings(input.taskIds ?? []);
-
-    if (taskIds.length === 0) {
-      const persisted = await persistVisibleAgentMessageAndDispatchMentions(db, {
-        agentId: run.agentId,
-        content,
-        conversation,
-        createdAt,
-        eventCreatedAt: event.createdAt,
-        ownerUserId: run.ownerUserId,
-        runId: event.runId,
-      });
-
-      dispatchJobs.push(...persisted.dispatchJobs);
-      realtimeEvents.push(...persisted.realtimeEvents);
-      return result();
-    }
-
-    await db.transaction(async (tx) => {
-      const [message] = await tx.insert(conversationMessages).values({
-        conversationId: conversation.id,
-        senderType: "agent",
-        senderAgentId: run.agentId,
-        runId: event.runId,
-        content,
-        status: "completed",
-        createdAt,
-        updatedAt: createdAt,
-      }).returning();
-
-      const mentionedAgentIds = await resolveMentionedAgentIds(db, {
-        conversation,
-        message: input,
-      });
-
-      const conversationTaskRows = await tx
-        .select()
-        .from(conversationTasks)
-        .where(eq(conversationTasks.conversationId, conversation.id))
-        .orderBy(asc(conversationTasks.createdAt));
-      const agentHubMcpTasks = toMcpTaskListFromRows(conversationTaskRows);
-      const taskWhere = [
-        eq(conversationTasks.conversationId, conversation.id),
-        eq(conversationTasks.creatorRunId, event.runId),
-        eq(conversationTasks.orchestratorAgentId, run.agentId),
-        inArray(conversationTasks.id, taskIds),
-        eq(conversationTasks.status, "created"),
-      ];
-      const taskRows = await tx
-        .select()
-        .from(conversationTasks)
-        .where(
-          and(
-            ...taskWhere,
-            ...(mentionedAgentIds.length === 0
-              ? []
-              : [inArray(conversationTasks.assigneeAgentId, mentionedAgentIds)]),
-          ),
-        )
-        .orderBy(asc(conversationTasks.createdAt));
-
-      for (const task of taskRows) {
-        const runAgent = await getRunnableAgentForUser(db, {
-          agentId: task.assigneeAgentId,
-          ownerUserId: run.ownerUserId,
-        });
-
-        if (runAgent === null) {
-          continue;
-        }
-
-        const agentGroupsPrompt = buildAgentGroupsPrompt(
-          await listActiveAgentGroupContexts(db, {
-            agentId: runAgent.agent.id,
-            ownerUserId: run.ownerUserId,
-          }),
-        );
-        const runId = randomUUID();
-        const job: RunQueueJob = {
-          conversationId: conversation.id,
-          daemonDeviceId: runAgent.daemonDeviceId,
-          prompt: buildAssignedTaskPrompt({
-            conversationTitle: conversation.title,
-            taskId: task.id,
-            taskTitle: task.title,
-            taskDescription: optionalString(task.description),
-            dispatchMessage: content,
-            agentGroupsPrompt,
-          }),
-          agentInstructions: buildAssignedTaskInstructions({
-            agentDescription: runAgent.agent.description,
-            conversationTitle: conversation.title,
-          }),
-          agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-          agentHubMcpTasks,
-          workspacePath: runAgent.workspacePath,
-          run: {
-            id: runId,
-            agentId: runAgent.agent.id,
-            daemonDeviceId: runAgent.daemonDeviceId,
-            status: "queued",
-            createdAt: event.createdAt,
-            updatedAt: event.createdAt,
-          },
-          runtime: runAgent.runtime,
-        };
-        const queuedEvent: RunEvent = {
-          type: "run.queued",
-          runId,
-          agentId: runAgent.agent.id,
-          daemonDeviceId: runAgent.daemonDeviceId,
-          createdAt: event.createdAt,
-        };
-
-        await tx.insert(runs).values({
-          id: runId,
-          ownerUserId: run.ownerUserId,
-          conversationId: conversation.id,
-          agentId: runAgent.agent.id,
-          daemonDeviceId: runAgent.daemonDeviceId,
-          status: "queued",
-          prompt: job.prompt,
-          workspacePath: runAgent.workspacePath,
-          runtime: runAgent.runtime,
-          createdAt,
-          updatedAt: createdAt,
-        });
-
-        await tx.insert(runEvents).values({
-          runId,
-          eventType: queuedEvent.type,
-          payload: queuedEvent,
-          createdAt,
-        });
-
-        await tx
-          .update(conversationTasks)
-          .set({
-            assigneeRunId: runId,
-            dispatchMessageId: message.id,
-            status: "assigned",
-            updatedAt: createdAt,
-          })
-          .where(eq(conversationTasks.id, task.id));
-
-        dispatchJobs.push(job);
-        realtimeEvents.push(
-          createRealtimeEvent({
-            conversationId: conversation.id,
-            ownerUserId: run.ownerUserId,
-            run: job.run,
-            type: "run.updated",
-          }),
-          createRealtimeEvent({
-            conversationId: conversation.id,
-            event: queuedEvent,
-            ownerUserId: run.ownerUserId,
-            runId,
-            type: "run.event.created",
-          }),
-          createRealtimeEvent({
-            conversationId: conversation.id,
-            ownerUserId: run.ownerUserId,
-            taskId: task.id,
-            type: "task.updated",
-          }),
-        );
-      }
-
-      await tx
-        .update(conversations)
-        .set({
-          lastMessageAt: createdAt,
-          updatedAt: createdAt,
-        })
-        .where(eq(conversations.id, conversation.id));
-      realtimeEvents.push(
-        createRealtimeEvent({
-          conversationId: conversation.id,
-          ownerUserId: run.ownerUserId,
-          type: "conversation.updated",
-        }),
-        createRealtimeEvent({
-          conversationId: conversation.id,
-          message: toConversationMessage(message),
-          ownerUserId: run.ownerUserId,
-          type: "conversation.message.created",
-        }),
-      );
+    const conversation = await getSendMessageTargetConversation(db, {
+      currentConversationId: run.conversationId,
+      ownerUserId: run.ownerUserId,
+      runAgentId: run.agentId,
+      target: input.target,
     });
 
+    if (conversation === null) {
+      return result();
+    }
+
+    const persisted = await persistVisibleAgentMessageAndDispatchMentions(db, {
+      agentId: run.agentId,
+      artifactIds: sendMessageAttachmentArtifactIds(input),
+      content: input.content,
+      conversation,
+      createdAt: new Date(event.createdAt),
+      eventCreatedAt: event.createdAt,
+      ownerUserId: run.ownerUserId,
+      publicApiBaseUrl: options.publicApiBaseUrl,
+      publicWebBaseUrl: options.publicWebBaseUrl,
+      runId: event.runId,
+    });
+
+    dispatchJobs.push(...persisted.dispatchJobs);
+    realtimeEvents.push(...persisted.realtimeEvents);
     return result();
   }
 

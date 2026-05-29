@@ -2,7 +2,8 @@ import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbo
 import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationMessage, ConversationTask, User } from '../lib/api'
+import { apiUrl } from '../lib/api'
 import { formatMessageTime, formatTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
@@ -27,7 +28,6 @@ interface ChannelWorkspaceProps {
   submitRun: (
     event: FormEvent<HTMLFormElement>,
     mode: 'chat' | 'task',
-    mentions: ConversationMention[],
   ) => void
   openCreateAgent: () => void
   openEditConversation: () => void
@@ -97,7 +97,7 @@ function escapeRegExp(value: string): string {
 function mentionsFromPrompt(
   value: string,
   agents: AgentDetails[],
-): ConversationMention[] {
+): string[] {
   return agents
     .filter((agent) => {
       const pattern = new RegExp(
@@ -107,11 +107,7 @@ function mentionsFromPrompt(
 
       return pattern.test(value)
     })
-    .map((agent) => ({
-      type: 'agent',
-      agentId: agent.agent.id,
-      label: agent.agent.name,
-    }))
+    .map((agent) => agent.agent.id)
 }
 
 export function ChannelWorkspace({
@@ -178,7 +174,7 @@ export function ChannelWorkspace({
       )
       .sort((first, second) => first.agent.name.localeCompare(second.agent.name))
   }, [activeConversation, agents])
-  const promptMentions = useMemo(
+  const promptMentionIds = useMemo(
     () => mentionsFromPrompt(prompt, mentionableAgents),
     [mentionableAgents, prompt],
   )
@@ -190,7 +186,7 @@ export function ChannelWorkspace({
           .filter(
             (agent) =>
               agent.agent.name.toLowerCase().includes(mentionTerm) &&
-              !promptMentions.some((mention) => mention.agentId === agent.agent.id),
+              !promptMentionIds.includes(agent.agent.id),
           )
           .slice(0, 6)
   const normalizedMentionIndex = mentionSuggestions.length === 0
@@ -334,7 +330,7 @@ export function ChannelWorkspace({
     })
   }
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    submitRun(event, composerMode, promptMentions)
+    submitRun(event, composerMode)
   }
   const handlePromptChange = (value: string) => {
     if (mentionSearchTerm(value) !== mentionTerm) {
@@ -779,6 +775,25 @@ export function ChannelWorkspace({
                     </span>
                     {message.content && (
                       <MessageContent className={messageBodyClass} content={message.content} />
+                    )}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {message.attachments.map((attachment) => (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            className="max-w-72 cursor-pointer overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-0 text-left hover:border-[var(--cds-border-strong-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                            onClick={() => openArtifactEditor(attachment.artifactId)}
+                            title={attachment.artifact.title}
+                          >
+                            <img
+                              src={apiUrl(`/artifacts/${attachment.artifactId}/preview/`)}
+                              alt={attachment.artifact.title}
+                              className="block max-h-64 w-full object-contain"
+                            />
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {message.error && (
                       <span className="text-xs text-[var(--cds-text-error)]">

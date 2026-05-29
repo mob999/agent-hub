@@ -4,7 +4,6 @@ import type {
   ConversationArtifactId,
   ConversationId,
   ConversationMessageId,
-  ConversationMention,
   ConversationTaskStatus,
   ConversationTaskId,
 } from "./conversation.js";
@@ -12,8 +11,6 @@ import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
-  | "send_message_to_group"
-  | "send_message_to_user"
   | "list_tasks"
   | "create_task"
   | "upload_artifact"
@@ -21,8 +18,6 @@ export type AgentHubMcpToolName =
 
 export const agentHubAllMcpTools = [
   "send_message",
-  "send_message_to_group",
-  "send_message_to_user",
   "list_tasks",
   "create_task",
   "upload_artifact",
@@ -31,36 +26,35 @@ export const agentHubAllMcpTools = [
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
-  "send_message_to_group",
-  "send_message_to_user",
   "list_tasks",
   "upload_artifact",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
+export type AgentHubSendMessageTarget =
+  | { type: "current" }
+  | { type: "group"; groupName: string }
+  | { type: "user" };
+
+export interface AgentHubSendMessageAttachmentInput {
+  type: "image";
+  localPath?: string;
+  artifactId?: ConversationArtifactId;
+  title?: string;
+  filename?: string;
+}
+
 export interface AgentHubSendMessageToolInput {
+  target?: AgentHubSendMessageTarget;
   content: string;
-  mentions?: ConversationMention[];
-  taskIds?: ConversationTaskId[];
+  attachments?: AgentHubSendMessageAttachmentInput[];
 }
 
 export interface AgentHubSendMessageToolResult {
   accepted: true;
-}
-
-export interface AgentHubSendMessageToGroupToolInput {
-  groupName: string;
-  content: string;
-}
-
-export interface AgentHubSendMessageToUserToolInput {
-  content: string;
-}
-
-export interface AgentHubCrossConversationMessageToolResult {
-  accepted: true;
   conversationId?: ConversationId;
   messageId?: ConversationMessageId;
+  attachments?: ConversationArtifact[];
 }
 
 export interface AgentHubListTasksToolInput {
@@ -120,15 +114,12 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
-  | AgentHubSendMessageToGroupToolInput
-  | AgentHubSendMessageToUserToolInput
   | AgentHubListTasksToolInput
   | AgentHubCreateTaskToolInput
   | AgentHubUploadArtifactToolInput
   | AgentHubCompleteTaskToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
-  | AgentHubCrossConversationMessageToolResult
   | AgentHubListTasksToolResult
   | AgentHubCreateTaskToolResult
   | AgentHubUploadArtifactToolResult

@@ -251,23 +251,26 @@ export interface ConversationMessage {
   content: string
   status: ConversationMessageStatus
   error?: string
+  attachments?: ConversationMessageAttachment[]
   createdAt: string
   updatedAt: string
 }
 
-export type SendConversationMessageMode = 'chat' | 'task'
-
-export interface ConversationMention {
-  type: 'agent'
-  agentId: string
-  label?: string
+export interface ConversationMessageAttachment {
+  id: string
+  messageId: string
+  artifactId: string
+  type: 'image'
+  artifact: ConversationArtifact
+  createdAt: string
 }
+
+export type SendConversationMessageMode = 'chat' | 'task'
 
 export interface SendConversationMessageRequest {
   content: string
   mode?: SendConversationMessageMode
   agentId?: string
-  mentions?: ConversationMention[]
 }
 
 export interface SendConversationMessageResponse {

@@ -29,7 +29,6 @@ import {
   type DaemonDevice,
   type LocalRun,
   type RealtimeEvent,
-  type ConversationMention,
   type RuntimeKind,
   type RunEvent,
   type SendConversationMessageMode,
@@ -690,7 +689,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
     mode: SendConversationMessageMode,
-    mentions: ConversationMention[],
   ) => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
@@ -738,9 +736,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           body: JSON.stringify({
             content: trimmedPrompt,
             mode,
-            ...(activeConversation.type === 'group' && mentions.length > 0
-              ? { mentions }
-              : {}),
           }),
         },
       )

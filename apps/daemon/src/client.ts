@@ -300,6 +300,7 @@ export async function startDaemon(): Promise<void> {
           uploadId,
           runId: message.run.id,
           taskId: upload.taskId,
+          messageTarget: upload.messageTarget,
           title: upload.title,
           filename: upload.filename,
           sizeBytes: upload.sizeBytes,

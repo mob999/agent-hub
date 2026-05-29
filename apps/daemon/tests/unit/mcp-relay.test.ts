@@ -166,12 +166,12 @@ describe("AgentHubMcpRelay", () => {
     ]);
   });
 
-  it("relays cross-conversation message tools to the active run session", async () => {
+  it("relays cross-conversation send_message targets to the active run session", async () => {
     const relay = await createStartedRelay();
     const calls: unknown[] = [];
     const session = relay.createSession({
       runId: "run_1",
-      enabledTools: ["send_message_to_group", "send_message_to_user"],
+      enabledTools: ["send_message"],
       onToolCall: (call) => {
         calls.push(call);
         return { accepted: true };
@@ -179,34 +179,37 @@ describe("AgentHubMcpRelay", () => {
     });
 
     const groupResponse = await fetch(
-      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_group`,
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           toolCallId: "tool_group",
-          input: { groupName: " Design ", content: " hello group " },
+          input: {
+            target: { type: "group", groupName: " Design " },
+            content: " hello group ",
+          },
         }),
       },
     );
     const userResponse = await fetch(
-      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_user`,
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           toolCallId: "tool_user",
-          input: { content: " hello user " },
+          input: { target: { type: "user" }, content: " hello user " },
         }),
       },
     );
     const rejected = await fetch(
-      `${session.relayUrl}/sessions/${session.token}/tools/send_message_to_group`,
+      `${session.relayUrl}/sessions/${session.token}/tools/send_message`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          input: { groupName: " ", content: "hello" },
+          input: { target: { type: "group", groupName: " " }, content: "hello" },
         }),
       },
     );
@@ -216,14 +219,22 @@ describe("AgentHubMcpRelay", () => {
     expect(rejected.status).toBe(400);
     expect(calls).toEqual([
       expect.objectContaining({
-        name: "send_message_to_group",
+        name: "send_message",
         toolCallId: "tool_group",
-        input: { groupName: "Design", content: "hello group" },
+        input: {
+          target: { type: "group", groupName: "Design" },
+          content: "hello group",
+          attachments: undefined,
+        },
       }),
       expect.objectContaining({
-        name: "send_message_to_user",
+        name: "send_message",
         toolCallId: "tool_user",
-        input: { content: "hello user" },
+        input: {
+          target: { type: "user" },
+          content: "hello user",
+          attachments: undefined,
+        },
       }),
     ]);
   });

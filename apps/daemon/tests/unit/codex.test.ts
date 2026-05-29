@@ -365,7 +365,7 @@ describe("CodexAdapter", () => {
           id: "task_2",
           title: "Write report",
           assigneeAgentId: "agent_3",
-          status: "created",
+          status: "assigned",
         }),
       ],
     });

@@ -189,6 +189,30 @@ export const conversationArtifacts = pgTable(
   }),
 );
 
+export const conversationMessageArtifacts = pgTable(
+  "conversation_message_artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: "cascade" }),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => conversationArtifacts.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 32 }).notNull(),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationMessageArtifactsMessagePositionIdx: uniqueIndex(
+      "conversation_message_artifacts_message_position_idx",
+    ).on(table.messageId, table.position),
+    conversationMessageArtifactsArtifactIdx: index(
+      "conversation_message_artifacts_artifact_idx",
+    ).on(table.artifactId),
+  }),
+);
+
 export const conversationArtifactRevisions = pgTable(
   "conversation_artifact_revisions",
   {

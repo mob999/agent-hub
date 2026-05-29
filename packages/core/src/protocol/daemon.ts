@@ -8,7 +8,7 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
-import type { AgentHubListTasksToolResult } from "./mcp.js";
+import type { AgentHubListTasksToolResult, AgentHubSendMessageTarget } from "./mcp.js";
 import type {
   ConversationArtifact,
   ConversationArtifactActionId,
@@ -63,7 +63,8 @@ export type DaemonClientMessage =
       type: "artifact.upload";
       uploadId: string;
       runId: RunId;
-      taskId: ConversationTaskId;
+      taskId?: ConversationTaskId;
+      messageTarget?: AgentHubSendMessageTarget;
       title: string;
       filename: string;
       sizeBytes: number;

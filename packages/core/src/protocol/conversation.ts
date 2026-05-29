@@ -59,6 +59,7 @@ export interface ConversationMessage {
   content: string;
   status: ConversationMessageStatus;
   error?: string;
+  attachments?: ConversationMessageAttachment[];
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -79,6 +80,15 @@ export interface ConversationArtifact {
   editorUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+export interface ConversationMessageAttachment {
+  id: string;
+  messageId: ConversationMessageId;
+  artifactId: ConversationArtifactId;
+  type: "image";
+  artifact: ConversationArtifact;
+  createdAt: IsoDateTime;
 }
 
 export type ConversationArtifactRevisionId = string;
@@ -218,17 +228,10 @@ export interface CreateConversationArtifactActionResponse {
 
 export type SendConversationMessageMode = "chat" | "task";
 
-export interface ConversationMention {
-  type: "agent";
-  agentId: AgentId;
-  label?: string;
-}
-
 export interface SendConversationMessageRequest {
   content: string;
   mode?: SendConversationMessageMode;
   agentId?: AgentId;
-  mentions?: ConversationMention[];
 }
 
 export interface SendConversationMessageResponse {

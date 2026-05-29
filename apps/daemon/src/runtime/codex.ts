@@ -516,7 +516,7 @@ export class CodexAdapter implements AgentAdapter {
             id: taskInput.taskId ?? call.toolCallId,
             title: taskInput.title,
             assigneeAgentId: taskInput.assigneeAgentId,
-            status: "created" as const,
+            status: "assigned" as const,
           };
           mcpTasks.push(task);
 

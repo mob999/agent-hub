@@ -1,4 +1,5 @@
 import type {
+  AgentHubSendMessageTarget,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
@@ -8,7 +9,10 @@ import type {
 } from "../protocol/index.js";
 import type { AgentRun, RunEvent } from "../protocol/index.js";
 
-export interface AgentRunArtifactUpload extends AgentHubUploadArtifactToolInput {
+export interface AgentRunArtifactUpload
+  extends Omit<AgentHubUploadArtifactToolInput, "taskId"> {
+  messageTarget?: AgentHubSendMessageTarget;
+  taskId?: AgentHubUploadArtifactToolInput["taskId"];
   filename: string;
   sourcePath?: string;
   sizeBytes: number;

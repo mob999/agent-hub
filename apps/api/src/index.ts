@@ -66,6 +66,7 @@ import {
   readArtifactContent,
   restoreAgentForUser,
   restoreGroupConversationForUser,
+  resolveTextMentionedAgentIds,
   subscribeRealtimeEvents,
   toAgentRun,
   updateConversationOrchestrator,
@@ -258,32 +259,6 @@ function isValidAgentIdList(value: unknown): value is string[] {
   );
 }
 
-function parseMentionedAgentIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const agentIds = value.flatMap((mention) => {
-    if (
-      typeof mention !== "object" ||
-      mention === null ||
-      Array.isArray(mention)
-    ) {
-      return [];
-    }
-
-    const record = mention as Record<string, unknown>;
-
-    return record.type === "agent" &&
-      typeof record.agentId === "string" &&
-      uuidPattern.test(record.agentId)
-      ? [record.agentId]
-      : [];
-  });
-
-  return [...new Set(agentIds)];
-}
-
 function parseOptionalAgentId(value: unknown): string | undefined {
   return typeof value === "string" && uuidPattern.test(value)
     ? value
@@ -474,8 +449,8 @@ function buildGroupTaskOrchestratorInstructions(input: {
     input.agentInstructions,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
     "In Task mode, break the user's request into concrete tasks for group agents.",
-    "For each task, call create_task with { title, description, assigneeAgentId }.",
-    "After creating tasks, call send_message with a visible dispatch message that @mentions each assignee and includes the created taskIds.",
+    "For each task, call create_task with { title, description, assigneeAgentId }. AgentHub will create the visible @assignee dispatch message and start the assignee run automatically.",
+    "Use send_message only for optional progress updates or final user-facing notes.",
     "Do not assign a task to yourself unless you are intentionally doing part of the work.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -508,8 +483,8 @@ function buildGroupTaskOrchestratorPrompt(input: {
     ...roster,
     "",
     "Create tasks only for agents listed above.",
-    "create_task requires assigneeAgentId and returns a task id.",
-    "After creating tasks, call send_message with content, mentions, and taskIds so AgentHub can dispatch the assigned agents.",
+    "create_task requires assigneeAgentId, creates the task, posts the visible @assignee dispatch message, and starts the assignee run automatically.",
+    "Do not use send_message to dispatch tasks. Use send_message only for optional progress updates or final notes.",
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
@@ -1559,6 +1534,8 @@ app.get("/conversations/:conversationId/messages", async (c) => {
     ownerUserId: user.id,
     limit,
     before,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (messages === null) {
@@ -1668,7 +1645,6 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agentId?: unknown;
     content?: unknown;
-    mentions?: unknown;
     mode?: unknown;
   };
   const content = typeof body.content === "string" ? body.content.trim() : "";
@@ -1723,7 +1699,6 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     typeof body.agentId === "string" && body.agentId.length > 0
       ? body.agentId
       : undefined;
-  const mentionedAgentIds = parseMentionedAgentIds(body.mentions);
   const now = new Date().toISOString();
   const priorMessages = await listConversationMessagesForUser(db, {
     conversationId: conversation.id,
@@ -1767,8 +1742,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
   const agentHubMcpTasks = toMcpTaskList(currentConversationTasks);
 
+  const userAgents = await listAgentsForUser(db, { ownerUserId: user.id });
   const agentNamesById = Object.fromEntries(
-    (await listAgentsForUser(db, { ownerUserId: user.id })).map((agent) => [
+    userAgents.map((agent) => [
       agent.agent.id,
       agent.agent.name,
     ]),
@@ -1873,6 +1849,12 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const groupAgentIds = conversation.agentIds ?? [];
+  const mentionedAgentIds = resolveTextMentionedAgentIds(
+    content,
+    userAgents
+      .filter((agent) => groupAgentIds.includes(agent.agent.id))
+      .map((agent) => ({ id: agent.agent.id, name: agent.agent.name })),
+  );
 
   if (mode === "task") {
     if (conversation.orchestratorAgentId === undefined) {

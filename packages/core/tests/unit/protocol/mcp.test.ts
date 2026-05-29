@@ -4,8 +4,6 @@ import type {
   AgentHubCompleteTaskToolInput,
   AgentHubListTasksToolResult,
   AgentHubMcpToolCall,
-  AgentHubSendMessageToGroupToolInput,
-  AgentHubSendMessageToUserToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -20,8 +18,6 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
-      "send_message_to_group",
-      "send_message_to_user",
       "list_tasks",
       "create_task",
       "upload_artifact",
@@ -29,29 +25,27 @@ describe("AgentHub MCP protocol", () => {
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
-      "send_message_to_group",
-      "send_message_to_user",
       "list_tasks",
       "upload_artifact",
       "complete_task",
     ]);
   });
 
-  it("expresses send_message with mentions and task ids", () => {
+  it("expresses send_message with targets and image attachments", () => {
     const input: AgentHubSendMessageToolInput = {
       content: "Deploying this to @Codex",
-      mentions: [
+      target: { type: "group", groupName: "Design" },
+      attachments: [
         {
-          type: "agent",
-          agentId: "00000000-0000-4000-8000-000000000001",
-          label: "Codex",
+          type: "image",
+          localPath: "artifacts/screenshot.png",
+          title: "Screenshot",
         },
       ],
-      taskIds: ["00000000-0000-4000-8000-000000000002"],
     };
 
-    expect(input.mentions?.[0]?.label).toBe("Codex");
-    expect(input.taskIds).toHaveLength(1);
+    expect(input.target).toEqual({ type: "group", groupName: "Design" });
+    expect(input.attachments?.[0]?.localPath).toBe("artifacts/screenshot.png");
   });
 
   it("expresses list_tasks results with task ids", () => {
@@ -137,24 +131,26 @@ describe("AgentHub MCP protocol", () => {
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
   });
 
-  it("expresses cross-conversation message tools", () => {
-    const groupInput: AgentHubSendMessageToGroupToolInput = {
-      groupName: "#Design",
+  it("expresses cross-conversation messages through send_message target", () => {
+    const groupInput: AgentHubSendMessageToolInput = {
+      target: { type: "group", groupName: "#Design" },
       content: "I found something relevant for this group.",
     };
-    const userInput: AgentHubSendMessageToUserToolInput = {
+    const userInput: AgentHubSendMessageToolInput = {
+      target: { type: "user" },
       content: "I need your confirmation before continuing.",
     };
     const groupCall: AgentHubMcpToolCall = {
       runId: "00000000-0000-4000-8000-000000000003",
       toolCallId: "tool_group",
-      name: "send_message_to_group",
+      name: "send_message",
       input: groupInput,
       createdAt: "2026-05-26T00:00:00.000Z",
     };
 
-    expect(groupCall.name).toBe("send_message_to_group");
-    expect(groupInput.groupName).toBe("#Design");
+    expect(groupCall.name).toBe("send_message");
+    expect(groupInput.target).toEqual({ type: "group", groupName: "#Design" });
+    expect(userInput.target).toEqual({ type: "user" });
     expect(userInput.content).toContain("confirmation");
   });
 });

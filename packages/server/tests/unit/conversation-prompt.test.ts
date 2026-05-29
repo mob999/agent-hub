@@ -101,8 +101,8 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("agents: @coco");
     expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
     expect(prompt).toContain("agents: @dudu, @jojo");
-    expect(prompt).toContain("send_message_to_group");
-    expect(prompt).toContain("send_message_to_user");
+    expect(prompt).toContain("target { type: \"group\", groupName }");
+    expect(prompt).toContain("target { type: \"user\" }");
   });
 
   it("resolves text mentions by longest agent name first", () => {

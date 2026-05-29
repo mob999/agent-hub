@@ -99,6 +99,7 @@ const gateway = new DaemonGateway({
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
       runId: message.runId,
+      messageTarget: message.messageTarget,
       sizeBytes: message.sizeBytes,
       sourcePath: message.sourcePath,
       storageRoot: env.AGENTHUB_STORAGE_ROOT,

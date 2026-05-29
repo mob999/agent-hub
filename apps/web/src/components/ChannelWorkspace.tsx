@@ -3,7 +3,7 @@ import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, S
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationMention, ConversationMessage, ConversationTask, User } from '../lib/api'
-import { formatTime } from '../lib/format'
+import { formatMessageTime, formatTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
@@ -32,6 +32,7 @@ interface ChannelWorkspaceProps {
   openCreateAgent: () => void
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
+  openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
   closeArtifactEditor?: () => void
   activeEditorArtifactId?: string | null
@@ -130,6 +131,7 @@ export function ChannelWorkspace({
   openCreateAgent,
   openEditConversation,
   openArtifactEditor,
+  openRun,
   openConversationEditor,
   closeArtifactEditor,
   activeEditorArtifactId = null,
@@ -142,6 +144,7 @@ export function ChannelWorkspace({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
   const hasSelectedConversation = activeConversation !== null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
@@ -322,6 +325,13 @@ export function ChannelWorkspace({
   }
   const selectMention = (agent: AgentDetails) => {
     setPrompt(replaceActiveMention(prompt, agent.agent.name))
+  }
+  const appendMention = (agent: AgentDetails) => {
+    const separator = prompt.length === 0 || /\s$/.test(prompt) ? '' : ' '
+    setPrompt(`${prompt}${separator}@${agent.agent.name} `)
+    window.requestAnimationFrame(() => {
+      promptInputRef.current?.focus()
+    })
   }
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     submitRun(event, composerMode, promptMentions)
@@ -721,6 +731,10 @@ export function ChannelWorkspace({
                 activeConversation?.type === 'group' &&
                 message.senderAgentId !== undefined &&
                 activeConversation.orchestratorAgentId === message.senderAgentId
+              const canMentionSender =
+                activeConversation?.type === 'group' &&
+                message.senderType === 'agent' &&
+                senderAgent !== null
 
               return (
                 <article
@@ -748,9 +762,19 @@ export function ChannelWorkspace({
                           Orch
                         </Tag>
                       )}
-                      <strong className="leading-5">{senderName}</strong>
+                      {canMentionSender ? (
+                        <button
+                          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left font-semibold leading-5 text-[var(--cds-text-primary)] hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                          type="button"
+                          onClick={() => appendMention(senderAgent)}
+                        >
+                          {senderName}
+                        </button>
+                      ) : (
+                        <strong className="leading-5">{senderName}</strong>
+                      )}
                       <time className="text-xs leading-5 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
-                        {formatTime(message.updatedAt)}
+                        {formatMessageTime(message.updatedAt)}
                       </time>
                     </span>
                     {message.content && (
@@ -762,9 +786,13 @@ export function ChannelWorkspace({
                       </span>
                     )}
                     {message.runId && (
-                      <span className="text-xs text-[var(--cds-text-secondary)]">
+                      <button
+                        className="w-fit cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--cds-text-secondary)] hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                        type="button"
+                        onClick={() => openRun(message.runId as string)}
+                      >
                         Run {message.runId.slice(0, 8)}
-                      </span>
+                      </button>
                     )}
                   </span>
                 </article>
@@ -844,6 +872,7 @@ export function ChannelWorkspace({
             </div>
           )}
           <textarea
+            ref={promptInputRef}
             id="run-prompt"
             className="min-h-16 w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
             rows={2}

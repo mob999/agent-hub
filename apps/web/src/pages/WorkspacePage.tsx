@@ -1078,6 +1078,12 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
+  const openRun = (runId: string) => {
+    setSelectedRunId(runId)
+    navigate('/runs')
+    void loadRuns()
+    void refreshRun(runId)
+  }
 
   const openConversationEditor = (conversationId: string, artifactId?: string | null) => {
     navigate(
@@ -1569,6 +1575,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             savedOpen={savedOpen}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onOpenActivity={() => navigateToView('runs')}
             onRestoreAgent={(agentId) => {
               void restoreAgent(agentId)
             }}
@@ -1598,6 +1605,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             openCreateAgent={() => openCreateAgent()}
             openEditConversation={openEditActiveConversation}
             openArtifactEditor={openArtifactEditor}
+            openRun={openRun}
             openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
             closeArtifactEditor={closeArtifactEditor}
             activeEditorArtifactId={editorRoute?.artifactId ?? null}

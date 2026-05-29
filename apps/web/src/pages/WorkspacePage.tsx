@@ -1122,6 +1122,12 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
         : `/chat/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}/tasks/${taskIndex}` as RoutePath,
     )
   }
+  const openTasksRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
+  }
+  const closeConversationRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
+  }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
       setSelectedRunId(null)
@@ -1620,9 +1626,20 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
             openArtifactEditor={openArtifactEditor}
             openRun={openRun}
             focusedGoalRoute={focusedGoalRoute}
+            taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
             openGoalRoute={(goalId, taskIndex) => {
               if (activeConversation?.id) {
                 openGoalRoute(activeConversation.id, goalId, taskIndex)
+              }
+            }}
+            openTasksRoute={() => {
+              if (activeConversation?.id) {
+                openTasksRoute(activeConversation.id)
+              }
+            }}
+            closeConversationRoute={() => {
+              if (activeConversation?.id) {
+                closeConversationRoute(activeConversation.id)
               }
             }}
             openConversationEditor={(conversationId) => openConversationEditor(conversationId)}

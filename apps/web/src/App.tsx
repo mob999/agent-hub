@@ -30,6 +30,10 @@ function chatStateFromPath(path: string): { conversationId: string | null; goalR
     return { conversationId, goalRoute: null }
   }
 
+  if (segments.length === 3 && segments[2] === 'tasks') {
+    return { conversationId, goalRoute: null }
+  }
+
   if (segments[2] !== 'goals' || segments[3] === undefined) {
     return { conversationId: null, goalRoute: null }
   }

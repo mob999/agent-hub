@@ -46,6 +46,8 @@ interface ChannelWorkspaceProps {
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
+  openTasksRoute: () => void
+  closeConversationRoute: () => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
   closeArtifactEditor?: () => void
@@ -54,6 +56,7 @@ interface ChannelWorkspaceProps {
   onActiveEditorArtifactChange?: (artifactId: string) => void
   refreshArtifacts?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
+  taskRouteActive?: boolean
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -143,6 +146,8 @@ export function ChannelWorkspace({
   openEditConversation,
   openArtifactEditor,
   openGoalRoute,
+  openTasksRoute,
+  closeConversationRoute,
   openRun,
   openConversationEditor,
   closeArtifactEditor,
@@ -151,6 +156,7 @@ export function ChannelWorkspace({
   onActiveEditorArtifactChange,
   refreshArtifacts,
   focusedGoalRoute = null,
+  taskRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
@@ -446,6 +452,18 @@ export function ChannelWorkspace({
 
     return () => window.clearTimeout(timeout)
   }, [activeConversation?.id, focusedGoalId])
+
+  useEffect(() => {
+    if (activeConversation?.id === undefined || !taskRouteActive) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWorkspacePanel({ conversationId: activeConversation.id, view: 'tasks' })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [activeConversation?.id, taskRouteActive])
 
   useEffect(() => {
     if (!showTasks || taskAggregationMode !== 'goal' || focusedGoalId === null) {
@@ -746,15 +764,16 @@ export function ChannelWorkspace({
             align="bottom"
             type="button"
             disabled={!canOpenWorkspacePanel}
-            onClick={() =>
-              setWorkspacePanel((panel) =>
-                panel?.conversationId === activeConversation?.id && panel?.view === 'tasks'
-                  ? null
-                  : activeConversation
-                    ? { conversationId: activeConversation.id, view: 'tasks' }
-                    : null,
-              )
-            }
+            onClick={() => {
+              if (showTasks) {
+                setWorkspacePanel(null)
+                closeConversationRoute()
+                return
+              }
+
+              setWorkspacePanel(activeConversation ? { conversationId: activeConversation.id, view: 'tasks' } : null)
+              openTasksRoute()
+            }}
           >
             <Task size={16} />
           </IconButton>
@@ -765,7 +784,7 @@ export function ChannelWorkspace({
             align="bottom"
             type="button"
             disabled={!canOpenWorkspacePanel}
-            onClick={() =>
+            onClick={() => {
               setWorkspacePanel((panel) =>
                 panel?.conversationId === activeConversation?.id && panel?.view === 'files'
                   ? null
@@ -773,7 +792,8 @@ export function ChannelWorkspace({
                     ? { conversationId: activeConversation.id, view: 'files' }
                     : null,
               )
-            }
+              closeConversationRoute()
+            }}
           >
             <Folder size={16} />
           </IconButton>

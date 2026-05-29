@@ -391,10 +391,42 @@ export function buildConversationRunPrompt(input: {
   ].join("\n");
 }
 
+export function buildAgentIdentityInstructions(input: {
+  agentDescription?: string | null;
+  agentName: string;
+  conversationTitle?: string;
+  isOrchestrator?: boolean;
+  scenario: string;
+}): string {
+  const description = input.agentDescription?.trim();
+
+  return [
+    "<agenthub_agent_identity>",
+    `You are ${input.agentName} in AgentHub.`,
+    `Current scenario: ${input.scenario}.`,
+    input.conversationTitle === undefined
+      ? undefined
+      : `Current conversation: #${input.conversationTitle}.`,
+    input.isOrchestrator === true
+      ? "You are the configured Orchestrator for this group."
+      : undefined,
+    "Your runtime may be Codex, Claude Code, OpenCode, or another adapter, but that runtime is only the execution engine.",
+    "Do not introduce yourself as Codex, Claude Code, OpenCode, or the runtime.",
+    "Stay in character as this AgentHub agent and follow the role/profile below.",
+    description === undefined || description.length === 0
+      ? "Profile: No description provided."
+      : ["Profile:", description].join("\n"),
+    "</agenthub_agent_identity>",
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
 export interface AgentGroupContext {
-  agents: Array<{ id: string; name: string }>;
+  agents: Array<{ description?: string; id: string; name: string }>;
   conversationId: ConversationId;
   groupName: string;
+  orchestratorAgentId?: string;
   title: string;
 }
 
@@ -438,7 +470,7 @@ export async function listActiveAgentGroupContexts(
   const agentRows = agentIds.length === 0
     ? []
     : await db
-        .select({ id: agents.id, name: agents.name })
+        .select({ description: agents.description, id: agents.id, name: agents.name })
         .from(agents)
         .where(
           and(
@@ -448,20 +480,30 @@ export async function listActiveAgentGroupContexts(
           ),
         )
         .orderBy(asc(agents.createdAt));
-  const agentNamesById = new Map(agentRows.map((agent) => [agent.id, agent.name]));
+  const agentDetailsById = new Map(
+    agentRows.map((agent) => [
+      agent.id,
+      {
+        description: optionalString(agent.description),
+        id: agent.id,
+        name: agent.name,
+      },
+    ]),
+  );
 
   return activeGroups
     .filter((conversation) => conversation.agentIds?.includes(input.agentId))
     .map((conversation) => ({
       agents: (conversation.agentIds ?? []).flatMap((agentId) => {
-        const name = agentNamesById.get(agentId);
+        const agent = agentDetailsById.get(agentId);
 
-        return name === undefined ? [] : [{ id: agentId, name }];
+        return agent === undefined ? [] : [agent];
       }),
       conversationId: conversation.id,
       groupName: conversation.key === defaultGroupConversationKey
         ? defaultGroupConversationKey
         : conversation.title,
+      orchestratorAgentId: conversation.orchestratorAgentId,
       title: conversation.title,
     }));
 }
@@ -471,15 +513,35 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
     ? ["You are not a member of any active AgentHub groups."]
     : [
         "You are a member of these active AgentHub groups:",
-        ...groups.map(
-          (group) => {
-            const agentList = group.agents.length === 0
-              ? "none"
-              : group.agents.map((agent) => `@${agent.name}`).join(", ");
+        ...groups.flatMap((group) => {
+          const orchestrator = group.orchestratorAgentId === undefined
+            ? undefined
+            : group.agents.find((agent) => agent.id === group.orchestratorAgentId);
+          const memberLines = group.agents.length === 0
+            ? ["  members: none"]
+            : [
+                "  members:",
+                ...group.agents.map((agent) => {
+                  const description = agent.description?.trim();
+                  const role = agent.id === group.orchestratorAgentId
+                    ? " [Orchestrator]"
+                    : "";
 
-            return `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId}; agents: ${agentList})`;
-          },
-        ),
+                  return `  - @${agent.name}${role}: ${
+                    description === undefined || description.length === 0
+                      ? "No description provided."
+                      : description
+                  }`;
+                }),
+              ];
+
+          return [
+            `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId}; orchestrator: ${
+              orchestrator === undefined ? "none" : `@${orchestrator.name}`
+            })`,
+            ...memberLines,
+          ];
+        }),
       ];
 
   return [
@@ -2591,18 +2653,17 @@ export function buildAssignedTaskPrompt(input: {
 }
 
 function buildAssignedTaskInstructions(input: {
+  agentName: string;
   agentDescription?: string;
   conversationTitle: string;
 }): string {
   return [
-    input.agentDescription === undefined || input.agentDescription.trim().length === 0
-      ? undefined
-      : [
-          "AgentHub agent profile:",
-          "Follow this agent profile when working on the assigned task.",
-          "",
-          input.agentDescription.trim(),
-        ].join("\n"),
+    buildAgentIdentityInstructions({
+      agentDescription: input.agentDescription,
+      agentName: input.agentName,
+      conversationTitle: input.conversationTitle,
+      scenario: "assigned task",
+    }),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
     "Visible task updates must be sent with send_message. Completed work must be reported with upload_artifact and complete_task.",
   ]
@@ -2611,31 +2672,36 @@ function buildAssignedTaskInstructions(input: {
 }
 
 function buildMentionedGroupChatAgentInstructions(input: {
+  agentName: string;
   agentDescription?: string;
   conversationTitle: string;
+  isOrchestrator?: boolean;
 }): string {
   return [
-    input.agentDescription === undefined || input.agentDescription.trim().length === 0
-      ? undefined
-      : [
-          "AgentHub agent profile:",
-          "Follow this agent profile when responding.",
-          "",
-          input.agentDescription.trim(),
-        ].join("\n"),
+    buildAgentIdentityInstructions({
+      agentDescription: input.agentDescription,
+      agentName: input.agentName,
+      conversationTitle: input.conversationTitle,
+      isOrchestrator: input.isOrchestrator,
+      scenario: "mentioned group chat",
+    }),
     `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
+    input.isOrchestrator === true
+      ? "You are the configured Orchestrator for this group, even in Chat mode."
+      : undefined,
     "Visible group replies must be sent with the AgentHub MCP tool send_message.",
     "Do not answer a group chat by writing normal assistant text.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
 }
 
-function buildMentionedGroupChatRunPrompt(input: {
+export function buildMentionedGroupChatRunPrompt(input: {
   agentGroupsPrompt: string;
   agentName: string;
   agentNamesById: Record<string, string>;
   conversationTitle: string;
   currentMessage: string;
+  isOrchestrator?: boolean;
   messages: ConversationMessage[];
   senderAgentName: string;
 }): string {
@@ -2654,6 +2720,12 @@ function buildMentionedGroupChatRunPrompt(input: {
   return [
     "<agenthub_group_chat_protocol>",
     `You are ${input.agentName} in #${input.conversationTitle}.`,
+    input.isOrchestrator === true
+      ? "You are the configured Orchestrator for this group, even in Chat mode."
+      : undefined,
+    input.isOrchestrator === true
+      ? "You may coordinate other agents by sending visible messages with @AgentName, but only reply when useful."
+      : undefined,
     `${input.senderAgentName} explicitly mentioned you in the latest message.`,
     "If you should reply, call the MCP tool send_message with { content: string }.",
     "If you should not reply, do not call send_message.",
@@ -2663,7 +2735,7 @@ function buildMentionedGroupChatRunPrompt(input: {
     input.agentGroupsPrompt,
     "",
     conversationPrompt,
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 async function listAgentNamesByIdForUser(
@@ -2732,6 +2804,7 @@ async function createMentionedGroupChatRuns(
       continue;
     }
 
+    const isOrchestrator = input.conversation.orchestratorAgentId === runAgent.agent.id;
     const runId = randomUUID();
     const agentGroupsPrompt = buildAgentGroupsPrompt(
       await listActiveAgentGroupContexts(db, {
@@ -2748,14 +2821,17 @@ async function createMentionedGroupChatRuns(
         agentNamesById,
         conversationTitle: input.conversation.title,
         currentMessage: input.content,
+        isOrchestrator,
         messages: priorMessages,
         senderAgentName,
       }),
       agentInstructions: buildMentionedGroupChatAgentInstructions({
+        agentName: runAgent.agent.name,
         agentDescription: runAgent.agent.description,
         conversationTitle: input.conversation.title,
+        isOrchestrator,
       }),
-      agentHubMcpTools: input.conversation.orchestratorAgentId === runAgent.agent.id
+      agentHubMcpTools: isOrchestrator
         ? [...agentHubAllMcpTools]
         : [...agentHubNonOrchestratorMcpTools],
       agentHubMcpTasks,
@@ -3013,12 +3089,16 @@ async function maybeCreateFinalizationRun(
     daemonDeviceId: runAgent.daemonDeviceId,
     prompt,
     agentInstructions: [
-      runAgent.agent.description?.trim()
-        ? `AgentHub agent profile:\n${runAgent.agent.description.trim()}`
-        : undefined,
+      buildAgentIdentityInstructions({
+        agentDescription: runAgent.agent.description,
+        agentName: runAgent.agent.name,
+        conversationTitle: conversation.title,
+        isOrchestrator: true,
+        scenario: "task finalization",
+      }),
       "You are the Orchestrator finalizing a completed group Task mode workflow.",
       "Use only AgentHub MCP send_message for the visible final response.",
-    ].filter((line): line is string => line !== undefined).join("\n\n"),
+    ].join("\n\n"),
     agentHubMcpTools: [...agentHubAllMcpTools],
     agentHubMcpTasks: toMcpTaskListFromRows(taskRows),
     workspacePath: runAgent.workspacePath,
@@ -3336,6 +3416,7 @@ export async function appendRunEventToConversationMessage(
               agentGroupsPrompt,
             }),
             agentInstructions: buildAssignedTaskInstructions({
+              agentName: runAgent.agent.name,
               agentDescription: runAgent.agent.description,
               conversationTitle: conversation.title,
             }),

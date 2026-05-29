@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  buildMentionedGroupChatRunPrompt,
   resolveTextMentionedAgentIds,
   type ConversationMessage,
 } from "../../src";
@@ -78,31 +80,85 @@ describe("conversation prompt builder", () => {
     );
   });
 
+  it("builds stable AgentHub identity instructions", () => {
+    const prompt = buildAgentIdentityInstructions({
+      agentDescription: "",
+      agentName: "dudu",
+      conversationTitle: "Design",
+      isOrchestrator: true,
+      scenario: "group chat",
+    });
+
+    expect(prompt).toContain("You are dudu in AgentHub.");
+    expect(prompt).toContain("runtime is only the execution engine");
+    expect(prompt).toContain("Do not introduce yourself as Codex");
+    expect(prompt).toContain("You are the configured Orchestrator");
+    expect(prompt).toContain("Profile: No description provided.");
+  });
+
   it("describes the active groups an agent can message", () => {
     const prompt = buildAgentGroupsPrompt([
       {
-        agents: [{ id: "agent-all", name: "coco" }],
+        agents: [{ description: "Coordinates research.", id: "agent-all", name: "coco" }],
         conversationId: "00000000-0000-4000-8000-000000000020",
         groupName: "all",
+        orchestratorAgentId: "agent-all",
         title: "all",
       },
       {
         agents: [
-          { id: "agent-design-1", name: "dudu" },
+          { description: "Frontend implementation.", id: "agent-design-1", name: "dudu" },
           { id: "agent-design-2", name: "jojo" },
         ],
         conversationId: "00000000-0000-4000-8000-000000000021",
         groupName: "Design",
+        orchestratorAgentId: "agent-design-1",
         title: "Design",
       },
     ]);
 
     expect(prompt).toContain("- #all (groupName: all, conversationId:");
-    expect(prompt).toContain("agents: @coco");
+    expect(prompt).toContain("orchestrator: @coco");
+    expect(prompt).toContain("@coco [Orchestrator]: Coordinates research.");
     expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
-    expect(prompt).toContain("agents: @dudu, @jojo");
+    expect(prompt).toContain("@dudu [Orchestrator]: Frontend implementation.");
+    expect(prompt).toContain("@jojo: No description provided.");
     expect(prompt).toContain("target { type: \"group\", groupName }");
     expect(prompt).toContain("target { type: \"user\" }");
+  });
+
+  it("marks mentioned group chat runs when the mentioned agent is orchestrator", () => {
+    const prompt = buildMentionedGroupChatRunPrompt({
+      agentGroupsPrompt: "<agenthub_agent_groups />",
+      agentName: "coco",
+      agentNamesById: {},
+      conversationTitle: "Design",
+      currentMessage: "@coco can you coordinate this?",
+      isOrchestrator: true,
+      messages: [],
+      senderAgentName: "dudu",
+    });
+
+    expect(prompt).toContain(
+      "You are the configured Orchestrator for this group, even in Chat mode.",
+    );
+    expect(prompt).toContain(
+      "You may coordinate other agents by sending visible messages with @AgentName",
+    );
+  });
+
+  it("does not mark non-orchestrator group chat runs as orchestrator", () => {
+    const prompt = buildMentionedGroupChatRunPrompt({
+      agentGroupsPrompt: "<agenthub_agent_groups />",
+      agentName: "jojo",
+      agentNamesById: {},
+      conversationTitle: "Design",
+      currentMessage: "@jojo can you review this?",
+      messages: [],
+      senderAgentName: "dudu",
+    });
+
+    expect(prompt).not.toContain("configured Orchestrator");
   });
 
   it("resolves text mentions by longest agent name first", () => {

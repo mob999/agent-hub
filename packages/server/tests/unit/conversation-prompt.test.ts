@@ -124,6 +124,8 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("@dudu [Orchestrator]: Frontend implementation.");
     expect(prompt).toContain("@jojo: No description provided.");
     expect(prompt).toContain("target { type: \"group\", groupName }");
+    expect(prompt).toContain("do not mention @AgentName");
+    expect(prompt).toContain("forces AgentHub to start that agent's reply run");
     expect(prompt).toContain("target { type: \"user\" }");
   });
 
@@ -144,6 +146,9 @@ describe("conversation prompt builder", () => {
     );
     expect(prompt).toContain(
       "You may coordinate other agents by sending visible messages with @AgentName",
+    );
+    expect(prompt).toContain(
+      "Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
     );
   });
 

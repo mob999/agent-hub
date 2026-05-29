@@ -406,12 +406,12 @@ export function ChannelWorkspace({
             )}
           </span>
           <div className="grid min-w-0 gap-0.5">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 items-baseline gap-2">
               <h1 className={chatTitleClassName}>{chatTitle}</h1>
               {isAgentTyping && (
-                <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-[var(--cds-text-primary)]">
+                <span className="inline-flex shrink-0 items-baseline gap-1.5 text-xs font-semibold leading-none text-[var(--cds-text-primary)]">
                   <span
-                    className="h-1.5 w-1.5 rounded-full bg-[var(--cds-support-info)]"
+                    className="relative top-[-0.0625rem] h-1.5 w-1.5 animate-[agenthub-breathe_1.4s_ease-in-out_infinite] rounded-full bg-[var(--cds-support-info)]"
                     aria-hidden="true"
                   />
                   输入中

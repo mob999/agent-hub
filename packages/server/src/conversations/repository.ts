@@ -549,6 +549,7 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
     ...groupLines,
     "Use send_message with target { type: \"group\", groupName } to send a visible message to one of these groups.",
     "To wake another agent in a group, include @AgentName in the message content.",
+    "If you are only replying to the current conversation or giving a status update, do not mention @AgentName; mentioning an agent forces AgentHub to start that agent's reply run.",
     "Use send_message with target { type: \"user\" } to send a visible private message to the current user.",
     "Archived groups are not listed and cannot be targeted.",
     "</agenthub_agent_groups>",
@@ -2690,6 +2691,7 @@ function buildMentionedGroupChatAgentInstructions(input: {
       ? "You are the configured Orchestrator for this group, even in Chat mode."
       : undefined,
     "Visible group replies must be sent with the AgentHub MCP tool send_message.",
+    "For ordinary replies or progress updates, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
     "Do not answer a group chat by writing normal assistant text.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -2728,6 +2730,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
       : undefined,
     `${input.senderAgentName} explicitly mentioned you in the latest message.`,
     "If you should reply, call the MCP tool send_message with { content: string }.",
+    "For ordinary replies, do not include @AgentName. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
     "</agenthub_group_chat_protocol>",

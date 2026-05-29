@@ -3,6 +3,7 @@ import { JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import type { ReactNode } from 'react'
 import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
 import {
+  eventLogLine,
   eventMessageContent,
   eventTitle,
   formatTime,
@@ -34,6 +35,7 @@ function formatEventJson(value: unknown): string {
 
 function eventDetails(event: RunEvent): EventDetail[] {
   const details: EventDetail[] = []
+  const logLine = eventLogLine(event)
 
   if (event.input !== undefined) {
     details.push({ label: 'Parameters', value: event.input })
@@ -45,6 +47,13 @@ function eventDetails(event: RunEvent): EventDetail[] {
 
   if (event.error) {
     details.push({ label: 'Error', value: event.error })
+  }
+
+  if (logLine) {
+    details.push({
+      label: event.stream === 'stderr' ? 'Error log' : 'Log line',
+      value: logLine,
+    })
   }
 
   if (event.raw !== undefined && event.type !== 'runtime.event') {
@@ -247,6 +256,8 @@ interface EventRowProps {
 
 function EventRow({ event, index }: EventRowProps) {
   const details = eventDetails(event)
+  const logLine = eventLogLine(event)
+  const isErrorLog = event.type === 'log.line' && event.stream === 'stderr'
 
   return (
     <li className="grid min-w-0 gap-3 border-b border-[var(--cds-border-subtle-01)] px-4 py-3 last:border-b-0 max-[671px]:px-3">
@@ -254,7 +265,7 @@ function EventRow({ event, index }: EventRowProps) {
         <Tag
           className="min-w-0 max-w-full justify-self-start"
           size="sm"
-          type={event.type.startsWith('tool.call') ? 'blue' : 'gray'}
+          type={isErrorLog ? 'red' : event.type.startsWith('tool.call') ? 'blue' : 'gray'}
         >
           <span className="block max-w-[11rem] truncate">{event.type}</span>
         </Tag>
@@ -266,6 +277,15 @@ function EventRow({ event, index }: EventRowProps) {
             <span className="truncate text-xs text-[var(--cds-text-secondary)]">
               {event.toolCallId}
             </span>
+          )}
+          {logLine && (
+            <pre
+              className={`min-w-0 whitespace-pre-wrap break-words text-xs leading-relaxed ${
+                isErrorLog ? 'text-[var(--cds-text-error)]' : 'text-[var(--cds-text-secondary)]'
+              }`}
+            >
+              {logLine}
+            </pre>
           )}
         </span>
         <time

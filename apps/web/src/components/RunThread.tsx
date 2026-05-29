@@ -1,6 +1,7 @@
 import { Tag } from '@carbon/react'
 import type { LocalRun, RunEvent } from '../lib/api'
 import {
+  eventLogLine,
   eventMessageContent,
   eventTitle,
   formatTime,
@@ -25,6 +26,7 @@ export function RunThread({ localRun, events, selected, selectRun }: RunThreadPr
     .join('')
   const displayEvents = events.filter(isDisplayRunEvent)
   const latestEvent = displayEvents.at(-1)
+  const latestLogLine = latestEvent ? eventLogLine(latestEvent) : ''
   const eventPreview = displayEvents.slice(-4)
 
   return (
@@ -75,7 +77,7 @@ export function RunThread({ localRun, events, selected, selectRun }: RunThreadPr
           <span className={messageBodyClass}>
             {agentMessage ||
               (latestEvent
-                ? eventTitle(latestEvent)
+                ? latestLogLine || eventTitle(latestEvent)
                 : `Run is ${runStatusLabel(localRun.run.status).toLowerCase()}.`)}
           </span>
           <span className="text-xs text-[var(--cds-text-secondary)]">

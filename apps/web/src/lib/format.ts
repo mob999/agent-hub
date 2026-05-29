@@ -98,3 +98,11 @@ export function eventMessageContent(event: RunEvent): string {
 
   return ''
 }
+
+export function eventLogLine(event: RunEvent): string {
+  if (event.type === 'log.line') {
+    return event.line ?? ''
+  }
+
+  return ''
+}

@@ -184,6 +184,7 @@ export interface ConversationGoalTask {
   artifacts?: ConversationArtifact[]
   completedAt?: string
   checkpointRunId?: string
+  webUrl?: string
   createdAt: string
   updatedAt: string
 }
@@ -200,6 +201,7 @@ export interface ConversationGoal {
   summary?: string
   tasks: ConversationGoalTask[]
   completedAt?: string
+  webUrl?: string
   createdAt: string
   updatedAt: string
 }

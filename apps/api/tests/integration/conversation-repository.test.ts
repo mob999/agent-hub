@@ -765,7 +765,7 @@ describeDb("conversation repository integration", () => {
     });
     expect(task?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
     expect(messages?.map((message) => message.content)).toContain(
-      `@dudu 已创建任务：Write the report\nGoal ID: ${goalId}\nTask #0`,
+      `@dudu 已创建任务：Write the report\nGoal ID: [${goalId}](/chat/${group.conversation.id}/goals/${goalId})\n[Task #0](/chat/${group.conversation.id}/goals/${goalId}/tasks/0)`,
     );
   });
 });

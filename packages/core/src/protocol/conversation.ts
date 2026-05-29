@@ -153,6 +153,7 @@ export interface ConversationGoalTask {
   artifacts?: ConversationArtifact[];
   completedAt?: IsoDateTime;
   checkpointRunId?: RunId;
+  webUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -169,6 +170,7 @@ export interface ConversationGoal {
   summary?: string;
   tasks: ConversationGoalTask[];
   completedAt?: IsoDateTime;
+  webUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }

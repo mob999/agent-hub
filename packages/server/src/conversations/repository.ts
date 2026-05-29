@@ -325,6 +325,10 @@ export function toConversationArtifactAction(
 export function toConversationGoalTask(
   row: ConversationGoalTaskRow,
   artifacts: ConversationArtifact[] = [],
+  input: {
+    conversationId?: ConversationId;
+    publicWebBaseUrl?: string;
+  } = {},
 ): ConversationGoalTask {
   return {
     id: row.id,
@@ -343,6 +347,15 @@ export function toConversationGoalTask(
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     completedAt: row.completedAt?.toISOString(),
     checkpointRunId: optionalString(row.checkpointRunId),
+    webUrl:
+      input.conversationId === undefined
+        ? undefined
+        : buildGoalTaskWebHref({
+            conversationId: input.conversationId,
+            goalId: row.goalId,
+            publicWebBaseUrl: input.publicWebBaseUrl,
+            taskIndex: row.index,
+          }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -351,6 +364,7 @@ export function toConversationGoalTask(
 export function toConversationGoal(
   row: ConversationGoalRow,
   tasks: ConversationGoalTask[] = [],
+  input: { publicWebBaseUrl?: string } = {},
 ): ConversationGoal {
   return {
     id: row.id,
@@ -364,9 +378,39 @@ export function toConversationGoal(
     summary: optionalString(row.summary),
     tasks,
     completedAt: row.completedAt?.toISOString(),
+    webUrl: buildGoalWebHref({
+      conversationId: row.conversationId,
+      goalId: row.id,
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function buildGoalWebHref(input: {
+  conversationId: string;
+  goalId: string;
+  publicWebBaseUrl?: string;
+}): string {
+  const path = `/chat/${input.conversationId}/goals/${input.goalId}`;
+
+  return input.publicWebBaseUrl === undefined
+    ? path
+    : new URL(path, input.publicWebBaseUrl).toString();
+}
+
+function buildGoalTaskWebHref(input: {
+  conversationId: string;
+  goalId: string;
+  publicWebBaseUrl?: string;
+  taskIndex: number;
+}): string {
+  const path = `/chat/${input.conversationId}/goals/${input.goalId}/tasks/${input.taskIndex}`;
+
+  return input.publicWebBaseUrl === undefined
+    ? path
+    : new URL(path, input.publicWebBaseUrl).toString();
 }
 
 function toMcpGoalListFromRows(input: {
@@ -1391,11 +1435,20 @@ export async function listConversationGoalsForUser(
   const tasksByGoalId = new Map<string, ConversationGoalTask[]>();
   for (const taskRow of taskRows) {
     const tasks = tasksByGoalId.get(taskRow.goalId) ?? [];
-    tasks.push(toConversationGoalTask(taskRow, artifactsByGoalTask.get(taskRow.id)));
+    tasks.push(
+      toConversationGoalTask(taskRow, artifactsByGoalTask.get(taskRow.id), {
+        conversationId: input.conversationId,
+        publicWebBaseUrl: input.publicWebBaseUrl,
+      }),
+    );
     tasksByGoalId.set(taskRow.goalId, tasks);
   }
 
-  return goalRows.map((goal) => toConversationGoal(goal, tasksByGoalId.get(goal.id)));
+  return goalRows.map((goal) =>
+    toConversationGoal(goal, tasksByGoalId.get(goal.id), {
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    }),
+  );
 }
 
 export async function listConversationArtifactsForUser(
@@ -3930,7 +3983,12 @@ export async function appendRunEventToConversationMessage(
           type: "task.updated",
         }),
       );
-      toolResult = { accepted: true, goal: toConversationGoal(goal) };
+      toolResult = {
+        accepted: true,
+        goal: toConversationGoal(goal, [], {
+          publicWebBaseUrl: options.publicWebBaseUrl,
+        }),
+      };
       return result();
     }
 
@@ -4036,7 +4094,18 @@ export async function appendRunEventToConversationMessage(
       const dependencyState = dependencyStatusForTask(input, existingTaskRows);
       let taskStatus = dependencyState.status;
       let blockedReason = dependencyState.blockedReason;
-      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nGoal ID: ${goal.id}\nTask #${taskIndex}`;
+      const goalHref = buildGoalWebHref({
+        conversationId: conversation.id,
+        goalId: goal.id,
+        publicWebBaseUrl: options.publicWebBaseUrl,
+      });
+      const taskHref = buildGoalTaskWebHref({
+        conversationId: conversation.id,
+        goalId: goal.id,
+        publicWebBaseUrl: options.publicWebBaseUrl,
+        taskIndex,
+      });
+      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${taskIndex}](${taskHref})`;
       const shouldDispatch = taskStatus === "assigned";
       const job = shouldDispatch && !isSelfAssigned
         ? await createAssignedTaskRunJob(db, {
@@ -4092,6 +4161,9 @@ export async function appendRunEventToConversationMessage(
           checkpointRunId: null,
           createdAt,
           updatedAt: createdAt,
+        }, [], {
+          conversationId: conversation.id,
+          publicWebBaseUrl: options.publicWebBaseUrl,
         }),
       };
 
@@ -4259,7 +4331,18 @@ export async function appendRunEventToConversationMessage(
         .from(agents)
         .where(eq(agents.id, task.assigneeAgentId))
         .limit(1);
-      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nGoal ID: ${goal.id}\nTask #${task.index}`;
+      const goalHref = buildGoalWebHref({
+        conversationId: context.conversation.id,
+        goalId: goal.id,
+        publicWebBaseUrl: options.publicWebBaseUrl,
+      });
+      const taskHref = buildGoalTaskWebHref({
+        conversationId: context.conversation.id,
+        goalId: goal.id,
+        publicWebBaseUrl: options.publicWebBaseUrl,
+        taskIndex: task.index,
+      });
+      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${task.index}](${taskHref})`;
       const goalTasks = await listGoalTasks(db, goal.id);
       const job = await createAssignedTaskRunJob(db, {
         assigneeAgentId: task.assigneeAgentId,
@@ -4513,7 +4596,13 @@ export async function appendRunEventToConversationMessage(
         accepted: true,
         goal: toConversationGoal(
           updatedGoal,
-          goalTasks.map((task) => toConversationGoalTask(task)),
+          goalTasks.map((task) =>
+            toConversationGoalTask(task, [], {
+              conversationId: updatedGoal.conversationId,
+              publicWebBaseUrl: options.publicWebBaseUrl,
+            })
+          ),
+          { publicWebBaseUrl: options.publicWebBaseUrl },
         ),
       };
       return result();

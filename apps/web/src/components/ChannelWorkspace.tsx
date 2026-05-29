@@ -45,6 +45,7 @@ interface ChannelWorkspaceProps {
   openCreateAgent: () => void
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
+  openGoalRoute: (goalId: string, taskIndex?: number | null) => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
   closeArtifactEditor?: () => void
@@ -52,6 +53,7 @@ interface ChannelWorkspaceProps {
   editorConversationId?: string | null
   onActiveEditorArtifactChange?: (artifactId: string) => void
   refreshArtifacts?: () => void
+  focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -140,6 +142,7 @@ export function ChannelWorkspace({
   openCreateAgent,
   openEditConversation,
   openArtifactEditor,
+  openGoalRoute,
   openRun,
   openConversationEditor,
   closeArtifactEditor,
@@ -147,6 +150,7 @@ export function ChannelWorkspace({
   editorConversationId = null,
   onActiveEditorArtifactChange,
   refreshArtifacts,
+  focusedGoalRoute = null,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
@@ -177,6 +181,12 @@ export function ChannelWorkspace({
 
     return grouped
   }, [flattenedGoalTasks])
+  const focusedTaskKey =
+    focusedGoalRoute?.taskIndex === null || focusedGoalRoute === null
+      ? null
+      : `${focusedGoalRoute.goalId}:${focusedGoalRoute.taskIndex}`
+  const focusedGoalId = focusedGoalRoute?.goalId ?? null
+  const focusedGoalTaskIndex = focusedGoalRoute?.taskIndex ?? null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
     ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
@@ -419,18 +429,61 @@ export function ChannelWorkspace({
     visibleMessages.length,
   ])
 
+  useEffect(() => {
+    if (activeConversation?.id === undefined || focusedGoalId === null) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWorkspacePanel({ conversationId: activeConversation.id, view: 'tasks' })
+      setTaskAggregationMode('goal')
+      setExpandedGoalIds((current) =>
+        current.includes(focusedGoalId)
+          ? current
+          : [...current, focusedGoalId],
+      )
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [activeConversation?.id, focusedGoalId])
+
+  useEffect(() => {
+    if (!showTasks || taskAggregationMode !== 'goal' || focusedGoalId === null) {
+      return
+    }
+
+    const elementId =
+      focusedGoalTaskIndex === null
+        ? `goal-${focusedGoalId}`
+        : `goal-task-${focusedGoalId}-${focusedGoalTaskIndex}`
+    const timeout = window.setTimeout(() => {
+      document.getElementById(elementId)?.scrollIntoView({ block: 'center' })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [
+    expandedGoalIds,
+    focusedGoalId,
+    focusedGoalTaskIndex,
+    showTasks,
+    taskAggregationMode,
+  ])
+
   const renderGoalTaskCard = (
     goal: ConversationGoal,
     task: GoalTask,
     options: { compact?: boolean; showGoal?: boolean } = {},
   ) => {
     const assignee = agents.find((agent) => agent.agent.id === task.assigneeAgentId)
+    const focused = focusedTaskKey === `${goal.id}:${task.index}`
 
     if (options.compact === true) {
       return (
-        <section
+        <button
           key={`${goal.id}:${task.id}`}
-          className="grid gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-2 text-sm text-[var(--cds-text-primary)]"
+          className="grid cursor-pointer gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-2 text-left text-sm text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          type="button"
+          onClick={() => openGoalRoute(goal.id, task.index)}
         >
           <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-text-secondary)]">
             Goal: {goal.id.slice(0, 8)} #{task.index}
@@ -443,14 +496,17 @@ export function ChannelWorkspace({
               {goal.title}
             </p>
           )}
-        </section>
+        </button>
       )
     }
 
     return (
       <section
+        id={`goal-task-${goal.id}-${task.index}`}
         key={`${goal.id}:${task.id}`}
-        className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-3 text-sm text-[var(--cds-text-primary)]"
+        className={`grid gap-2 border bg-[var(--cds-background)] p-3 text-sm text-[var(--cds-text-primary)] ${
+          focused ? 'border-[var(--cds-border-strong-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]' : 'border-[var(--cds-border-subtle-01)]'
+        }`}
       >
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
           <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold">
@@ -527,11 +583,15 @@ export function ChannelWorkspace({
       {goals.map((goal) => {
         const orchestrator = agents.find((agent) => agent.agent.id === goal.orchestratorAgentId)
         const expanded = expandedGoalIdSet.has(goal.id)
+        const focused = focusedGoalRoute?.goalId === goal.id
 
         return (
           <article
+            id={`goal-${goal.id}`}
             key={goal.id}
-            className="grid border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm text-[var(--cds-text-primary)]"
+            className={`grid border bg-[var(--cds-layer-01)] text-sm text-[var(--cds-text-primary)] ${
+              focused ? 'border-[var(--cds-border-strong-01)]' : 'border-[var(--cds-border-subtle-01)]'
+            }`}
           >
             <button
               className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-3 border-0 bg-transparent p-3 text-left text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]"

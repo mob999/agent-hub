@@ -7,14 +7,57 @@ interface EditorRouteState {
   conversationId: string
 }
 
-function chatConversationIdFromPath(path: string): string | null {
+export interface GoalRouteState {
+  conversationId: string
+  goalId: string
+  taskIndex: number | null
+}
+
+function chatStateFromPath(path: string): { conversationId: string | null; goalRoute: GoalRouteState | null } {
   const segments = path.split('/').filter(Boolean)
 
   if (segments[0] !== 'chat') {
-    return null
+    return { conversationId: null, goalRoute: null }
   }
 
-  return segments.length === 2 ? decodeURIComponent(segments[1] ?? '') : null
+  const conversationId = segments[1] === undefined ? null : decodeURIComponent(segments[1])
+
+  if (conversationId === null) {
+    return { conversationId: null, goalRoute: null }
+  }
+
+  if (segments.length === 2) {
+    return { conversationId, goalRoute: null }
+  }
+
+  if (segments[2] !== 'goals' || segments[3] === undefined) {
+    return { conversationId: null, goalRoute: null }
+  }
+
+  const taskIndexSegment = segments.length === 6 && segments[4] === 'tasks'
+    ? decodeURIComponent(segments[5] ?? '')
+    : null
+  const taskIndex =
+    taskIndexSegment !== null && /^\d+$/.test(taskIndexSegment)
+      ? Number.parseInt(taskIndexSegment, 10)
+      : null
+
+  if (segments.length !== 4 && (segments.length !== 6 || taskIndex === null)) {
+    return { conversationId: null, goalRoute: null }
+  }
+
+  return {
+    conversationId,
+    goalRoute: {
+      conversationId,
+      goalId: decodeURIComponent(segments[3]),
+      taskIndex,
+    },
+  }
+}
+
+function chatConversationIdFromPath(path: string): string | null {
+  return chatStateFromPath(path).conversationId
 }
 
 function getRoutePath(): RoutePath {
@@ -28,7 +71,7 @@ function getRoutePath(): RoutePath {
     path === '/login' ||
     path === '/register' ||
     path === '/chat' ||
-    chatConversationIdFromPath(path) !== null ||
+    chatStateFromPath(path).conversationId !== null ||
     path === '/runs' ||
     path === '/daemon'
   ) {
@@ -82,6 +125,7 @@ function App() {
     <WorkspacePage
       route={isWorkspaceRoute(route) ? route : '/chat'}
       chatConversationId={route.startsWith('/chat/') ? chatConversationIdFromPath(route) : null}
+      goalRoute={route.startsWith('/chat/') ? chatStateFromPath(route).goalRoute : null}
       editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
       navigate={navigate}
     />

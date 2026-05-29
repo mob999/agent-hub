@@ -42,6 +42,7 @@ import {
 } from '../lib/api'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
+import type { GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
@@ -175,12 +176,13 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   chatConversationId?: string | null
+  goalRoute?: GoalRouteState | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, chatConversationId = null, editorRoute = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({ route, chatConversationId = null, goalRoute = null, editorRoute = null, navigate }: WorkspacePageProps) {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -260,6 +262,15 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const activeConversationGoals = useMemo(
     () => (activeConversationId === null ? [] : goalsByConversation[activeConversationId] ?? []),
     [activeConversationId, goalsByConversation],
+  )
+  const focusedGoalRoute = useMemo(() =>
+    goalRoute !== null && goalRoute.conversationId === activeConversation?.id
+      ? { goalId: goalRoute.goalId, taskIndex: goalRoute.taskIndex }
+      : null,
+    [
+      activeConversation?.id,
+      goalRoute,
+    ],
   )
   const activeConversationArtifacts = useMemo(
     () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
@@ -1104,6 +1115,13 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         : `/chat/${encodeURIComponent(activeConversationId)}` as RoutePath,
     )
   }
+  const openGoalRoute = (conversationId: string, goalId: string, taskIndex?: number | null) => {
+    navigate(
+      taskIndex === undefined || taskIndex === null
+        ? `/chat/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}` as RoutePath
+        : `/chat/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}/tasks/${taskIndex}` as RoutePath,
+    )
+  }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
       setSelectedRunId(null)
@@ -1601,6 +1619,12 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             openEditConversation={openEditActiveConversation}
             openArtifactEditor={openArtifactEditor}
             openRun={openRun}
+            focusedGoalRoute={focusedGoalRoute}
+            openGoalRoute={(goalId, taskIndex) => {
+              if (activeConversation?.id) {
+                openGoalRoute(activeConversation.id, goalId, taskIndex)
+              }
+            }}
             openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
             closeArtifactEditor={closeArtifactEditor}
             activeEditorArtifactId={editorRoute?.artifactId ?? null}

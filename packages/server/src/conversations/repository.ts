@@ -275,6 +275,29 @@ export function toConversationArtifact(
   };
 }
 
+function escapeMarkdownLinkText(value: string): string {
+  return value.replace(/([\\[\]])/g, "\\$1");
+}
+
+export const artifactUserFacingLinkInstructions =
+  "When mentioning artifacts to the user, always use Markdown links in the form [title](editorUrl). Prefer artifact.userFacingLink/editorUrl; use downloadUrl only if editorUrl is missing. Do not show bare filenames or artifact ids as the deliverable entry.";
+
+export function formatArtifactPromptLines(artifact: ConversationArtifact): string[] {
+  const userFacingUrl = artifact.editorUrl ?? artifact.downloadUrl;
+  const userFacingLink = userFacingUrl === undefined
+    ? artifact.title
+    : `[${escapeMarkdownLinkText(artifact.title)}](${userFacingUrl})`;
+
+  return [
+    "    artifact:",
+    `      title: ${artifact.title}`,
+    `      id: ${artifact.id}`,
+    `      editorUrl: ${artifact.editorUrl ?? "none"}`,
+    `      downloadUrl: ${artifact.downloadUrl ?? "none"}`,
+    `      userFacingLink: ${userFacingLink}`,
+  ];
+}
+
 function toConversationMessageAttachment(
   row: ConversationMessageArtifactRow,
   artifact: ConversationArtifact,
@@ -3490,10 +3513,7 @@ async function maybeCreateCheckpointRunForTask(
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
   const taskLines = goalTasks.map((row) => {
-    const artifactLines = (artifactsByTask.get(row.id) ?? []).map(
-      (artifact) =>
-        `    artifact: ${artifact.title} (${artifact.id}) ${artifact.editorUrl ?? artifact.downloadUrl ?? ""}`,
-    );
+    const artifactLines = (artifactsByTask.get(row.id) ?? []).flatMap(formatArtifactPromptLines);
 
     return [
       `Task #${row.index}: ${row.title}`,
@@ -3517,6 +3537,7 @@ async function maybeCreateCheckpointRunForTask(
     task.summary ? `Completed task summary: ${task.summary}` : undefined,
     "Review the completed task and decide how to continue the goal.",
     "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_goal only when the goal is done.",
+    artifactUserFacingLinkInstructions,
     "</agenthub_task_checkpoint>",
     "",
     agentGroupsPrompt,
@@ -3538,6 +3559,7 @@ async function maybeCreateCheckpointRunForTask(
         scenario: "task checkpoint",
       }),
       "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the goal using AgentHub MCP tools.",
+      "When you send a user-facing summary that mentions artifacts, use the provided userFacingLink Markdown links. Prefer editor links and never leave deliverables as bare filenames.",
     ].join("\n\n"),
     agentHubMcpTools: [...agentHubAllMcpTools],
     agentHubMcpGoals: [toConversationGoal(goal, goalTasks.map((row) => toConversationGoalTask(row)))],

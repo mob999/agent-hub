@@ -397,19 +397,29 @@ export function ChannelWorkspace({
     )
   }
 
-  const showTasks =
-    workspacePanel?.conversationId === activeConversation?.id &&
-    workspacePanel?.view === 'tasks'
-  const showFiles =
-    workspacePanel?.conversationId === activeConversation?.id &&
-    workspacePanel?.view === 'files'
   const firstArtifactId = artifacts[0]?.id ?? null
   const showEditor =
     editorConversationId !== null &&
     editorConversationId === activeConversation?.id &&
     canOpenWorkspacePanel
+  const showTasks =
+    !showEditor &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'tasks'
+  const showFiles =
+    !showEditor &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'files'
   const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
+  const openArtifactEditorPanel = (artifactId: string) => {
+    setWorkspacePanel(null)
+    openArtifactEditor(artifactId)
+  }
+  const openConversationEditorPanel = (conversationId: string) => {
+    setWorkspacePanel(null)
+    openConversationEditor?.(conversationId)
+  }
 
   useEffect(() => {
     if (showWorkspacePage) {
@@ -585,7 +595,7 @@ export function ChannelWorkspace({
                 key={artifact.id}
                 className="w-fit cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                 type="button"
-                onClick={() => openArtifactEditor(artifact.id)}
+                onClick={() => openArtifactEditorPanel(artifact.id)}
               >
                 {artifact.title}
               </button>
@@ -807,16 +817,17 @@ export function ChannelWorkspace({
             onClick={() => {
               if (showEditor) {
                 closeArtifactEditor?.()
+                setWorkspacePanel(null)
                 return
               }
 
               if (firstArtifactId !== null) {
-                openArtifactEditor(firstArtifactId)
+                openArtifactEditorPanel(firstArtifactId)
                 return
               }
 
               if (activeConversation !== null) {
-                openConversationEditor?.(activeConversation.id)
+                openConversationEditorPanel(activeConversation.id)
               }
             }}
           >
@@ -940,9 +951,9 @@ export function ChannelWorkspace({
                           <button
                             className="block max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                             type="button"
-                            onClick={() => {
-                              openArtifactEditor(artifact.id)
-                            }}
+                          onClick={() => {
+                            openArtifactEditorPanel(artifact.id)
+                          }}
                           >
                             {artifact.title}
                           </button>
@@ -1064,7 +1075,7 @@ export function ChannelWorkspace({
                             key={attachment.id}
                             type="button"
                             className="max-w-72 cursor-pointer overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-0 text-left hover:border-[var(--cds-border-strong-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                            onClick={() => openArtifactEditor(attachment.artifactId)}
+                            onClick={() => openArtifactEditorPanel(attachment.artifactId)}
                             title={attachment.artifact.title}
                           >
                             <img

@@ -5,6 +5,8 @@ import {
   buildAgentGroupsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  artifactUserFacingLinkInstructions,
+  formatArtifactPromptLines,
   buildMentionedGroupChatRunPrompt,
   resolveTextMentionedAgentIds,
   type ConversationMessage,
@@ -82,6 +84,55 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("Task Index: 0");
     expect(prompt).toContain(
       "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
+    );
+  });
+
+  it("formats artifact prompt data with an editor-first user-facing Markdown link", () => {
+    expect(
+      formatArtifactPromptLines({
+        id: "artifact-1",
+        ownerUserId: "user-1",
+        conversationId: "conversation-1",
+        runId: "run-1",
+        creatorAgentId: "agent-1",
+        status: "ready",
+        title: "implementation-report.md",
+        filename: "implementation-report.md",
+        sizeBytes: 1200,
+        downloadUrl: "http://localhost:3000/artifacts/artifact-1/download",
+        editorUrl: "http://localhost:5173/editor/conversation-1/artifact-1",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      }),
+    ).toContain(
+      "      userFacingLink: [implementation-report.md](http://localhost:5173/editor/conversation-1/artifact-1)",
+    );
+  });
+
+  it("instructs orchestrators to use Markdown artifact links", () => {
+    expect(artifactUserFacingLinkInstructions).toContain("always use Markdown links");
+    expect(artifactUserFacingLinkInstructions).toContain("Prefer artifact.userFacingLink/editorUrl");
+    expect(artifactUserFacingLinkInstructions).toContain("Do not show bare filenames");
+  });
+
+  it("falls back to the artifact download link when no editor link is available", () => {
+    expect(
+      formatArtifactPromptLines({
+        id: "artifact-1",
+        ownerUserId: "user-1",
+        conversationId: "conversation-1",
+        runId: "run-1",
+        creatorAgentId: "agent-1",
+        status: "ready",
+        title: "archive.zip",
+        filename: "archive.zip",
+        sizeBytes: 1200,
+        downloadUrl: "http://localhost:3000/artifacts/artifact-1/download",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      }),
+    ).toContain(
+      "      userFacingLink: [archive.zip](http://localhost:3000/artifacts/artifact-1/download)",
     );
   });
 

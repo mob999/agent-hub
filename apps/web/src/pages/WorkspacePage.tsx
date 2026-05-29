@@ -1622,6 +1622,9 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
             setPrompt={updatePrompt}
             submitRun={submitRun}
             openCreateAgent={() => openCreateAgent()}
+            openAgentConversation={(agentId) => {
+              void selectAgentConversation(agentId)
+            }}
             openEditConversation={openEditActiveConversation}
             openArtifactEditor={openArtifactEditor}
             openRun={openRun}

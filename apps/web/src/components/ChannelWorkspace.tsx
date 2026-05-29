@@ -24,6 +24,7 @@ const taskStatusOrder = [
 
 type TaskAggregationMode = 'goal' | 'status'
 type GoalTask = ConversationGoal['tasks'][number]
+type StatusTagType = 'blue' | 'cyan' | 'gray' | 'green' | 'magenta' | 'purple' | 'red' | 'teal'
 
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
@@ -43,6 +44,7 @@ interface ChannelWorkspaceProps {
     mode: 'chat' | 'task',
   ) => void
   openCreateAgent: () => void
+  openAgentConversation: (agentId: string) => void
   openEditConversation: () => void
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
@@ -65,6 +67,40 @@ function isAgentReady(agent: AgentDetails): boolean {
 
 function displayNameInitial(name: string): string {
   return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
+}
+
+function goalStatusTagType(status: ConversationGoal['status']): StatusTagType {
+  switch (status) {
+    case 'active':
+      return 'blue'
+    case 'completed':
+      return 'green'
+    case 'failed':
+      return 'red'
+    case 'cancelled':
+      return 'gray'
+  }
+}
+
+function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
+  switch (status) {
+    case 'waiting':
+      return 'gray'
+    case 'ready':
+      return 'cyan'
+    case 'assigned':
+      return 'purple'
+    case 'running':
+      return 'blue'
+    case 'succeeded':
+      return 'green'
+    case 'failed':
+      return 'red'
+    case 'cancelled':
+      return 'gray'
+    case 'blocked':
+      return 'magenta'
+  }
 }
 
 function artifactLabel(filename: string): string {
@@ -143,6 +179,7 @@ export function ChannelWorkspace({
   setPrompt,
   submitRun,
   openCreateAgent,
+  openAgentConversation,
   openEditConversation,
   openArtifactEditor,
   openGoalRoute,
@@ -167,10 +204,6 @@ export function ChannelWorkspace({
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
   const hasSelectedConversation = activeConversation !== null
-  const totalGoalTasks = useMemo(
-    () => goals.reduce((total, goal) => total + goal.tasks.length, 0),
-    [goals],
-  )
   const expandedGoalIdSet = useMemo(() => new Set(expandedGoalIds), [expandedGoalIds])
   const flattenedGoalTasks = useMemo(
     () => goals.flatMap((goal) => goal.tasks.map((task) => ({ goal, task }))),
@@ -513,8 +546,13 @@ export function ChannelWorkspace({
           type="button"
           onClick={() => openGoalRoute(goal.id, task.index)}
         >
-          <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-text-secondary)]">
-            Goal: {goal.id.slice(0, 8)} #{task.index}
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Tag className="m-0 uppercase" type={taskStatusTagType(task.status)} size="sm">
+              {task.status}
+            </Tag>
+            <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-text-secondary)]">
+              Goal: {goal.id.slice(0, 8)} #{task.index}
+            </span>
           </span>
           <h4 className="min-w-0 break-words text-sm font-semibold leading-5">
             {task.title}
@@ -553,28 +591,61 @@ export function ChannelWorkspace({
               </p>
             )}
           </div>
-          <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+          <Tag className="m-0 uppercase" type={taskStatusTagType(task.status)} size="sm">
             {task.status}
-          </span>
+          </Tag>
         </div>
-        <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
-          <div>
-            <dt className="font-semibold uppercase">Assignee</dt>
-            <dd className="truncate">{assignee?.agent.name ?? task.assigneeAgentId}</dd>
+        <div className="grid gap-2 text-xs leading-4 text-[var(--cds-text-secondary)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="flex items-center gap-2">
+              <span className="font-semibold uppercase">Assigned to</span>
+              {assignee ? (
+                <button
+                  className="cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  onClick={() => openAgentConversation(assignee.agent.id)}
+                >
+                  {assignee.agent.name}
+                </button>
+              ) : (
+                <span>{task.assigneeAgentId}</span>
+              )}
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="font-semibold uppercase">With run</span>
+              {task.assigneeRunId ? (
+                <button
+                  className="cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  onClick={() => openRun(task.assigneeRunId as string)}
+                >
+                  {task.assigneeRunId.slice(0, 8)}
+                </button>
+              ) : (
+                <span>Not dispatched</span>
+              )}
+            </span>
           </div>
-          <div>
-            <dt className="font-semibold uppercase">Run</dt>
-            <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold uppercase">Depends on</span>
+            {task.dependsOnTaskIndexes && task.dependsOnTaskIndexes.length > 0 ? (
+              <span className="flex flex-wrap gap-1">
+                {task.dependsOnTaskIndexes.map((index) => (
+                  <button
+                    key={index}
+                    className="cursor-pointer border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:bg-[var(--cds-layer-hover-01)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    onClick={() => openGoalRoute(goal.id, index)}
+                  >
+                    #{index}
+                  </button>
+                ))}
+              </span>
+            ) : (
+              <span>None</span>
+            )}
           </div>
-          <div>
-            <dt className="font-semibold uppercase">Depends on</dt>
-            <dd className="truncate">
-              {task.dependsOnTaskIndexes && task.dependsOnTaskIndexes.length > 0
-                ? task.dependsOnTaskIndexes.map((index) => `#${index}`).join(', ')
-                : 'None'}
-            </dd>
-          </div>
-        </dl>
+        </div>
         {task.blockedReason && (
           <div className="text-xs text-[var(--cds-text-secondary)]">
             <span className="font-semibold text-[var(--cds-text-primary)]">Blocked:</span>{' '}
@@ -629,30 +700,51 @@ export function ChannelWorkspace({
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <h3 className="truncate text-base font-semibold">{goal.title}</h3>
-                  <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+                  <Tag className="m-0 uppercase" type={goalStatusTagType(goal.status)} size="sm">
                     {goal.status}
-                  </span>
+                  </Tag>
+                  <h3 className="truncate text-base font-semibold">{goal.title}</h3>
                 </div>
                 {goal.description && (
                   <p className="mt-1 truncate text-sm text-[var(--cds-text-secondary)]">
                     {goal.description}
                   </p>
                 )}
-                <dl className="mt-2 grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
-                  <div>
-                    <dt className="font-semibold uppercase">Orchestrator</dt>
-                    <dd className="truncate">{orchestrator?.agent.name ?? goal.orchestratorAgentId}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold uppercase">Goal</dt>
-                    <dd className="truncate">{goal.id.slice(0, 8)}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold uppercase">Tasks</dt>
-                    <dd className="truncate">{goal.tasks.length}</dd>
-                  </div>
-                </dl>
+                <p className="mt-2 truncate text-sm text-[var(--cds-text-secondary)]">
+                  Goal{' '}
+                  <button
+                    className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openGoalRoute(goal.id, null)
+                    }}
+                  >
+                    {goal.id.slice(0, 8)}
+                  </button>{' '}
+                  organized by{' '}
+                  {orchestrator ? (
+                    <button
+                      className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openAgentConversation(orchestrator.agent.id)
+                      }}
+                    >
+                      {orchestrator.agent.name}
+                    </button>
+                  ) : (
+                    <span className="font-semibold text-[var(--cds-link-primary)]">
+                      {goal.orchestratorAgentId}
+                    </span>
+                  )}
+                  , with{' '}
+                  <span className="font-semibold text-[var(--cds-support-info)]">
+                    {goal.tasks.length}
+                  </span>{' '}
+                  {goal.tasks.length === 1 ? 'task' : 'tasks'}
+                </p>
               </div>
               <span className="self-start text-xl leading-none text-[var(--cds-text-secondary)]">
                 {expanded ? '-' : '+'}
@@ -682,15 +774,15 @@ export function ChannelWorkspace({
   )
 
   const renderStatusBoardView = () => (
-    <div className="overflow-x-auto pb-2">
-      <div className="grid min-w-[72rem] grid-cols-8 gap-2">
+    <div className="min-h-0 overflow-x-auto pb-2">
+      <div className="grid h-full min-w-[72rem] grid-cols-8 gap-2">
         {taskStatusOrder.map((status) => {
           const statusTasks = goalTasksByStatus.get(status) ?? []
 
           return (
             <section
               key={status}
-              className="grid min-h-80 content-start gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2"
+              className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2"
             >
               <div className="flex items-center justify-between gap-2 border-b border-[var(--cds-border-subtle-01)] pb-2">
                 <h3 className="truncate text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
@@ -701,11 +793,11 @@ export function ChannelWorkspace({
                 </span>
               </div>
               {statusTasks.length === 0 ? (
-                <div className="grid min-h-24 place-items-center text-xs text-[var(--cds-text-placeholder)]">
+                <div className="grid min-h-0 place-items-center text-xs text-[var(--cds-text-placeholder)]">
                   No tasks
                 </div>
               ) : (
-                <div className="grid gap-2">
+                <div className="grid min-h-0 content-start gap-2 overflow-y-auto pr-1">
                   {statusTasks.map(({ goal, task }) =>
                     renderGoalTaskCard(goal, task, { compact: true, showGoal: true }),
                   )}
@@ -869,39 +961,37 @@ export function ChannelWorkspace({
         aria-live="polite"
       >
         {showWorkspacePage && showTasks ? (
-          <div className="grid w-full content-start gap-4">
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Tasks</h2>
-                <div
-                  className="inline-flex h-8 overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
-                  role="group"
-                  aria-label="Task aggregation"
-                >
-                  {(['goal', 'status'] as const).map((mode) => {
-                    const selected = taskAggregationMode === mode
+          <div
+            className={
+              taskAggregationMode === 'status'
+                ? 'grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-4'
+                : 'grid w-full content-start gap-4'
+            }
+          >
+            <div
+              className="inline-flex h-8 w-fit overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+              role="group"
+              aria-label="Task aggregation"
+            >
+              {(['goal', 'status'] as const).map((mode) => {
+                const selected = taskAggregationMode === mode
 
-                    return (
-                      <button
-                        key={mode}
-                        className={`min-w-16 cursor-pointer border-0 px-3 text-sm font-semibold capitalize focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
-                          selected
-                            ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-                            : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
-                        }`}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => setTaskAggregationMode(mode)}
-                      >
-                        {mode === 'goal' ? 'Goals' : 'Status'}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-              <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
-                {totalGoalTasks}
-              </span>
+                return (
+                  <button
+                    key={mode}
+                    className={`min-w-16 cursor-pointer border-0 px-3 text-sm font-semibold capitalize focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                      selected
+                        ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
+                        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                    }`}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setTaskAggregationMode(mode)}
+                  >
+                    {mode === 'goal' ? 'Goals' : 'Status'}
+                  </button>
+                )
+              })}
             </div>
             {goals.length === 0 ? (
               <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">

@@ -56,7 +56,7 @@ describe("AgentHubMcpRelay", () => {
     ]);
   });
 
-  it("relays create_task calls with a daemon-generated task id", async () => {
+  it("relays create_task calls scoped to a goal", async () => {
     const relay = await createStartedRelay();
     const calls: unknown[] = [];
     const session = relay.createSession({
@@ -67,9 +67,12 @@ describe("AgentHubMcpRelay", () => {
         return {
           accepted: true,
           task: {
-            id: (call.input as { taskId: string }).taskId,
+            id: "task_1",
+            goalId: (call.input as { goalId: string }).goalId,
+            index: 0,
             title: (call.input as { title: string }).title,
             assigneeAgentId: (call.input as { assigneeAgentId: string }).assigneeAgentId,
+            status: "assigned",
           },
         };
       },
@@ -83,6 +86,7 @@ describe("AgentHubMcpRelay", () => {
         body: JSON.stringify({
           toolCallId: "tool_2",
           input: {
+            goalId: "goal_1",
             title: "Write tests",
             description: "Cover dispatch.",
             assigneeAgentId: "agent_2",
@@ -101,7 +105,7 @@ describe("AgentHubMcpRelay", () => {
         assigneeAgentId: "agent_2",
       },
     });
-    expect(body.task.id).toEqual(expect.any(String));
+    expect(body.task.id).toBe("task_1");
     expect(calls).toEqual([
       expect.objectContaining({
         runId: "run_1",
@@ -111,28 +115,28 @@ describe("AgentHubMcpRelay", () => {
           title: "Write tests",
           description: "Cover dispatch.",
           assigneeAgentId: "agent_2",
-          taskId: body.task.id,
+          goalId: "goal_1",
         }),
       }),
     ]);
   });
 
-  it("relays list_tasks calls to the active run session", async () => {
+  it("relays list_goals calls to the active run session", async () => {
     const relay = await createStartedRelay();
     const calls: unknown[] = [];
     const session = relay.createSession({
       runId: "run_1",
-      enabledTools: ["list_tasks"],
+      enabledTools: ["list_goals"],
       onToolCall: (call) => {
         calls.push(call);
         return {
           accepted: true,
-          tasks: [
+          goals: [
             {
-              id: "task_1",
+              id: "goal_1",
               title: "Research market",
-              assigneeAgentId: "agent_2",
-              status: "running",
+              status: "active",
+              tasks: [],
             },
           ],
         };
@@ -140,28 +144,28 @@ describe("AgentHubMcpRelay", () => {
     });
 
     const response = await fetch(
-      `${session.relayUrl}/sessions/${session.token}/tools/list_tasks`,
+      `${session.relayUrl}/sessions/${session.token}/tools/list_goals`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           toolCallId: "tool_list",
-          input: { status: "running" },
+          input: { status: "active" },
         }),
       },
     );
 
     await expect(response.json()).resolves.toMatchObject({
       accepted: true,
-      tasks: [{ id: "task_1" }],
+      goals: [{ id: "goal_1" }],
     });
     expect(response.status).toBe(200);
     expect(calls).toEqual([
       expect.objectContaining({
         runId: "run_1",
         toolCallId: "tool_list",
-        name: "list_tasks",
-        input: { status: "running" },
+        name: "list_goals",
+        input: { status: "active" },
       }),
     ]);
   });
@@ -282,7 +286,8 @@ describe("AgentHubMcpRelay", () => {
             id: "artifact_1",
             ownerUserId: "user_1",
             conversationId: "conversation_1",
-            taskId: upload.taskId,
+            goalId: upload.goalId,
+            taskIndex: upload.taskIndex,
             runId: "run_1",
             creatorAgentId: "agent_1",
             status: "ready",
@@ -308,7 +313,8 @@ describe("AgentHubMcpRelay", () => {
         body: JSON.stringify({
           toolCallId: "tool_3",
           input: {
-            taskId: "task_1",
+            goalId: "goal_1",
+            taskIndex: 0,
             title: "Report",
             localPath: "artifacts/report.md",
           },
@@ -322,7 +328,8 @@ describe("AgentHubMcpRelay", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           input: {
-            taskId: "task_1",
+            goalId: "goal_1",
+            taskIndex: 0,
             title: "Report",
             localPath: "../outside.md",
           },
@@ -340,7 +347,8 @@ describe("AgentHubMcpRelay", () => {
     expect(rejected.status).toBe(500);
     expect(uploaded).toEqual([
       expect.objectContaining({
-        taskId: "task_1",
+        goalId: "goal_1",
+        taskIndex: 0,
         filename: "report.md",
         sourcePath: "artifacts/report.md",
         contentBase64: expect.any(String),

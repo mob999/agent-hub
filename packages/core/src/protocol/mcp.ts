@@ -2,41 +2,43 @@ import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
   ConversationArtifactId,
+  ConversationGoal,
+  ConversationGoalId,
+  ConversationGoalStatus,
+  ConversationGoalTask,
   ConversationId,
   ConversationMessageId,
-  ConversationTaskStatus,
-  ConversationTaskId,
 } from "./conversation.js";
 import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
-  | "list_tasks"
+  | "list_goals"
   | "list_artifacts"
   | "read_artifact"
+  | "create_goal"
   | "create_task"
   | "approve_task"
   | "cancel_task"
   | "upload_artifact"
   | "complete_task"
-  | "complete_workflow";
+  | "complete_goal";
 
 export const agentHubAllMcpTools = [
   "send_message",
-  "list_tasks",
+  "list_goals",
   "list_artifacts",
   "read_artifact",
+  "create_goal",
   "create_task",
   "approve_task",
   "cancel_task",
-  "upload_artifact",
-  "complete_task",
-  "complete_workflow",
+  "complete_goal",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
-  "list_tasks",
+  "list_goals",
   "list_artifacts",
   "read_artifact",
   "upload_artifact",
@@ -69,77 +71,75 @@ export interface AgentHubSendMessageToolResult {
   attachments?: ConversationArtifact[];
 }
 
-export interface AgentHubListTasksToolInput {
-  status?: ConversationTaskStatus;
+export interface AgentHubCreateGoalToolInput {
+  title: string;
+  description?: string;
 }
 
-export interface AgentHubListTasksToolResult {
+export interface AgentHubCreateGoalToolResult {
   accepted: true;
-  tasks: Array<{
-    id: ConversationTaskId;
-    title: string;
-    assigneeAgentId: AgentId;
-    assigneeRunId?: RunId;
-    workflowId?: string;
-    dependsOnTaskIds?: ConversationTaskId[];
-    description?: string;
-    status: ConversationTaskStatus;
-    blockedReason?: string;
-    summary?: string;
-    resultArtifactIds?: ConversationArtifactId[];
-  }>;
+  goal: ConversationGoal;
+}
+
+export interface AgentHubListGoalsToolInput {
+  status?: ConversationGoalStatus;
+}
+
+export interface AgentHubListGoalsToolResult {
+  accepted: true;
+  goals: ConversationGoal[];
 }
 
 export interface AgentHubCreateTaskToolInput {
+  goalId: ConversationGoalId;
   title: string;
   description?: string;
   assigneeAgentId: AgentId;
-  dependsOnTaskIds?: ConversationTaskId[];
-  taskId?: ConversationTaskId;
+  dependsOnTaskIndexes?: number[];
 }
 
 export interface AgentHubCreateTaskToolResult {
   accepted: true;
-  task: {
-    id: ConversationTaskId;
-    title: string;
-    assigneeAgentId: AgentId;
-    status: ConversationTaskStatus;
-    dependsOnTaskIds?: ConversationTaskId[];
-  };
+  task: ConversationGoalTask;
 }
 
 export interface AgentHubApproveTaskToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
 }
 
 export interface AgentHubApproveTaskToolResult {
   accepted: true;
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   runId?: RunId;
 }
 
 export interface AgentHubCancelTaskToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   reason?: string;
 }
 
 export interface AgentHubCancelTaskToolResult {
   accepted: true;
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
 }
 
-export interface AgentHubCompleteWorkflowToolInput {
+export interface AgentHubCompleteGoalToolInput {
+  goalId: ConversationGoalId;
   summary?: string;
 }
 
-export interface AgentHubCompleteWorkflowToolResult {
+export interface AgentHubCompleteGoalToolResult {
   accepted: true;
-  workflowId: string;
+  goal: ConversationGoal;
 }
 
 export interface AgentHubListArtifactsToolInput {
-  taskId?: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex?: number;
   limit?: number;
 }
 
@@ -149,6 +149,7 @@ export interface AgentHubListArtifactsToolResult {
 }
 
 export interface AgentHubReadArtifactToolInput {
+  goalId: ConversationGoalId;
   artifactId: ConversationArtifactId;
 }
 
@@ -162,7 +163,8 @@ export interface AgentHubReadArtifactToolResult {
 }
 
 export interface AgentHubUploadArtifactToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   title: string;
   localPath: string;
   filename?: string;
@@ -174,7 +176,8 @@ export interface AgentHubUploadArtifactToolResult {
 }
 
 export interface AgentHubCompleteTaskToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   summary: string;
   artifactIds?: ConversationArtifactId[];
 }
@@ -185,7 +188,8 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
-  | AgentHubListTasksToolInput
+  | AgentHubCreateGoalToolInput
+  | AgentHubListGoalsToolInput
   | AgentHubListArtifactsToolInput
   | AgentHubReadArtifactToolInput
   | AgentHubCreateTaskToolInput
@@ -193,10 +197,11 @@ export type AgentHubMcpToolInput =
   | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
   | AgentHubCompleteTaskToolInput
-  | AgentHubCompleteWorkflowToolInput;
+  | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
-  | AgentHubListTasksToolResult
+  | AgentHubCreateGoalToolResult
+  | AgentHubListGoalsToolResult
   | AgentHubListArtifactsToolResult
   | AgentHubReadArtifactToolResult
   | AgentHubCreateTaskToolResult
@@ -204,7 +209,7 @@ export type AgentHubMcpToolResult =
   | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
   | AgentHubCompleteTaskToolResult
-  | AgentHubCompleteWorkflowToolResult;
+  | AgentHubCompleteGoalToolResult;
 
 export interface AgentHubMcpToolCall {
   runId: RunId;

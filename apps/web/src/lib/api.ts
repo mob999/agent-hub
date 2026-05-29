@@ -132,7 +132,8 @@ export type ConversationType = 'group' | 'direct'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
-export type ConversationTaskStatus =
+export type ConversationGoalStatus = 'active' | 'completed' | 'cancelled' | 'failed'
+export type ConversationGoalTaskStatus =
   | 'waiting'
   | 'ready'
   | 'assigned'
@@ -166,27 +167,39 @@ export interface Conversation {
   lastMessageAt?: string
 }
 
-export interface ConversationTask {
+export interface ConversationGoalTask {
   id: string
-  ownerUserId: string
-  conversationId: string
-  workflowId: string
-  creatorRunId: string
-  orchestratorAgentId: string
+  goalId: string
+  index: number
   assigneeAgentId: string
   assigneeRunId?: string
   dispatchMessageId?: string
   title: string
   description?: string
-  status: ConversationTaskStatus
-  dependsOnTaskIds?: string[]
+  status: ConversationGoalTaskStatus
+  dependsOnTaskIndexes?: number[]
   blockedReason?: string
   summary?: string
   resultArtifactIds?: string[]
   artifacts?: ConversationArtifact[]
   completedAt?: string
   checkpointRunId?: string
-  finalizerRunId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationGoal {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  orchestratorAgentId: string
+  initialRunId: string
+  title: string
+  description?: string
+  status: ConversationGoalStatus
+  summary?: string
+  tasks: ConversationGoalTask[]
+  completedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -195,7 +208,9 @@ export interface ConversationArtifact {
   id: string
   ownerUserId: string
   conversationId: string
-  taskId?: string
+  goalId?: string
+  goalTaskId?: string
+  taskIndex?: number
   runId: string
   creatorAgentId: string
   status: ConversationArtifactStatus
@@ -397,8 +412,9 @@ export type RealtimeEvent =
       ownerUserId: string
       createdAt: string
       conversationId: string
-      taskId: string
-      task?: ConversationTask
+      goalId?: string
+      taskId?: string
+      goal?: ConversationGoal
     }
   | {
       type: 'artifact.created'

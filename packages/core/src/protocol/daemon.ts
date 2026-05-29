@@ -9,7 +9,7 @@ import type {
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
 import type {
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
   AgentHubSendMessageTarget,
@@ -19,7 +19,7 @@ import type {
   ConversationArtifactActionId,
   ConversationArtifactActionType,
   ConversationArtifactId,
-  ConversationTaskId,
+  ConversationGoalId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
@@ -30,7 +30,7 @@ export interface DaemonRunAssignment {
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
-  agentHubMcpTasks?: AgentHubListTasksToolResult["tasks"];
+  agentHubMcpGoals?: AgentHubListGoalsToolResult["goals"];
 }
 
 export type DaemonClientMessage =
@@ -74,7 +74,8 @@ export type DaemonClientMessage =
       type: "artifact.upload";
       uploadId: string;
       runId: RunId;
-      taskId?: ConversationTaskId;
+      goalId?: ConversationGoalId;
+      taskIndex?: number;
       messageTarget?: AgentHubSendMessageTarget;
       title: string;
       filename: string;

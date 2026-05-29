@@ -1,16 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
+  AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubApproveTaskToolInput,
   AgentHubCancelTaskToolInput,
-  AgentHubCompleteWorkflowToolInput,
+  AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubReadArtifactToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubSendMessageTarget,
   AgentHubUploadArtifactToolInput,
   AgentHubSendMessageToolInput,
@@ -23,7 +24,8 @@ import type {
   ConversationMessageAttachment,
   ConversationArtifactDetails,
   ConversationArtifactRevision,
-  ConversationTask,
+  ConversationGoal,
+  ConversationGoalTask,
   RealtimeEvent,
   RunEvent,
 } from "@agent-hub/core";
@@ -40,8 +42,8 @@ import {
   conversationArtifactRevisions,
   conversationMessageArtifacts,
   conversationMessages,
-  conversationTasks,
-  conversationTaskWorkflows,
+  conversationGoals,
+  conversationGoalTasks,
   conversations,
   runEvents,
   runs,
@@ -68,8 +70,8 @@ export const defaultGroupConversationTitle = "all";
 
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
-type ConversationTaskRow = typeof conversationTasks.$inferSelect;
-type ConversationTaskWorkflowRow = typeof conversationTaskWorkflows.$inferSelect;
+type ConversationGoalRow = typeof conversationGoals.$inferSelect;
+type ConversationGoalTaskRow = typeof conversationGoalTasks.$inferSelect;
 type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
 type ConversationMessageArtifactRow =
   typeof conversationMessageArtifacts.$inferSelect;
@@ -135,7 +137,8 @@ export interface PersistConversationArtifactUploadInput {
   sizeBytes: number;
   sourcePath?: string;
   storageRoot: string;
-  taskId?: string;
+  goalId?: string;
+  taskIndex?: number;
   title: string;
 }
 
@@ -242,7 +245,9 @@ export function toConversationArtifact(
     id: row.id,
     ownerUserId: row.ownerUserId,
     conversationId: row.conversationId,
-    taskId: optionalString(row.taskId),
+    goalId: optionalString(row.goalId),
+    goalTaskId: optionalString(row.goalTaskId),
+    taskIndex: row.taskIndex ?? undefined,
     runId: row.runId,
     creatorAgentId: row.creatorAgentId,
     status: row.status as ConversationArtifact["status"],
@@ -317,52 +322,65 @@ export function toConversationArtifactAction(
   };
 }
 
-export function toConversationTask(
-  row: ConversationTaskRow,
+export function toConversationGoalTask(
+  row: ConversationGoalTaskRow,
   artifacts: ConversationArtifact[] = [],
-): ConversationTask {
+): ConversationGoalTask {
   return {
     id: row.id,
-    ownerUserId: row.ownerUserId,
-    conversationId: row.conversationId,
-    workflowId: row.workflowId,
-    creatorRunId: row.creatorRunId,
-    orchestratorAgentId: row.orchestratorAgentId,
+    goalId: row.goalId,
+    index: row.index,
     assigneeAgentId: row.assigneeAgentId,
     assigneeRunId: optionalString(row.assigneeRunId),
     dispatchMessageId: optionalString(row.dispatchMessageId),
-    dependsOnTaskIds: row.dependsOnTaskIds ?? [],
+    dependsOnTaskIndexes: row.dependsOnTaskIndexes ?? [],
     title: row.title,
     description: optionalString(row.description),
-    status: row.status as ConversationTask["status"],
+    status: row.status as ConversationGoalTask["status"],
     blockedReason: optionalString(row.blockedReason),
     summary: optionalString(row.summary),
     resultArtifactIds: row.resultArtifactIds ?? undefined,
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     completedAt: row.completedAt?.toISOString(),
-    finalizerRunId: optionalString(row.finalizerRunId),
     checkpointRunId: optionalString(row.checkpointRunId),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-function toMcpTaskListFromRows(
-  rows: ConversationTaskRow[],
-): AgentHubListTasksToolResult["tasks"] {
-  return rows.map((row) => ({
+export function toConversationGoal(
+  row: ConversationGoalRow,
+  tasks: ConversationGoalTask[] = [],
+): ConversationGoal {
+  return {
     id: row.id,
-      title: row.title,
-      assigneeAgentId: row.assigneeAgentId,
-      assigneeRunId: optionalString(row.assigneeRunId),
-      workflowId: row.workflowId,
-      dependsOnTaskIds: row.dependsOnTaskIds ?? [],
-      description: optionalString(row.description),
-      status: row.status as ConversationTask["status"],
-      blockedReason: optionalString(row.blockedReason),
-      summary: optionalString(row.summary),
-      resultArtifactIds: row.resultArtifactIds ?? undefined,
-    }));
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    orchestratorAgentId: row.orchestratorAgentId,
+    initialRunId: row.initialRunId,
+    title: row.title,
+    description: optionalString(row.description),
+    status: row.status as ConversationGoal["status"],
+    summary: optionalString(row.summary),
+    tasks,
+    completedAt: row.completedAt?.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function toMcpGoalListFromRows(input: {
+  goals: ConversationGoalRow[];
+  tasksByGoalId: Map<string, ConversationGoalTaskRow[]>;
+}): AgentHubListGoalsToolResult["goals"] {
+  return input.goals.map((goal) =>
+    toConversationGoal(
+      goal,
+      (input.tasksByGoalId.get(goal.id) ?? []).map((task) =>
+        toConversationGoalTask(task)
+      ),
+    )
+  );
 }
 
 function conversationPromptRole(
@@ -650,6 +668,14 @@ function compactUniqueStrings(values: Array<string | undefined>): string[] {
         (value): value is string =>
           typeof value === "string" && value.length > 0,
       ),
+    ),
+  ];
+}
+
+function compactUniqueNumbers(values: number[]): number[] {
+  return [
+    ...new Set(
+      values.filter((value) => Number.isInteger(value) && value >= 0),
     ),
   ];
 }
@@ -1309,7 +1335,7 @@ export async function listConversationMessagesForUser(
   );
 }
 
-export async function listConversationTasksForUser(
+export async function listConversationGoalsForUser(
   db: Db,
   input: {
     conversationId: ConversationId;
@@ -1317,42 +1343,59 @@ export async function listConversationTasksForUser(
     publicApiBaseUrl?: string;
     publicWebBaseUrl?: string;
   },
-): Promise<ConversationTask[] | null> {
+): Promise<ConversationGoal[] | null> {
   const conversation = await getConversationForUser(db, input);
 
   if (conversation === null) {
     return null;
   }
 
-  const rows = await db
+  const goalRows = await db
     .select()
-    .from(conversationTasks)
-    .where(eq(conversationTasks.conversationId, input.conversationId))
-    .orderBy(desc(conversationTasks.createdAt));
+    .from(conversationGoals)
+    .where(eq(conversationGoals.conversationId, input.conversationId))
+    .orderBy(desc(conversationGoals.createdAt));
+
+  if (goalRows.length === 0) {
+    return [];
+  }
+
+  const taskRows = await db
+    .select()
+    .from(conversationGoalTasks)
+    .where(inArray(conversationGoalTasks.goalId, goalRows.map((goal) => goal.id)))
+    .orderBy(asc(conversationGoalTasks.index));
 
   const artifactRows = await db
     .select()
     .from(conversationArtifacts)
-    .where(eq(conversationArtifacts.conversationId, input.conversationId))
+    .where(inArray(conversationArtifacts.goalId, goalRows.map((goal) => goal.id)))
     .orderBy(desc(conversationArtifacts.createdAt));
-  const artifactsByTask = new Map<string, ConversationArtifact[]>();
+  const artifactsByGoalTask = new Map<string, ConversationArtifact[]>();
 
   for (const artifactRow of artifactRows) {
-    if (artifactRow.taskId === null) {
+    if (artifactRow.goalTaskId === null) {
       continue;
     }
 
-    const artifacts = artifactsByTask.get(artifactRow.taskId) ?? [];
+    const artifacts = artifactsByGoalTask.get(artifactRow.goalTaskId) ?? [];
     artifacts.push(
       toConversationArtifact(artifactRow, {
         publicApiBaseUrl: input.publicApiBaseUrl,
         publicWebBaseUrl: input.publicWebBaseUrl,
       }),
     );
-    artifactsByTask.set(artifactRow.taskId, artifacts);
+    artifactsByGoalTask.set(artifactRow.goalTaskId, artifacts);
   }
 
-  return rows.map((row) => toConversationTask(row, artifactsByTask.get(row.id)));
+  const tasksByGoalId = new Map<string, ConversationGoalTask[]>();
+  for (const taskRow of taskRows) {
+    const tasks = tasksByGoalId.get(taskRow.goalId) ?? [];
+    tasks.push(toConversationGoalTask(taskRow, artifactsByGoalTask.get(taskRow.id)));
+    tasksByGoalId.set(taskRow.goalId, tasks);
+  }
+
+  return goalRows.map((goal) => toConversationGoal(goal, tasksByGoalId.get(goal.id)));
 }
 
 export async function listConversationArtifactsForUser(
@@ -1812,7 +1855,7 @@ export async function persistConversationArtifactUpload(
     throw new Error("Artifact upload run was not found.");
   }
 
-  const targetConversation = input.taskId === undefined
+  const targetConversation = input.goalId === undefined
     ? await getSendMessageTargetConversation(db, {
         currentConversationId: run.conversationId,
         ownerUserId: run.ownerUserId,
@@ -1820,7 +1863,7 @@ export async function persistConversationArtifactUpload(
         target: input.messageTarget,
       })
     : null;
-  const artifactConversationId = input.taskId === undefined
+  const artifactConversationId = input.goalId === undefined
     ? targetConversation?.id
     : run.conversationId;
 
@@ -1828,23 +1871,33 @@ export async function persistConversationArtifactUpload(
     throw new Error("Artifact upload target conversation was not found.");
   }
 
-  if (input.taskId !== undefined) {
+  let goalTaskId: string | undefined;
+  if (input.goalId !== undefined) {
+    if (input.taskIndex === undefined) {
+      throw new Error("Artifact task index is required for goal uploads.");
+    }
+
     const [task] = await db
-      .select()
-      .from(conversationTasks)
+      .select({
+        id: conversationGoalTasks.id,
+      })
+      .from(conversationGoalTasks)
+      .innerJoin(conversationGoals, eq(conversationGoalTasks.goalId, conversationGoals.id))
       .where(
         and(
-          eq(conversationTasks.id, input.taskId),
-          eq(conversationTasks.conversationId, artifactConversationId),
-          eq(conversationTasks.assigneeRunId, input.runId),
-          eq(conversationTasks.assigneeAgentId, run.agentId),
+          eq(conversationGoals.id, input.goalId),
+          eq(conversationGoals.conversationId, artifactConversationId),
+          eq(conversationGoalTasks.index, input.taskIndex),
+          eq(conversationGoalTasks.assigneeRunId, input.runId),
+          eq(conversationGoalTasks.assigneeAgentId, run.agentId),
         ),
       )
       .limit(1);
 
     if (task === undefined) {
-      throw new Error("Artifact task does not belong to this run.");
+      throw new Error("Artifact goal task does not belong to this run.");
     }
+    goalTaskId = task.id;
   }
 
   const artifactId = randomUUID();
@@ -1871,7 +1924,9 @@ export async function persistConversationArtifactUpload(
       id: artifactId,
       ownerUserId: run.ownerUserId,
       conversationId: artifactConversationId,
-      taskId: input.taskId,
+      goalId: input.goalId,
+      goalTaskId,
+      taskIndex: input.taskIndex,
       runId: input.runId,
       creatorAgentId: run.agentId,
       status: "ready",
@@ -2200,9 +2255,9 @@ function readSendMessageAttachments(
   return attachments.length > 0 ? attachments : undefined;
 }
 
-function readListTasksToolInput(
+function readListGoalsToolInput(
   input: unknown,
-): { status?: ConversationTask["status"] } | null {
+): { status?: ConversationGoal["status"] } | null {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return null;
   }
@@ -2210,8 +2265,32 @@ function readListTasksToolInput(
   const status = (input as Record<string, unknown>).status;
 
   return typeof status === "string" && status.length > 0
-    ? { status: status as ConversationTask["status"] }
+    ? { status: status as ConversationGoal["status"] }
     : {};
+}
+
+function readCreateGoalToolInput(
+  input: unknown,
+): AgentHubCreateGoalToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("title" in input)
+  ) {
+    return null;
+  }
+
+  const goalInput = input as AgentHubCreateGoalToolInput;
+  const title = goalInput.title.trim();
+  const description = goalInput.description?.trim();
+
+  return title.length > 0 && title.length <= 160
+    ? {
+        title,
+        description: description && description.length > 0 ? description : undefined,
+      }
+    : null;
 }
 
 function readCreateTaskToolInput(
@@ -2221,6 +2300,7 @@ function readCreateTaskToolInput(
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
+    !("goalId" in input) ||
     !("title" in input) ||
     !("assigneeAgentId" in input)
   ) {
@@ -2231,18 +2311,20 @@ function readCreateTaskToolInput(
   const title = taskInput.title.trim();
   const description = taskInput.description?.trim();
 
-  return title.length > 0 &&
+  return typeof taskInput.goalId === "string" &&
+    taskInput.goalId.length > 0 &&
+    title.length > 0 &&
     title.length <= 160 &&
     typeof taskInput.assigneeAgentId === "string" &&
     taskInput.assigneeAgentId.length > 0
     ? {
+        goalId: taskInput.goalId,
         title,
         description: description && description.length > 0 ? description : undefined,
         assigneeAgentId: taskInput.assigneeAgentId,
-        dependsOnTaskIds: Array.isArray(taskInput.dependsOnTaskIds)
-          ? compactUniqueStrings(taskInput.dependsOnTaskIds)
+        dependsOnTaskIndexes: Array.isArray(taskInput.dependsOnTaskIndexes)
+          ? compactUniqueNumbers(taskInput.dependsOnTaskIndexes)
           : undefined,
-        taskId: taskInput.taskId,
       }
     : null;
 }
@@ -2254,9 +2336,17 @@ function readApproveTaskToolInput(
     return null;
   }
 
-  const taskId = (input as Record<string, unknown>).taskId;
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const taskIndex = record.taskIndex;
 
-  return typeof taskId === "string" && taskId.length > 0 ? { taskId } : null;
+  return typeof goalId === "string" &&
+    goalId.length > 0 &&
+    typeof taskIndex === "number" &&
+    Number.isInteger(taskIndex) &&
+    taskIndex >= 0
+    ? { goalId, taskIndex }
+    : null;
 }
 
 function readCancelTaskToolInput(
@@ -2267,12 +2357,18 @@ function readCancelTaskToolInput(
   }
 
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = record.taskIndex;
   const reason = record.reason;
 
-  return typeof taskId === "string" && taskId.length > 0
+  return typeof goalId === "string" &&
+    goalId.length > 0 &&
+    typeof taskIndex === "number" &&
+    Number.isInteger(taskIndex) &&
+    taskIndex >= 0
     ? {
-        taskId,
+        goalId,
+        taskIndex,
         reason: typeof reason === "string" && reason.trim().length > 0
           ? reason.trim()
           : undefined,
@@ -2280,20 +2376,25 @@ function readCancelTaskToolInput(
     : null;
 }
 
-function readCompleteWorkflowToolInput(
+function readCompleteGoalToolInput(
   input: unknown,
-): AgentHubCompleteWorkflowToolInput | null {
+): AgentHubCompleteGoalToolInput | null {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return null;
   }
 
-  const summary = (input as Record<string, unknown>).summary;
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const summary = record.summary;
 
-  return {
-    summary: typeof summary === "string" && summary.trim().length > 0
-      ? summary.trim()
-      : undefined,
-  };
+  return typeof goalId === "string" && goalId.length > 0
+    ? {
+        goalId,
+        summary: typeof summary === "string" && summary.trim().length > 0
+          ? summary.trim()
+          : undefined,
+      }
+    : null;
 }
 
 function readListArtifactsToolInput(
@@ -2304,15 +2405,23 @@ function readListArtifactsToolInput(
   }
 
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = record.taskIndex;
   const limit = record.limit;
 
-  return {
-    taskId: typeof taskId === "string" && taskId.length > 0 ? taskId : undefined,
-    limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
-      ? Math.min(limit, 50)
-      : undefined,
-  };
+  return typeof goalId === "string" && goalId.length > 0
+    ? {
+        goalId,
+        taskIndex: typeof taskIndex === "number" &&
+          Number.isInteger(taskIndex) &&
+          taskIndex >= 0
+          ? taskIndex
+          : undefined,
+        limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
+          ? Math.min(limit, 50)
+          : undefined,
+      }
+    : null;
 }
 
 function readReadArtifactToolInput(
@@ -2322,10 +2431,15 @@ function readReadArtifactToolInput(
     return null;
   }
 
-  const artifactId = (input as Record<string, unknown>).artifactId;
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const artifactId = record.artifactId;
 
-  return typeof artifactId === "string" && artifactId.length > 0
-    ? { artifactId }
+  return typeof goalId === "string" &&
+    goalId.length > 0 &&
+    typeof artifactId === "string" &&
+    artifactId.length > 0
+    ? { goalId, artifactId }
     : null;
 }
 
@@ -2336,7 +2450,8 @@ function readUploadArtifactToolInput(
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
-    !("taskId" in input) ||
+    !("goalId" in input) ||
+    !("taskIndex" in input) ||
     !("title" in input) ||
     !("localPath" in input)
   ) {
@@ -2350,11 +2465,15 @@ function readUploadArtifactToolInput(
 
   return title.length > 0 &&
     title.length <= 160 &&
-    typeof artifactInput.taskId === "string" &&
-    artifactInput.taskId.length > 0 &&
+    typeof artifactInput.goalId === "string" &&
+    artifactInput.goalId.length > 0 &&
+    typeof artifactInput.taskIndex === "number" &&
+    Number.isInteger(artifactInput.taskIndex) &&
+    artifactInput.taskIndex >= 0 &&
     localPath.length > 0
     ? {
-        taskId: artifactInput.taskId,
+        goalId: artifactInput.goalId,
+        taskIndex: artifactInput.taskIndex,
         title,
         localPath,
         filename: filename && filename.length > 0 ? filename : undefined,
@@ -2369,7 +2488,8 @@ function readCompleteTaskToolInput(
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
-    !("taskId" in input) ||
+    !("goalId" in input) ||
+    !("taskIndex" in input) ||
     !("summary" in input)
   ) {
     return null;
@@ -2381,11 +2501,15 @@ function readCompleteTaskToolInput(
     ? compactUniqueStrings(taskInput.artifactIds)
     : undefined;
 
-  return typeof taskInput.taskId === "string" &&
-    taskInput.taskId.length > 0 &&
+  return typeof taskInput.goalId === "string" &&
+    taskInput.goalId.length > 0 &&
+    typeof taskInput.taskIndex === "number" &&
+    Number.isInteger(taskInput.taskIndex) &&
+    taskInput.taskIndex >= 0 &&
     summary.length > 0
     ? {
-        taskId: taskInput.taskId,
+        goalId: taskInput.goalId,
+        taskIndex: taskInput.taskIndex,
         summary,
         artifactIds,
       }
@@ -2742,7 +2866,10 @@ async function resolveConversationAgentReference(
 export function buildAssignedTaskPrompt(input: {
   agentGroupsPrompt?: string;
   conversationTitle: string;
+  goalId: string;
+  goalTitle: string;
   taskId: string;
+  taskIndex: number;
   taskTitle: string;
   taskDescription?: string;
   dispatchMessage: string;
@@ -2750,14 +2877,17 @@ export function buildAssignedTaskPrompt(input: {
   return [
     "<agenthub_assigned_task>",
     `Group: #${input.conversationTitle}`,
+    `Goal ID: ${input.goalId}`,
+    `Goal: ${input.goalTitle}`,
     `Task ID: ${input.taskId}`,
+    `Task Index: ${input.taskIndex}`,
     `Task: ${input.taskTitle}`,
     input.taskDescription ? `Description: ${input.taskDescription}` : undefined,
     "",
     "You were assigned this task by the group orchestrator.",
     "Create the requested report or result file in your current workspace.",
     "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
-    "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
+    "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
     "Upload the report with upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
@@ -2907,12 +3037,11 @@ async function createMentionedGroupChatRuns(
     }))?.filter((message) => message.id !== input.triggerMessageId) ?? [];
   const agentNamesById = await listAgentNamesByIdForUser(db, input.ownerUserId);
   const senderAgentName = agentNamesById[input.senderAgentId] ?? "Another agent";
-  const taskRows = await db
-    .select()
-    .from(conversationTasks)
-    .where(eq(conversationTasks.conversationId, input.conversation.id))
-    .orderBy(asc(conversationTasks.createdAt));
-  const agentHubMcpTasks = toMcpTaskListFromRows(taskRows);
+  const agentHubMcpGoals =
+    (await listConversationGoalsForUser(db, {
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+    })) ?? [];
   const dispatchJobs: RunQueueJob[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
 
@@ -2956,7 +3085,7 @@ async function createMentionedGroupChatRuns(
       agentHubMcpTools: isOrchestrator
         ? [...agentHubAllMcpTools]
         : [...agentHubNonOrchestratorMcpTools],
-      agentHubMcpTasks,
+      agentHubMcpGoals,
       workspacePath: runAgent.workspacePath,
       run: {
         id: runId,
@@ -3092,107 +3221,39 @@ function isActiveTaskStatus(status: string): boolean {
     status === "running";
 }
 
-async function getWorkflowForRun(
+async function listGoalTasks(
   db: Db,
-  input: {
-    conversation: ConversationRow;
-    createdAt: Date;
-    ownerUserId: string;
-    runAgentId: string;
-    runId: string;
-  },
-): Promise<ConversationTaskWorkflowRow | null> {
-  const [existingWorkflow] = await db
-    .select()
-    .from(conversationTaskWorkflows)
-    .where(
-      and(
-        eq(conversationTaskWorkflows.conversationId, input.conversation.id),
-        eq(conversationTaskWorkflows.ownerUserId, input.ownerUserId),
-        eq(conversationTaskWorkflows.initialRunId, input.runId),
-      ),
-    )
-    .limit(1);
-
-  if (existingWorkflow !== undefined) {
-    return existingWorkflow;
-  }
-
-  const [checkpointWorkflow] = await db
-    .select()
-    .from(conversationTaskWorkflows)
-    .innerJoin(
-      conversationTasks,
-      eq(conversationTasks.workflowId, conversationTaskWorkflows.id),
-    )
-    .where(
-      and(
-        eq(conversationTasks.checkpointRunId, input.runId),
-        eq(conversationTaskWorkflows.ownerUserId, input.ownerUserId),
-        eq(conversationTaskWorkflows.conversationId, input.conversation.id),
-      ),
-    )
-    .limit(1);
-
-  if (checkpointWorkflow?.conversation_task_workflows !== undefined) {
-    return checkpointWorkflow.conversation_task_workflows;
-  }
-
-  if (input.conversation.orchestratorAgentId !== input.runAgentId) {
-    return null;
-  }
-
-  const workflowId = randomUUID();
-  const [createdWorkflow] = await db
-    .insert(conversationTaskWorkflows)
-    .values({
-      id: workflowId,
-      ownerUserId: input.ownerUserId,
-      conversationId: input.conversation.id,
-      orchestratorAgentId: input.runAgentId,
-      initialRunId: input.runId,
-      status: "active",
-      createdAt: input.createdAt,
-      updatedAt: input.createdAt,
-    })
-    .returning();
-
-  return createdWorkflow ?? null;
-}
-
-async function listWorkflowTasks(
-  db: Db,
-  workflowId: string,
-): Promise<ConversationTaskRow[]> {
+  goalId: string,
+): Promise<ConversationGoalTaskRow[]> {
   return db
     .select()
-    .from(conversationTasks)
-    .where(eq(conversationTasks.workflowId, workflowId))
-    .orderBy(asc(conversationTasks.createdAt));
+    .from(conversationGoalTasks)
+    .where(eq(conversationGoalTasks.goalId, goalId))
+    .orderBy(asc(conversationGoalTasks.index));
 }
 
 function dependencyStatusForTask(
   taskInput: AgentHubCreateTaskToolInput,
-  existingTasks: ConversationTaskRow[],
-): { blockedReason?: string; status: ConversationTask["status"] } {
-  const dependencyIds = taskInput.dependsOnTaskIds ?? [];
+  existingTasks: ConversationGoalTaskRow[],
+): { blockedReason?: string; status: ConversationGoalTask["status"] } {
+  const dependencyIndexes = taskInput.dependsOnTaskIndexes ?? [];
 
-  if (dependencyIds.length === 0) {
+  if (dependencyIndexes.length === 0) {
     return { status: "assigned" };
   }
 
-  const tasksById = new Map(existingTasks.map((task) => [task.id, task]));
-  const missingDependency = dependencyIds.find((taskId) => !tasksById.has(taskId));
+  const tasksByIndex = new Map(existingTasks.map((task) => [task.index, task]));
+  const missingDependency = dependencyIndexes.find((index) => !tasksByIndex.has(index));
 
   if (missingDependency !== undefined) {
     return {
-      blockedReason: `Dependency task ${missingDependency} was not found.`,
+      blockedReason: `Dependency task #${missingDependency} was not found.`,
       status: "blocked",
     };
   }
 
-  const failedDependency = dependencyIds
-    .map((taskId) => tasksById.get(taskId))
+  const failedDependency = dependencyIndexes
+    .map((index) => tasksByIndex.get(index))
     .find((task) =>
       task !== undefined &&
       (task.status === "failed" ||
@@ -3202,12 +3263,12 @@ function dependencyStatusForTask(
 
   if (failedDependency !== undefined) {
     return {
-      blockedReason: `Dependency task ${failedDependency.id} is ${failedDependency.status}.`,
+      blockedReason: `Dependency task #${failedDependency.index} is ${failedDependency.status}.`,
       status: "blocked",
     };
   }
 
-  return dependencyIds.every((taskId) => tasksById.get(taskId)?.status === "succeeded")
+  return dependencyIndexes.every((index) => tasksByIndex.get(index)?.status === "succeeded")
     ? { status: "ready" }
     : { status: "waiting" };
 }
@@ -3216,40 +3277,50 @@ async function updateDependentTaskReadiness(
   db: Db,
   input: {
     createdAt: Date;
+    goalId: string;
     realtimeEvents: RealtimeEvent[];
-    workflowId: string;
   },
 ): Promise<void> {
-  const workflowTasks = await listWorkflowTasks(db, input.workflowId);
-  const tasksById = new Map(workflowTasks.map((task) => [task.id, task]));
+  const goalTasks = await listGoalTasks(db, input.goalId);
+  const [goal] = await db
+    .select()
+    .from(conversationGoals)
+    .where(eq(conversationGoals.id, input.goalId))
+    .limit(1);
 
-  for (const task of workflowTasks) {
+  if (goal === undefined) {
+    return;
+  }
+
+  const tasksByIndex = new Map(goalTasks.map((task) => [task.index, task]));
+
+  for (const task of goalTasks) {
     if (task.status !== "waiting" && task.status !== "ready") {
       continue;
     }
 
-    const dependencyIds = task.dependsOnTaskIds ?? [];
+    const dependencyIndexes = task.dependsOnTaskIndexes ?? [];
 
-    if (dependencyIds.length === 0) {
+    if (dependencyIndexes.length === 0) {
       continue;
     }
 
-    const failedDependency = dependencyIds
-      .map((taskId) => tasksById.get(taskId))
+    const failedDependency = dependencyIndexes
+      .map((index) => tasksByIndex.get(index))
       .find((dependency) =>
         dependency !== undefined &&
         (dependency.status === "failed" ||
           dependency.status === "cancelled" ||
           dependency.status === "blocked")
       );
-    const nextStatus: ConversationTask["status"] = failedDependency !== undefined
+    const nextStatus: ConversationGoalTask["status"] = failedDependency !== undefined
       ? "blocked"
-      : dependencyIds.every((taskId) => tasksById.get(taskId)?.status === "succeeded")
+      : dependencyIndexes.every((index) => tasksByIndex.get(index)?.status === "succeeded")
         ? "ready"
         : "waiting";
     const blockedReason = failedDependency === undefined
       ? null
-      : `Dependency task ${failedDependency.id} is ${failedDependency.status}.`;
+      : `Dependency task #${failedDependency.index} is ${failedDependency.status}.`;
 
     if (
       task.status === nextStatus &&
@@ -3259,17 +3330,17 @@ async function updateDependentTaskReadiness(
     }
 
     await db
-      .update(conversationTasks)
+      .update(conversationGoalTasks)
       .set({
         status: nextStatus,
         blockedReason,
         updatedAt: input.createdAt,
       })
-      .where(eq(conversationTasks.id, task.id));
+      .where(eq(conversationGoalTasks.id, task.id));
     input.realtimeEvents.push(
       createRealtimeEvent({
-        conversationId: task.conversationId,
-        ownerUserId: task.ownerUserId,
+        conversationId: goal.conversationId,
+        ownerUserId: goal.ownerUserId,
         taskId: task.id,
         type: "task.updated",
       }),
@@ -3285,13 +3356,13 @@ async function maybeCreateCheckpointRunForTask(
     publicApiBaseUrl?: string;
     publicWebBaseUrl?: string;
     realtimeEvents: RealtimeEvent[];
-    taskId: string;
+    goalTaskId: string;
   },
 ): Promise<void> {
   const [task] = await db
     .select()
-    .from(conversationTasks)
-    .where(eq(conversationTasks.id, input.taskId))
+    .from(conversationGoalTasks)
+    .where(eq(conversationGoalTasks.id, input.goalTaskId))
     .limit(1);
 
   if (
@@ -3302,20 +3373,20 @@ async function maybeCreateCheckpointRunForTask(
     return;
   }
 
-  const [workflow] = await db
+  const [goal] = await db
     .select()
-    .from(conversationTaskWorkflows)
-    .where(eq(conversationTaskWorkflows.id, task.workflowId))
+    .from(conversationGoals)
+    .where(eq(conversationGoals.id, task.goalId))
     .limit(1);
 
-  if (workflow === undefined || workflow.status !== "active") {
+  if (goal === undefined || goal.status !== "active") {
     return;
   }
 
   const [conversation] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, task.conversationId))
+    .where(eq(conversations.id, goal.conversationId))
     .limit(1);
 
   if (
@@ -3327,56 +3398,56 @@ async function maybeCreateCheckpointRunForTask(
 
   const runAgent = await getRunnableAgentForUser(db, {
     agentId: conversation.orchestratorAgentId,
-    ownerUserId: task.ownerUserId,
+    ownerUserId: goal.ownerUserId,
   });
 
   if (runAgent === null) {
     return;
   }
 
-  const workflowTasks = await listWorkflowTasks(db, workflow.id);
+  const goalTasks = await listGoalTasks(db, goal.id);
   const artifactRows = await db
     .select()
     .from(conversationArtifacts)
-    .where(inArray(conversationArtifacts.taskId, workflowTasks.map((row) => row.id)))
+    .where(eq(conversationArtifacts.goalId, goal.id))
     .orderBy(asc(conversationArtifacts.createdAt));
   const artifactsByTask = new Map<string, ConversationArtifact[]>();
 
   for (const artifactRow of artifactRows) {
-    if (artifactRow.taskId === null) {
+    if (artifactRow.goalTaskId === null) {
       continue;
     }
 
-    const artifacts = artifactsByTask.get(artifactRow.taskId) ?? [];
+    const artifacts = artifactsByTask.get(artifactRow.goalTaskId) ?? [];
     artifacts.push(
       toConversationArtifact(artifactRow, {
         publicApiBaseUrl: input.publicApiBaseUrl,
         publicWebBaseUrl: input.publicWebBaseUrl,
       }),
     );
-    artifactsByTask.set(artifactRow.taskId, artifacts);
+    artifactsByTask.set(artifactRow.goalTaskId, artifacts);
   }
 
   const agentGroupsPrompt = buildAgentGroupsPrompt(
     await listActiveAgentGroupContexts(db, {
       agentId: runAgent.agent.id,
-      ownerUserId: task.ownerUserId,
+      ownerUserId: goal.ownerUserId,
     }),
   );
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
-  const taskLines = workflowTasks.map((row, index) => {
+  const taskLines = goalTasks.map((row) => {
     const artifactLines = (artifactsByTask.get(row.id) ?? []).map(
       (artifact) =>
         `    artifact: ${artifact.title} (${artifact.id}) ${artifact.editorUrl ?? artifact.downloadUrl ?? ""}`,
     );
 
     return [
-      `${index + 1}. ${row.title}`,
+      `Task #${row.index}: ${row.title}`,
       `   id: ${row.id}`,
       `   assigneeAgentId: ${row.assigneeAgentId}`,
       `   status: ${row.status}`,
-      `   dependsOnTaskIds: ${(row.dependsOnTaskIds ?? []).join(", ") || "none"}`,
+      `   dependsOnTaskIndexes: ${(row.dependsOnTaskIndexes ?? []).join(", ") || "none"}`,
       row.blockedReason ? `   blockedReason: ${row.blockedReason}` : undefined,
       row.summary ? `   summary: ${row.summary}` : undefined,
       ...artifactLines,
@@ -3385,12 +3456,14 @@ async function maybeCreateCheckpointRunForTask(
   const prompt = [
     "<agenthub_task_checkpoint>",
     `Group: #${conversation.title}`,
-    `Workflow ID: ${workflow.id}`,
+    `Goal ID: ${goal.id}`,
+    `Goal: ${goal.title}`,
+    `Completed task index: ${task.index}`,
     `Completed task ID: ${task.id}`,
     `Completed task status: ${task.status}`,
     task.summary ? `Completed task summary: ${task.summary}` : undefined,
-    "Review the completed task and decide how to continue the workflow.",
-    "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_workflow only when the workflow is done.",
+    "Review the completed task and decide how to continue the goal.",
+    "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_goal only when the goal is done.",
     "</agenthub_task_checkpoint>",
     "",
     agentGroupsPrompt,
@@ -3411,10 +3484,10 @@ async function maybeCreateCheckpointRunForTask(
         isOrchestrator: true,
         scenario: "task checkpoint",
       }),
-      "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the workflow using AgentHub MCP tools.",
+      "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the goal using AgentHub MCP tools.",
     ].join("\n\n"),
     agentHubMcpTools: [...agentHubAllMcpTools],
-    agentHubMcpTasks: toMcpTaskListFromRows(workflowTasks),
+    agentHubMcpGoals: [toConversationGoal(goal, goalTasks.map((row) => toConversationGoalTask(row)))],
     workspacePath: runAgent.workspacePath,
     run: {
       id: runId,
@@ -3437,8 +3510,8 @@ async function maybeCreateCheckpointRunForTask(
   await db.transaction(async (tx) => {
     const [lockedTask] = await tx
       .select()
-      .from(conversationTasks)
-      .where(eq(conversationTasks.id, task.id))
+      .from(conversationGoalTasks)
+      .where(eq(conversationGoalTasks.id, task.id))
       .limit(1);
 
     if (
@@ -3451,7 +3524,7 @@ async function maybeCreateCheckpointRunForTask(
 
     await tx.insert(runs).values({
       id: runId,
-      ownerUserId: task.ownerUserId,
+      ownerUserId: goal.ownerUserId,
       conversationId: conversation.id,
       agentId: runAgent.agent.id,
       daemonDeviceId: runAgent.daemonDeviceId,
@@ -3471,31 +3544,31 @@ async function maybeCreateCheckpointRunForTask(
     });
 
     await tx
-      .update(conversationTasks)
+      .update(conversationGoalTasks)
       .set({
         checkpointRunId: runId,
         updatedAt: input.createdAt,
       })
-      .where(eq(conversationTasks.id, task.id));
+      .where(eq(conversationGoalTasks.id, task.id));
 
     input.dispatchJobs.push(job);
     input.realtimeEvents.push(
       createRealtimeEvent({
         conversationId: conversation.id,
-        ownerUserId: task.ownerUserId,
+        ownerUserId: goal.ownerUserId,
         run: job.run,
         type: "run.updated",
       }),
       createRealtimeEvent({
         conversationId: conversation.id,
         event: queuedEvent,
-        ownerUserId: task.ownerUserId,
+        ownerUserId: goal.ownerUserId,
         runId,
         type: "run.event.created",
       }),
       createRealtimeEvent({
         conversationId: conversation.id,
-        ownerUserId: task.ownerUserId,
+        ownerUserId: goal.ownerUserId,
         taskId: task.id,
         type: "task.updated",
       }),
@@ -3507,14 +3580,17 @@ async function createAssignedTaskRunJob(
   db: Db,
   input: {
     agentGroupsPrompt?: string;
-    agentHubMcpTasks: AgentHubListTasksToolResult["tasks"];
+    agentHubMcpGoals: AgentHubListGoalsToolResult["goals"];
     assigneeAgentId: string;
     conversation: ConversationRow;
     createdAtIso: string;
     dispatchContent: string;
+    goalId: string;
+    goalTitle: string;
     ownerUserId: string;
     taskDescription?: string | null;
     taskId: string;
+    taskIndex: number;
     taskTitle: string;
   },
 ): Promise<RunQueueJob | null> {
@@ -3541,7 +3617,10 @@ async function createAssignedTaskRunJob(
     daemonDeviceId: runAgent.daemonDeviceId,
     prompt: buildAssignedTaskPrompt({
       conversationTitle: input.conversation.title,
+      goalId: input.goalId,
+      goalTitle: input.goalTitle,
       taskId: input.taskId,
+      taskIndex: input.taskIndex,
       taskTitle: input.taskTitle,
       taskDescription: input.taskDescription ?? undefined,
       dispatchMessage: input.dispatchContent,
@@ -3553,7 +3632,7 @@ async function createAssignedTaskRunJob(
       conversationTitle: input.conversation.title,
     }),
     agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-    agentHubMcpTasks: input.agentHubMcpTasks,
+    agentHubMcpGoals: input.agentHubMcpGoals,
     workspacePath: runAgent.workspacePath,
     run: {
       id: runId,
@@ -3627,48 +3706,62 @@ export async function appendRunEventToConversationMessage(
   if (event.type === "run.started" || event.type === "run.completed") {
     const updatedAt = new Date(event.createdAt);
     const updatedTasks = await db
-      .update(conversationTasks)
+      .update(conversationGoalTasks)
       .set({
         status: event.type === "run.started"
           ? "running"
           : event.status === "succeeded"
-            ? sql`case when ${conversationTasks.status} = 'succeeded' then 'succeeded' else 'failed' end`
+            ? sql`case when ${conversationGoalTasks.status} = 'succeeded' then 'succeeded' else 'failed' end`
             : event.status,
         updatedAt,
       })
-      .where(eq(conversationTasks.assigneeRunId, event.runId))
+      .where(eq(conversationGoalTasks.assigneeRunId, event.runId))
       .returning({
-        conversationId: conversationTasks.conversationId,
-        creatorRunId: conversationTasks.creatorRunId,
-        id: conversationTasks.id,
-        ownerUserId: conversationTasks.ownerUserId,
-        workflowId: conversationTasks.workflowId,
+        goalId: conversationGoalTasks.goalId,
+        id: conversationGoalTasks.id,
       });
+    const updatedGoals = updatedTasks.length === 0
+      ? []
+      : await db
+          .select({
+            id: conversationGoals.id,
+            conversationId: conversationGoals.conversationId,
+            ownerUserId: conversationGoals.ownerUserId,
+          })
+          .from(conversationGoals)
+          .where(inArray(conversationGoals.id, updatedTasks.map((task) => task.goalId)));
+    const goalsById = new Map(updatedGoals.map((goal) => [goal.id, goal]));
     realtimeEvents.push(
-      ...updatedTasks.map((task) =>
-        createRealtimeEvent({
-          conversationId: task.conversationId,
-          ownerUserId: task.ownerUserId,
-          taskId: task.id,
-          type: "task.updated" as const,
-        }),
-      ),
+      ...updatedTasks.flatMap((task) => {
+        const goal = goalsById.get(task.goalId);
+
+        return goal === undefined
+          ? []
+          : [
+              createRealtimeEvent({
+                conversationId: goal.conversationId,
+                ownerUserId: goal.ownerUserId,
+                taskId: task.id,
+                type: "task.updated" as const,
+              }),
+            ];
+      }),
     );
 
     if (event.type === "run.completed") {
-      for (const workflowId of compactUniqueStrings(
-        updatedTasks.map((task) => task.workflowId),
+      for (const goalId of compactUniqueStrings(
+        updatedTasks.map((task) => task.goalId),
       )) {
         await updateDependentTaskReadiness(db, {
           createdAt: updatedAt,
+          goalId,
           realtimeEvents,
-          workflowId,
         });
       }
 
       for (const task of updatedTasks) {
         await maybeCreateCheckpointRunForTask(db, {
-          taskId: task.id,
+          goalTaskId: task.id,
           createdAt: updatedAt,
           dispatchJobs,
           publicApiBaseUrl: options.publicApiBaseUrl,
@@ -3680,32 +3773,26 @@ export async function appendRunEventToConversationMessage(
   }
 
   if (event.type === "agenthub.tool.call") {
-    if (event.name === "list_tasks") {
+    if (event.name === "list_goals") {
       const context = await getToolRunContext(db, event.runId);
 
       if (context === null) {
         return result();
       }
 
-      const workflow = await getWorkflowForRun(db, {
-        conversation: context.conversation,
-        createdAt: new Date(event.createdAt),
-        ownerUserId: context.run.ownerUserId,
-        runAgentId: context.run.agentId,
-        runId: event.runId,
-      });
-      const taskRows = workflow === null
-        ? []
-        : await listWorkflowTasks(db, workflow.id);
-      const input = readListTasksToolInput(event.input);
+      const input = readListGoalsToolInput(event.input);
       const status = input?.status;
+      const goals = await listConversationGoalsForUser(db, {
+        conversationId: context.conversation.id,
+        ownerUserId: context.run.ownerUserId,
+        publicApiBaseUrl: options.publicApiBaseUrl,
+        publicWebBaseUrl: options.publicWebBaseUrl,
+      });
 
       toolResult = {
         accepted: true,
-        tasks: toMcpTaskListFromRows(
-          status === undefined
-            ? taskRows
-            : taskRows.filter((task) => task.status === status),
+        goals: (goals ?? []).filter((goal) =>
+          status === undefined || goal.status === status
         ),
       };
       return result();
@@ -3722,10 +3809,11 @@ export async function appendRunEventToConversationMessage(
       const conditions = [
         eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
         eq(conversationArtifacts.conversationId, context.conversation.id),
+        eq(conversationArtifacts.goalId, input.goalId),
       ];
 
-      if (input.taskId !== undefined) {
-        conditions.push(eq(conversationArtifacts.taskId, input.taskId));
+      if (input.taskIndex !== undefined) {
+        conditions.push(eq(conversationArtifacts.taskIndex, input.taskIndex));
       }
 
       const artifactRows = await db
@@ -3765,6 +3853,7 @@ export async function appendRunEventToConversationMessage(
         .where(
           and(
             eq(conversationArtifacts.id, input.artifactId),
+            eq(conversationArtifacts.goalId, input.goalId),
             eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
             eq(conversationArtifacts.conversationId, context.conversation.id),
           ),
@@ -3796,6 +3885,52 @@ export async function appendRunEventToConversationMessage(
           : { contentBase64: sliced.toString("base64"), encoding: "base64" as const }),
         truncated: content.byteLength > maxBytes ? true : undefined,
       };
+      return result();
+    }
+
+    if (event.name === "create_goal") {
+      const input = readCreateGoalToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+      const createdAt = new Date(event.createdAt);
+
+      if (
+        input === null ||
+        context === null ||
+        context.conversation.type !== "group" ||
+        context.conversation.orchestratorAgentId !== context.run.agentId
+      ) {
+        return result();
+      }
+
+      const [goal] = await db
+        .insert(conversationGoals)
+        .values({
+          id: randomUUID(),
+          ownerUserId: context.run.ownerUserId,
+          conversationId: context.conversation.id,
+          orchestratorAgentId: context.run.agentId,
+          initialRunId: event.runId,
+          title: input.title,
+          description: input.description,
+          status: "active",
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .returning();
+
+      if (goal === undefined) {
+        return result();
+      }
+
+      realtimeEvents.push(
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          taskId: goal.id,
+          type: "task.updated",
+        }),
+      );
+      toolResult = { accepted: true, goal: toConversationGoal(goal) };
       return result();
     }
 
@@ -3875,36 +4010,47 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
-      const createdAt = new Date(event.createdAt);
-      const taskId = input.taskId ?? randomUUID();
-      const workflow = await getWorkflowForRun(db, {
-        conversation,
-        createdAt,
-        ownerUserId: run.ownerUserId,
-        runAgentId: run.agentId,
-        runId: event.runId,
-      });
+      const [goal] = await db
+        .select()
+        .from(conversationGoals)
+        .where(
+          and(
+            eq(conversationGoals.id, input.goalId),
+            eq(conversationGoals.conversationId, conversation.id),
+            eq(conversationGoals.ownerUserId, run.ownerUserId),
+            eq(conversationGoals.orchestratorAgentId, run.agentId),
+            eq(conversationGoals.status, "active"),
+          ),
+        )
+        .limit(1);
 
-      if (workflow === null || workflow.status !== "active") {
+      if (goal === undefined) {
         return result();
       }
 
-      const existingTaskRows = await listWorkflowTasks(db, workflow.id);
+      const createdAt = new Date(event.createdAt);
+      const taskId = randomUUID();
+      const existingTaskRows = await listGoalTasks(db, goal.id);
+      const taskIndex =
+        existingTaskRows.reduce((max, task) => Math.max(max, task.index), -1) + 1;
       const dependencyState = dependencyStatusForTask(input, existingTaskRows);
       let taskStatus = dependencyState.status;
       let blockedReason = dependencyState.blockedReason;
-      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nTask ID: ${taskId}`;
+      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nGoal ID: ${goal.id}\nTask #${taskIndex}`;
       const shouldDispatch = taskStatus === "assigned";
       const job = shouldDispatch && !isSelfAssigned
         ? await createAssignedTaskRunJob(db, {
             assigneeAgentId,
-            agentHubMcpTasks: toMcpTaskListFromRows(existingTaskRows),
+            agentHubMcpGoals: [toConversationGoal(goal, existingTaskRows.map((row) => toConversationGoalTask(row)))],
             conversation,
             createdAtIso: event.createdAt,
             dispatchContent,
+            goalId: goal.id,
+            goalTitle: goal.title,
             ownerUserId: run.ownerUserId,
             taskDescription: input.description,
             taskId,
+            taskIndex,
             taskTitle: input.title,
           })
         : null;
@@ -3928,13 +4074,25 @@ export async function appendRunEventToConversationMessage(
           };
       toolResult = {
         accepted: true,
-        task: {
+        task: toConversationGoalTask({
           id: taskId,
-          title: input.title,
+          goalId: goal.id,
+          index: taskIndex,
           assigneeAgentId,
+          assigneeRunId: assigneeRunId ?? null,
+          dispatchMessageId: null,
+          dependsOnTaskIndexes: input.dependsOnTaskIndexes ?? [],
+          title: input.title,
+          description: input.description ?? null,
           status: taskStatus,
-          dependsOnTaskIds: input.dependsOnTaskIds,
-        },
+          blockedReason: blockedReason ?? null,
+          summary: null,
+          resultArtifactIds: null,
+          completedAt: null,
+          checkpointRunId: null,
+          createdAt,
+          updatedAt: createdAt,
+        }),
       };
 
       await db.transaction(async (tx) => {
@@ -3952,18 +4110,15 @@ export async function appendRunEventToConversationMessage(
           : [undefined];
 
         const [createdTask] = await tx
-          .insert(conversationTasks)
+          .insert(conversationGoalTasks)
           .values({
             id: taskId,
-            ownerUserId: run.ownerUserId,
-            conversationId: conversation.id,
-            workflowId: workflow.id,
-            creatorRunId: event.runId,
-            orchestratorAgentId: run.agentId,
+            goalId: goal.id,
+            index: taskIndex,
             assigneeAgentId,
             assigneeRunId,
             dispatchMessageId: message?.id,
-            dependsOnTaskIds: input.dependsOnTaskIds ?? [],
+            dependsOnTaskIndexes: input.dependsOnTaskIndexes ?? [],
             title: input.title,
             description: input.description,
             status: taskStatus,
@@ -3972,7 +4127,7 @@ export async function appendRunEventToConversationMessage(
             updatedAt: createdAt,
           })
           .onConflictDoNothing()
-          .returning({ id: conversationTasks.id });
+          .returning({ id: conversationGoalTasks.id });
 
         if (createdTask === undefined) {
           return;
@@ -4059,35 +4214,38 @@ export async function appendRunEventToConversationMessage(
     if (event.name === "approve_task") {
       const input = readApproveTaskToolInput(event.input);
       const context = await getToolRunContext(db, event.runId);
+      const updatedAt = new Date(event.createdAt);
 
       if (input === null || context === null) {
         return result();
       }
 
-      const workflow = await getWorkflowForRun(db, {
-        conversation: context.conversation,
-        createdAt: new Date(event.createdAt),
-        ownerUserId: context.run.ownerUserId,
-        runAgentId: context.run.agentId,
-        runId: event.runId,
-      });
+      const [goal] = await db
+        .select()
+        .from(conversationGoals)
+        .where(
+          and(
+            eq(conversationGoals.id, input.goalId),
+            eq(conversationGoals.conversationId, context.conversation.id),
+            eq(conversationGoals.ownerUserId, context.run.ownerUserId),
+            eq(conversationGoals.orchestratorAgentId, context.run.agentId),
+            eq(conversationGoals.status, "active"),
+          ),
+        )
+        .limit(1);
 
-      if (
-        workflow === null ||
-        workflow.orchestratorAgentId !== context.run.agentId ||
-        workflow.status !== "active"
-      ) {
+      if (goal === undefined) {
         return result();
       }
 
       const [task] = await db
         .select()
-        .from(conversationTasks)
+        .from(conversationGoalTasks)
         .where(
           and(
-            eq(conversationTasks.id, input.taskId),
-            eq(conversationTasks.workflowId, workflow.id),
-            eq(conversationTasks.status, "ready"),
+            eq(conversationGoalTasks.goalId, goal.id),
+            eq(conversationGoalTasks.index, input.taskIndex),
+            eq(conversationGoalTasks.status, "ready"),
           ),
         )
         .limit(1);
@@ -4101,39 +4259,41 @@ export async function appendRunEventToConversationMessage(
         .from(agents)
         .where(eq(agents.id, task.assigneeAgentId))
         .limit(1);
-      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nTask ID: ${task.id}`;
-      const workflowTasks = await listWorkflowTasks(db, workflow.id);
+      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nGoal ID: ${goal.id}\nTask #${task.index}`;
+      const goalTasks = await listGoalTasks(db, goal.id);
       const job = await createAssignedTaskRunJob(db, {
         assigneeAgentId: task.assigneeAgentId,
-        agentHubMcpTasks: toMcpTaskListFromRows(workflowTasks),
+        agentHubMcpGoals: [toConversationGoal(goal, goalTasks.map((row) => toConversationGoalTask(row)))],
         conversation: context.conversation,
         createdAtIso: event.createdAt,
         dispatchContent,
+        goalId: goal.id,
+        goalTitle: goal.title,
         ownerUserId: context.run.ownerUserId,
         taskDescription: task.description,
         taskId: task.id,
+        taskIndex: task.index,
         taskTitle: task.title,
       });
-      const updatedAt = new Date(event.createdAt);
 
       if (job === null) {
         await db
-          .update(conversationTasks)
+          .update(conversationGoalTasks)
           .set({
             status: "blocked",
             blockedReason: "Assignee agent is not ready.",
             updatedAt,
           })
-          .where(eq(conversationTasks.id, task.id));
+          .where(eq(conversationGoalTasks.id, task.id));
         realtimeEvents.push(
           createRealtimeEvent({
-            conversationId: task.conversationId,
-            ownerUserId: task.ownerUserId,
+            conversationId: goal.conversationId,
+            ownerUserId: goal.ownerUserId,
             taskId: task.id,
             type: "task.updated",
           }),
         );
-        toolResult = { accepted: true, taskId: task.id };
+        toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
         return result();
       }
 
@@ -4181,7 +4341,7 @@ export async function appendRunEventToConversationMessage(
         });
 
         await tx
-          .update(conversationTasks)
+          .update(conversationGoalTasks)
           .set({
             assigneeRunId: job.run.id,
             dispatchMessageId: message.id,
@@ -4189,7 +4349,7 @@ export async function appendRunEventToConversationMessage(
             blockedReason: null,
             updatedAt,
           })
-          .where(eq(conversationTasks.id, task.id));
+          .where(eq(conversationGoalTasks.id, task.id));
 
         await tx
           .update(conversations)
@@ -4234,7 +4394,7 @@ export async function appendRunEventToConversationMessage(
           type: "run.event.created",
         }),
       );
-      toolResult = { accepted: true, taskId: task.id, runId: job.run.id };
+      toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index, runId: job.run.id };
       return result();
     }
 
@@ -4247,20 +4407,26 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
-      const workflow = await getWorkflowForRun(db, {
-        conversation: context.conversation,
-        createdAt: updatedAt,
-        ownerUserId: context.run.ownerUserId,
-        runAgentId: context.run.agentId,
-        runId: event.runId,
-      });
+      const [goal] = await db
+        .select()
+        .from(conversationGoals)
+        .where(
+          and(
+            eq(conversationGoals.id, input.goalId),
+            eq(conversationGoals.conversationId, context.conversation.id),
+            eq(conversationGoals.ownerUserId, context.run.ownerUserId),
+            eq(conversationGoals.orchestratorAgentId, context.run.agentId),
+            eq(conversationGoals.status, "active"),
+          ),
+        )
+        .limit(1);
 
-      if (workflow === null || workflow.orchestratorAgentId !== context.run.agentId) {
+      if (goal === undefined) {
         return result();
       }
 
       const [task] = await db
-        .update(conversationTasks)
+        .update(conversationGoalTasks)
         .set({
           status: "cancelled",
           blockedReason: input.reason ?? null,
@@ -4268,8 +4434,8 @@ export async function appendRunEventToConversationMessage(
         })
         .where(
           and(
-            eq(conversationTasks.id, input.taskId),
-            eq(conversationTasks.workflowId, workflow.id),
+            eq(conversationGoalTasks.goalId, goal.id),
+            eq(conversationGoalTasks.index, input.taskIndex),
           ),
         )
         .returning();
@@ -4280,23 +4446,23 @@ export async function appendRunEventToConversationMessage(
 
       realtimeEvents.push(
         createRealtimeEvent({
-          conversationId: task.conversationId,
-          ownerUserId: task.ownerUserId,
+          conversationId: goal.conversationId,
+          ownerUserId: goal.ownerUserId,
           taskId: task.id,
           type: "task.updated",
         }),
       );
       await updateDependentTaskReadiness(db, {
         createdAt: updatedAt,
+        goalId: goal.id,
         realtimeEvents,
-        workflowId: workflow.id,
       });
-      toolResult = { accepted: true, taskId: task.id };
+      toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
       return result();
     }
 
-    if (event.name === "complete_workflow") {
-      const input = readCompleteWorkflowToolInput(event.input);
+    if (event.name === "complete_goal") {
+      const input = readCompleteGoalToolInput(event.input);
       const context = await getToolRunContext(db, event.runId);
       const updatedAt = new Date(event.createdAt);
 
@@ -4304,40 +4470,52 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
-      const workflow = await getWorkflowForRun(db, {
-        conversation: context.conversation,
-        createdAt: updatedAt,
-        ownerUserId: context.run.ownerUserId,
-        runAgentId: context.run.agentId,
-        runId: event.runId,
-      });
+      const [goal] = await db
+        .select()
+        .from(conversationGoals)
+        .where(
+          and(
+            eq(conversationGoals.id, input.goalId),
+            eq(conversationGoals.conversationId, context.conversation.id),
+            eq(conversationGoals.ownerUserId, context.run.ownerUserId),
+            eq(conversationGoals.orchestratorAgentId, context.run.agentId),
+            eq(conversationGoals.status, "active"),
+          ),
+        )
+        .limit(1);
 
-      if (workflow === null || workflow.orchestratorAgentId !== context.run.agentId) {
+      if (goal === undefined) {
         return result();
       }
 
-      const workflowTasks = await listWorkflowTasks(db, workflow.id);
+      const goalTasks = await listGoalTasks(db, goal.id);
 
-      if (workflowTasks.some((task) => isActiveTaskStatus(task.status))) {
+      if (goalTasks.some((task) => isActiveTaskStatus(task.status))) {
         return result();
       }
 
-      const [updatedWorkflow] = await db
-        .update(conversationTaskWorkflows)
+      const [updatedGoal] = await db
+        .update(conversationGoals)
         .set({
           status: "completed",
           summary: input.summary ?? null,
           completedAt: updatedAt,
           updatedAt,
         })
-        .where(eq(conversationTaskWorkflows.id, workflow.id))
+        .where(eq(conversationGoals.id, goal.id))
         .returning();
 
-      if (updatedWorkflow === undefined) {
+      if (updatedGoal === undefined) {
         return result();
       }
 
-      toolResult = { accepted: true, workflowId: workflow.id };
+      toolResult = {
+        accepted: true,
+        goal: toConversationGoal(
+          updatedGoal,
+          goalTasks.map((task) => toConversationGoalTask(task)),
+        ),
+      };
       return result();
     }
 
@@ -4376,13 +4554,15 @@ export async function appendRunEventToConversationMessage(
       const updatedAt = new Date(event.createdAt);
       const [task] = await db
         .select()
-        .from(conversationTasks)
+        .from(conversationGoalTasks)
+        .innerJoin(conversationGoals, eq(conversationGoalTasks.goalId, conversationGoals.id))
         .where(
           and(
-            eq(conversationTasks.id, input.taskId),
-            eq(conversationTasks.conversationId, run.conversationId),
-            eq(conversationTasks.assigneeRunId, event.runId),
-            eq(conversationTasks.assigneeAgentId, run.agentId),
+            eq(conversationGoals.id, input.goalId),
+            eq(conversationGoals.conversationId, run.conversationId),
+            eq(conversationGoalTasks.index, input.taskIndex),
+            eq(conversationGoalTasks.assigneeRunId, event.runId),
+            eq(conversationGoalTasks.assigneeAgentId, run.agentId),
           ),
         )
         .limit(1);
@@ -4390,6 +4570,8 @@ export async function appendRunEventToConversationMessage(
       if (task === undefined) {
         return result();
       }
+      const goal = task.conversation_goals;
+      const goalTask = task.conversation_goal_tasks;
 
       const artifactIds = input.artifactIds ?? [];
 
@@ -4400,7 +4582,8 @@ export async function appendRunEventToConversationMessage(
           .where(
             and(
               eq(conversationArtifacts.conversationId, run.conversationId),
-              eq(conversationArtifacts.taskId, task.id),
+              eq(conversationArtifacts.goalId, goal.id),
+              eq(conversationArtifacts.goalTaskId, goalTask.id),
               eq(conversationArtifacts.runId, event.runId),
               inArray(conversationArtifacts.id, artifactIds),
             ),
@@ -4412,7 +4595,7 @@ export async function appendRunEventToConversationMessage(
       }
 
       await db
-        .update(conversationTasks)
+        .update(conversationGoalTasks)
         .set({
           status: "succeeded",
           summary: input.summary,
@@ -4420,24 +4603,24 @@ export async function appendRunEventToConversationMessage(
           completedAt: updatedAt,
           updatedAt,
         })
-        .where(eq(conversationTasks.id, task.id));
+        .where(eq(conversationGoalTasks.id, goalTask.id));
       realtimeEvents.push(
         createRealtimeEvent({
           conversationId: run.conversationId,
           ownerUserId: run.ownerUserId,
-          taskId: task.id,
+          taskId: goalTask.id,
           type: "task.updated",
         }),
       );
 
       await updateDependentTaskReadiness(db, {
         createdAt: updatedAt,
+        goalId: goal.id,
         realtimeEvents,
-        workflowId: task.workflowId,
       });
 
       await maybeCreateCheckpointRunForTask(db, {
-        taskId: task.id,
+        goalTaskId: goalTask.id,
         createdAt: updatedAt,
         dispatchJobs,
         publicApiBaseUrl: options.publicApiBaseUrl,

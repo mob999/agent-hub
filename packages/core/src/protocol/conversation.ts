@@ -3,7 +3,8 @@ import type { AgentRun, RunId } from "./run.js";
 
 export type ConversationId = string;
 export type ConversationMessageId = string;
-export type ConversationTaskId = string;
+export type ConversationGoalId = string;
+export type ConversationGoalTaskId = string;
 export type ConversationArtifactId = string;
 
 export type ConversationType = "group" | "direct";
@@ -14,8 +15,12 @@ export type ConversationMessageStatus =
   | "streaming"
   | "failed"
   | "cancelled";
-export type ConversationTaskStatus =
-  | "created"
+export type ConversationGoalStatus =
+  | "active"
+  | "completed"
+  | "cancelled"
+  | "failed";
+export type ConversationGoalTaskStatus =
   | "waiting"
   | "ready"
   | "assigned"
@@ -24,10 +29,6 @@ export type ConversationTaskStatus =
   | "failed"
   | "cancelled"
   | "blocked";
-export type ConversationTaskWorkflowStatus =
-  | "active"
-  | "completed"
-  | "cancelled";
 export type ConversationArtifactStatus =
   | "pending"
   | "ready"
@@ -75,7 +76,9 @@ export interface ConversationArtifact {
   id: ConversationArtifactId;
   ownerUserId: UserId;
   conversationId: ConversationId;
-  taskId?: ConversationTaskId;
+  goalId?: ConversationGoalId;
+  goalTaskId?: ConversationGoalTaskId;
+  taskIndex?: number;
   runId: RunId;
   creatorAgentId: AgentId;
   status: ConversationArtifactStatus;
@@ -133,39 +136,38 @@ export interface ConversationArtifactDetails {
   availableActions: ConversationArtifactActionType[];
 }
 
-export interface ConversationTask {
-  id: ConversationTaskId;
-  ownerUserId: UserId;
-  conversationId: ConversationId;
-  workflowId: string;
-  creatorRunId: RunId;
-  orchestratorAgentId: AgentId;
+export interface ConversationGoalTask {
+  id: ConversationGoalTaskId;
+  goalId: ConversationGoalId;
+  index: number;
   assigneeAgentId: AgentId;
   assigneeRunId?: RunId;
   dispatchMessageId?: ConversationMessageId;
-  dependsOnTaskIds?: ConversationTaskId[];
+  dependsOnTaskIndexes?: number[];
   title: string;
   description?: string;
-  status: ConversationTaskStatus;
+  status: ConversationGoalTaskStatus;
   blockedReason?: string;
   summary?: string;
   resultArtifactIds?: ConversationArtifactId[];
   artifacts?: ConversationArtifact[];
   completedAt?: IsoDateTime;
-  finalizerRunId?: RunId;
   checkpointRunId?: RunId;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
 
-export interface ConversationTaskWorkflow {
-  id: string;
+export interface ConversationGoal {
+  id: ConversationGoalId;
   ownerUserId: UserId;
   conversationId: ConversationId;
   orchestratorAgentId: AgentId;
   initialRunId: RunId;
-  status: ConversationTaskWorkflowStatus;
+  title: string;
+  description?: string;
+  status: ConversationGoalStatus;
   summary?: string;
+  tasks: ConversationGoalTask[];
   completedAt?: IsoDateTime;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -221,8 +223,8 @@ export interface ListConversationMessagesResponse {
   messages: ConversationMessage[];
 }
 
-export interface ListConversationTasksResponse {
-  tasks: ConversationTask[];
+export interface ListConversationGoalsResponse {
+  goals: ConversationGoal[];
 }
 
 export interface ListConversationArtifactsResponse {

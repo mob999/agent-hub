@@ -68,15 +68,20 @@ describe("conversation prompt builder", () => {
   it("includes the assigned task id for MCP task completion tools", () => {
     const prompt = buildAssignedTaskPrompt({
       conversationTitle: "Research",
+      goalId: "00000000-0000-4000-8000-000000000099",
+      goalTitle: "Research report",
       taskId: "00000000-0000-4000-8000-000000000010",
+      taskIndex: 0,
       taskTitle: "Write the report",
       taskDescription: "Summarize the findings.",
       dispatchMessage: "@dudu please write this report.",
     });
 
+    expect(prompt).toContain("Goal ID: 00000000-0000-4000-8000-000000000099");
     expect(prompt).toContain("Task ID: 00000000-0000-4000-8000-000000000010");
+    expect(prompt).toContain("Task Index: 0");
     expect(prompt).toContain(
-      "Use the exact Task ID above when calling AgentHub MCP upload_artifact and complete_task.",
+      "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
     );
   });
 

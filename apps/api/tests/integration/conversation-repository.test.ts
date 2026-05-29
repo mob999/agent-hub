@@ -26,7 +26,7 @@ import {
   getConversationForUser,
   listConversationMessagesForUser,
   listActiveAgentGroupContexts,
-  listConversationTasksForUser,
+  listConversationGoalsForUser,
   listConversationsForUser,
   updateGroupConversation,
 } from "@agent-hub/server";
@@ -703,16 +703,35 @@ describeDb("conversation repository integration", () => {
       userMessageContent: "make a report",
     });
 
+    const goalResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: orchestratorJob.run.id,
+      toolCallId: "tool_create_goal",
+      name: "create_goal",
+      input: {
+        title: "Agent report",
+        description: "make a report",
+      },
+      createdAt: "2026-05-26T00:00:00.500Z",
+    });
+    const goalId = goalResult.toolResult !== undefined && "goal" in goalResult.toolResult
+      ? goalResult.toolResult.goal.id
+      : undefined;
+    expect(goalId).toBeDefined();
+    if (goalId === undefined) {
+      return;
+    }
+
     const result = await appendRunEvent(db, {
       type: "agenthub.tool.call",
       runId: orchestratorJob.run.id,
       toolCallId: "tool_create_task",
       name: "create_task",
       input: {
+        goalId,
         title: "Write the report",
         description: "Summarize the result.",
         assigneeAgentId,
-        taskId: "00000000-0000-4000-8000-000000000099",
       },
       createdAt: "2026-05-26T00:00:01.000Z",
     });
@@ -723,7 +742,7 @@ describeDb("conversation repository integration", () => {
       runIds.push(result.dispatchJobs[0].run.id);
     }
 
-    const tasks = await listConversationTasksForUser(db, {
+    const goals = await listConversationGoalsForUser(db, {
       ownerUserId,
       conversationId: group.conversation.id,
     });
@@ -732,14 +751,21 @@ describeDb("conversation repository integration", () => {
       conversationId: group.conversation.id,
     });
 
-    expect(tasks?.[0]).toMatchObject({
-      id: "00000000-0000-4000-8000-000000000099",
+    const task = goals?.[0]?.tasks[0];
+
+    expect(goals?.[0]).toMatchObject({
+      id: goalId,
+      title: "Agent report",
+      status: "active",
+    });
+    expect(task).toMatchObject({
+      index: 0,
       assigneeAgentId,
       status: "assigned",
     });
-    expect(tasks?.[0]?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
+    expect(task?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
     expect(messages?.map((message) => message.content)).toContain(
-      "@dudu 已创建任务：Write the report\nTask ID: 00000000-0000-4000-8000-000000000099",
+      `@dudu 已创建任务：Write the report\nGoal ID: ${goalId}\nTask #0`,
     );
   });
 });

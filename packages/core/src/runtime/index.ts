@@ -3,7 +3,7 @@ import type {
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
@@ -12,9 +12,10 @@ import type {
 import type { AgentRun, RunEvent } from "../protocol/index.js";
 
 export interface AgentRunArtifactUpload
-  extends Omit<AgentHubUploadArtifactToolInput, "taskId"> {
+  extends Omit<AgentHubUploadArtifactToolInput, "goalId" | "taskIndex"> {
   messageTarget?: AgentHubSendMessageTarget;
-  taskId?: AgentHubUploadArtifactToolInput["taskId"];
+  goalId?: AgentHubUploadArtifactToolInput["goalId"];
+  taskIndex?: AgentHubUploadArtifactToolInput["taskIndex"];
   filename: string;
   sourcePath?: string;
   sizeBytes: number;
@@ -28,7 +29,7 @@ export interface AgentRunInput {
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
-  agentHubMcpTasks?: AgentHubListTasksToolResult["tasks"];
+  agentHubMcpGoals?: AgentHubListGoalsToolResult["goals"];
   uploadArtifact?(
     upload: AgentRunArtifactUpload,
   ): Promise<AgentHubUploadArtifactToolResult>;

@@ -92,6 +92,13 @@
       "when": 1780029000000,
       "tag": "0012_task_graph",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780041031578,
+      "tag": "0013_goal_task_model",
+      "breakpoints": true
     }
   ]
 }

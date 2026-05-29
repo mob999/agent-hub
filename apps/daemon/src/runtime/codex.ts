@@ -12,7 +12,7 @@ import type {
 import type {
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubUploadArtifactToolResult,
   AgentHubMcpToolName,
   AgentRuntimeConfig,
@@ -467,8 +467,8 @@ export class CodexAdapter implements AgentAdapter {
     const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
       input.agentInstructions,
     );
-    const mcpTasks: AgentHubListTasksToolResult["tasks"] = [
-      ...(input.agentHubMcpTasks ?? []),
+    const mcpGoals: AgentHubListGoalsToolResult["goals"] = [
+      ...(input.agentHubMcpGoals ?? []),
     ];
     const mcpSession = this.#mcpRelay?.createSession({
       enabledTools: input.agentHubMcpTools ?? [],
@@ -489,7 +489,7 @@ export class CodexAdapter implements AgentAdapter {
           createdAt: call.createdAt,
         });
 
-        if (call.name === "list_tasks") {
+        if (call.name === "list_goals") {
           const status = "status" in call.input &&
             typeof call.input.status === "string"
             ? call.input.status
@@ -497,41 +497,11 @@ export class CodexAdapter implements AgentAdapter {
 
           return {
             accepted: true,
-            tasks: status === undefined
-              ? mcpTasks.map((task) => ({ ...task }))
-              : mcpTasks
-                  .filter((task) => task.status === status)
-                  .map((task) => ({ ...task })),
-          };
-        }
-
-        if (
-          call.name === "create_task" &&
-          "title" in call.input &&
-          "assigneeAgentId" in call.input
-        ) {
-          const taskInput = call.input as {
-            assigneeAgentId: string;
-            taskId?: string;
-            title: string;
-          };
-
-          const task = {
-            id: taskInput.taskId ?? call.toolCallId,
-            title: taskInput.title,
-            assigneeAgentId: taskInput.assigneeAgentId,
-            status: "assigned" as const,
-          };
-          mcpTasks.push(task);
-
-          return {
-            accepted: true,
-            task: {
-              id: task.id,
-              title: task.title,
-              assigneeAgentId: task.assigneeAgentId,
-              status: task.status,
-            },
+            goals: status === undefined
+              ? mcpGoals.map((goal) => ({ ...goal }))
+              : mcpGoals
+                  .filter((goal) => goal.status === status)
+                  .map((goal) => ({ ...goal })),
           };
         }
 

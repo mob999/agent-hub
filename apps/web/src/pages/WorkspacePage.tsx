@@ -23,8 +23,8 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
+  type ConversationGoal,
   type ConversationMessage,
-  type ConversationTask,
   type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
@@ -205,7 +205,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
-  const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
+  const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
   const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
   const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
@@ -257,9 +257,9 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
     () => (activeConversationId === null ? [] : messagesByConversation[activeConversationId] ?? []),
     [activeConversationId, messagesByConversation],
   )
-  const activeConversationTasks = useMemo(
-    () => (activeConversationId === null ? [] : tasksByConversation[activeConversationId] ?? []),
-    [activeConversationId, tasksByConversation],
+  const activeConversationGoals = useMemo(
+    () => (activeConversationId === null ? [] : goalsByConversation[activeConversationId] ?? []),
+    [activeConversationId, goalsByConversation],
   )
   const activeConversationArtifacts = useMemo(
     () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
@@ -445,12 +445,12 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
 
   const loadTasks = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ tasks: ConversationTask[] }>(
+      const response = await apiRequest<{ goals: ConversationGoal[] }>(
         `/conversations/${conversationId}/tasks`,
       )
-      setTasksByConversation((current) => ({
+      setGoalsByConversation((current) => ({
         ...current,
-        [conversationId]: response.tasks,
+        [conversationId]: response.goals,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -958,15 +958,15 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         }
       })
     }
-    const upsertTask = (task: ConversationTask) => {
-      setTasksByConversation((current) => {
-        const currentTasks = current[task.conversationId] ?? []
+    const upsertGoal = (goal: ConversationGoal) => {
+      setGoalsByConversation((current) => {
+        const currentGoals = current[goal.conversationId] ?? []
 
         return {
           ...current,
-          [task.conversationId]: [
-            task,
-            ...currentTasks.filter((item) => item.id !== task.id),
+          [goal.conversationId]: [
+            goal,
+            ...currentGoals.filter((item) => item.id !== goal.id),
           ],
         }
       })
@@ -1022,8 +1022,8 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           upsertRunEvent(event)
           break
         case 'task.updated':
-          if (event.task !== undefined) {
-            upsertTask(event.task)
+          if (event.goal !== undefined) {
+            upsertGoal(event.goal)
           } else {
             void loadTasks(event.conversationId)
           }
@@ -1586,7 +1586,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           <ChannelWorkspace
             activeConversation={activeConversation}
             messages={activeConversationMessages}
-            tasks={activeConversationTasks}
+            goals={activeConversationGoals}
             artifacts={activeConversationArtifacts}
             agents={agents}
             user={user}

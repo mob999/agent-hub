@@ -126,7 +126,8 @@ const gateway = new DaemonGateway({
       sizeBytes: message.sizeBytes,
       sourcePath: message.sourcePath,
       storageRoot: env.AGENTHUB_STORAGE_ROOT,
-      taskId: message.taskId,
+      goalId: message.goalId,
+      taskIndex: message.taskIndex,
       title: message.title,
     });
     await publishRealtimeEvents([

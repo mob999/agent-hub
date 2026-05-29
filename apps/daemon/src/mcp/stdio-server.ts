@@ -12,16 +12,18 @@ import type {
   AgentHubApproveTaskToolResult,
   AgentHubCancelTaskToolInput,
   AgentHubCancelTaskToolResult,
-  AgentHubCreateTaskToolInput,
-  AgentHubCreateTaskToolResult,
+  AgentHubCompleteGoalToolInput,
+  AgentHubCompleteGoalToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
-  AgentHubCompleteWorkflowToolInput,
-  AgentHubCompleteWorkflowToolResult,
+  AgentHubCreateGoalToolInput,
+  AgentHubCreateGoalToolResult,
+  AgentHubCreateTaskToolInput,
+  AgentHubCreateTaskToolResult,
   AgentHubListArtifactsToolInput,
   AgentHubListArtifactsToolResult,
-  AgentHubListTasksToolInput,
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolInput,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
   AgentHubReadArtifactToolInput,
@@ -33,26 +35,28 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
-const listTasksToolName = "list_tasks" satisfies AgentHubMcpToolName;
+const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
+const createGoalToolName = "create_goal" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const approveTaskToolName = "approve_task" satisfies AgentHubMcpToolName;
 const cancelTaskToolName = "cancel_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
-const completeWorkflowToolName = "complete_workflow" satisfies AgentHubMcpToolName;
+const completeGoalToolName = "complete_goal" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
-  listTasksToolName,
+  listGoalsToolName,
   listArtifactsToolName,
   readArtifactToolName,
+  createGoalToolName,
   createTaskToolName,
   approveTaskToolName,
   cancelTaskToolName,
   uploadArtifactToolName,
   completeTaskToolName,
-  completeWorkflowToolName,
+  completeGoalToolName,
 ] as const;
 
 export async function startAgentHubMcpStdioServer(
@@ -88,7 +92,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: sendMessageToolName,
               description:
-                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user.",
+                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. If this is a direct reply, do not @mention; @mentioning another agent forces that agent to run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -144,31 +148,20 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
-      ...(enabledTools.has(listTasksToolName)
+      ...(enabledTools.has(listGoalsToolName)
         ? [
             {
-              name: listTasksToolName,
+              name: listGoalsToolName,
               description:
-                "List tasks in the current AgentHub group conversation, including task ids.",
+                "List goals in the current AgentHub group conversation, including each goal's tasks and task indexes.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
                   status: {
                     type: "string",
-                    enum: [
-                      "created",
-                      "waiting",
-                      "ready",
-                      "assigned",
-                      "running",
-                      "succeeded",
-                      "failed",
-                      "cancelled",
-                      "blocked",
-                    ],
-                    description:
-                      "Optional task status filter.",
+                    enum: ["active", "completed", "cancelled", "failed"],
+                    description: "Optional goal status filter.",
                   },
                 },
               },
@@ -180,14 +173,20 @@ export async function startAgentHubMcpStdioServer(
             {
               name: listArtifactsToolName,
               description:
-                "List files and reports in the current AgentHub group workspace.",
+                "List files and reports for a goal in the current AgentHub group workspace.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  taskId: {
+                  goalId: {
                     type: "string",
-                    description: "Optional task id filter.",
+                    minLength: 1,
+                    description: "Goal id to inspect.",
+                  },
+                  taskIndex: {
+                    type: "number",
+                    minimum: 0,
+                    description: "Optional goal-local task index filter.",
                   },
                   limit: {
                     type: "number",
@@ -196,6 +195,7 @@ export async function startAgentHubMcpStdioServer(
                     description: "Maximum number of artifacts to return.",
                   },
                 },
+                required: ["goalId"],
               },
             },
           ]
@@ -205,14 +205,33 @@ export async function startAgentHubMcpStdioServer(
             {
               name: readArtifactToolName,
               description:
-                "Read one artifact from the current AgentHub group workspace. Text files return text; binary files return base64.",
+                "Read one artifact from a goal in the current AgentHub group workspace. Text files return text; binary files return base64.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
+                  goalId: { type: "string", minLength: 1 },
                   artifactId: { type: "string", minLength: 1 },
                 },
-                required: ["artifactId"],
+                required: ["goalId", "artifactId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(createGoalToolName)
+        ? [
+            {
+              name: createGoalToolName,
+              description:
+                "Create a top-level AgentHub Goal for the user's Task-mode request before creating executable tasks.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  title: { type: "string", minLength: 1, maxLength: 160 },
+                  description: { type: "string" },
+                },
+                required: ["title"],
               },
             },
           ]
@@ -222,11 +241,16 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task for one group agent. Tasks without dependencies dispatch immediately; dependent tasks wait for Orchestrator approval after dependencies succeed.",
+                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately; dependent tasks wait for Orchestrator approval after dependencies succeed.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
+                  goalId: {
+                    type: "string",
+                    minLength: 1,
+                    description: "Goal id returned by create_goal or list_goals.",
+                  },
                   title: {
                     type: "string",
                     minLength: 1,
@@ -242,14 +266,14 @@ export async function startAgentHubMcpStdioServer(
                     minLength: 1,
                     description: "Agent id that should receive this task.",
                   },
-                  dependsOnTaskIds: {
+                  dependsOnTaskIndexes: {
                     type: "array",
-                    items: { type: "string", minLength: 1 },
+                    items: { type: "number", minimum: 0 },
                     description:
-                      "Optional upstream task ids that must succeed before this task can be approved.",
+                      "Optional upstream task indexes in the same goal that must succeed before this task can be approved.",
                   },
                 },
-                required: ["title", "assigneeAgentId"],
+                required: ["goalId", "title", "assigneeAgentId"],
               },
             },
           ]
@@ -264,9 +288,10 @@ export async function startAgentHubMcpStdioServer(
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  taskId: { type: "string", minLength: 1 },
+                  goalId: { type: "string", minLength: 1 },
+                  taskIndex: { type: "number", minimum: 0 },
                 },
-                required: ["taskId"],
+                required: ["goalId", "taskIndex"],
               },
             },
           ]
@@ -276,15 +301,16 @@ export async function startAgentHubMcpStdioServer(
             {
               name: cancelTaskToolName,
               description:
-                "Cancel an obsolete or invalid task in the current workflow.",
+                "Cancel an obsolete or invalid task in the current Goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  taskId: { type: "string", minLength: 1 },
+                  goalId: { type: "string", minLength: 1 },
+                  taskIndex: { type: "number", minimum: 0 },
                   reason: { type: "string" },
                 },
-                required: ["taskId"],
+                required: ["goalId", "taskIndex"],
               },
             },
           ]
@@ -294,12 +320,13 @@ export async function startAgentHubMcpStdioServer(
             {
               name: uploadArtifactToolName,
               description:
-                "Upload a report or result file from the current run workspace to the AgentHub group workspace.",
+                "Upload a report or result file from the current run workspace to the current Goal and task.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  taskId: { type: "string", minLength: 1 },
+                  goalId: { type: "string", minLength: 1 },
+                  taskIndex: { type: "number", minimum: 0 },
                   title: { type: "string", minLength: 1, maxLength: 160 },
                   localPath: {
                     type: "string",
@@ -309,7 +336,7 @@ export async function startAgentHubMcpStdioServer(
                   },
                   filename: { type: "string" },
                 },
-                required: ["taskId", "title", "localPath"],
+                required: ["goalId", "taskIndex", "title", "localPath"],
               },
             },
           ]
@@ -324,30 +351,33 @@ export async function startAgentHubMcpStdioServer(
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  taskId: { type: "string", minLength: 1 },
+                  goalId: { type: "string", minLength: 1 },
+                  taskIndex: { type: "number", minimum: 0 },
                   summary: { type: "string", minLength: 1 },
                   artifactIds: {
                     type: "array",
                     items: { type: "string", minLength: 1 },
                   },
                 },
-                required: ["taskId", "summary"],
+                required: ["goalId", "taskIndex", "summary"],
               },
             },
           ]
         : []),
-      ...(enabledTools.has(completeWorkflowToolName)
+      ...(enabledTools.has(completeGoalToolName)
         ? [
             {
-              name: completeWorkflowToolName,
+              name: completeGoalToolName,
               description:
-                "Mark the current task workflow complete after all active tasks are done. Send the final user-facing summary separately with send_message.",
+                "Mark a Goal complete after all active tasks are done. Send the final user-facing summary separately with send_message.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
+                  goalId: { type: "string", minLength: 1 },
                   summary: { type: "string" },
                 },
+                required: ["goalId"],
               },
             },
           ]
@@ -365,25 +395,27 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
-        : toolName === listTasksToolName
-          ? readListTasksInput(request.params.arguments)
+        : toolName === listGoalsToolName
+          ? readListGoalsInput(request.params.arguments)
           : toolName === listArtifactsToolName
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
               ? readReadArtifactInput(request.params.arguments)
-              : toolName === createTaskToolName
-                ? readCreateTaskInput(request.params.arguments)
-                : toolName === approveTaskToolName
-                  ? readApproveTaskInput(request.params.arguments)
-                  : toolName === cancelTaskToolName
-                    ? readCancelTaskInput(request.params.arguments)
-                    : toolName === uploadArtifactToolName
-                      ? readUploadArtifactInput(request.params.arguments)
-                      : toolName === completeTaskToolName
-                        ? readCompleteTaskInput(request.params.arguments)
-                        : toolName === completeWorkflowToolName
-                          ? readCompleteWorkflowInput(request.params.arguments)
-                          : undefined;
+              : toolName === createGoalToolName
+                ? readCreateGoalInput(request.params.arguments)
+                : toolName === createTaskToolName
+                  ? readCreateTaskInput(request.params.arguments)
+                  : toolName === approveTaskToolName
+                    ? readApproveTaskInput(request.params.arguments)
+                    : toolName === cancelTaskToolName
+                      ? readCancelTaskInput(request.params.arguments)
+                      : toolName === uploadArtifactToolName
+                        ? readUploadArtifactInput(request.params.arguments)
+                        : toolName === completeTaskToolName
+                          ? readCompleteTaskInput(request.params.arguments)
+                          : toolName === completeGoalToolName
+                            ? readCompleteGoalInput(request.params.arguments)
+                            : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -519,32 +551,28 @@ function readSendMessageAttachments(
   return attachments.length > 0 ? attachments : undefined;
 }
 
-function readListTasksInput(value: unknown): AgentHubListTasksToolInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("list_tasks arguments must be an object.");
-  }
-
-  const status = (value as Record<string, unknown>).status;
+function readListGoalsInput(value: unknown): AgentHubListGoalsToolInput {
+  const input = readObjectArguments(value, "list_goals");
+  const status = input.status;
 
   return typeof status === "string" && status.length > 0
-    ? { status: status as AgentHubListTasksToolInput["status"] }
+    ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
 }
 
 function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("list_artifacts arguments must be an object.");
-  }
-
-  const input = value as Record<string, unknown>;
-  const taskId = input.taskId;
+  const input = readObjectArguments(value, "list_artifacts");
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
   const limit = input.limit;
 
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("list_artifacts.goalId is required.");
+  }
+
   return {
-    taskId:
-      typeof taskId === "string" && taskId.length > 0
-        ? taskId
-        : undefined,
+    goalId,
+    taskIndex: taskIndex ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.floor(limit), 50)
@@ -554,29 +582,55 @@ function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput 
 
 function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
   const input = readObjectArguments(value, "read_artifact");
+  const goalId = input.goalId;
   const artifactId = input.artifactId;
+
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("read_artifact.goalId is required.");
+  }
 
   if (typeof artifactId !== "string" || artifactId.length === 0) {
     throw new Error("read_artifact.artifactId is required.");
   }
 
-  return { artifactId };
+  return { goalId, artifactId };
+}
+
+function readCreateGoalInput(value: unknown): AgentHubCreateGoalToolInput {
+  const input = readObjectArguments(value, "create_goal");
+  const title = input.title;
+  const description = input.description;
+
+  if (typeof title !== "string" || title.trim().length === 0) {
+    throw new Error("create_goal.title is required.");
+  }
+
+  if (title.trim().length > 160) {
+    throw new Error("create_goal.title must be 160 characters or fewer.");
+  }
+
+  return {
+    title: title.trim(),
+    description:
+      typeof description === "string" && description.trim().length > 0
+        ? description.trim()
+        : undefined,
+  };
 }
 
 function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("create_task arguments must be an object.");
-  }
-
-  const input = value as Record<string, unknown>;
+  const input = readObjectArguments(value, "create_task");
+  const goalId = input.goalId;
   const title = input.title;
   const description = input.description;
   const assigneeAgentId = input.assigneeAgentId;
-  const dependsOnTaskIds = Array.isArray(input.dependsOnTaskIds)
-    ? [...new Set(input.dependsOnTaskIds.filter((taskId): taskId is string =>
-        typeof taskId === "string" && taskId.length > 0,
-      ))]
+  const dependsOnTaskIndexes = Array.isArray(input.dependsOnTaskIndexes)
+    ? compactUniqueNumbers(input.dependsOnTaskIndexes)
     : undefined;
+
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("create_task.goalId is required.");
+  }
 
   if (typeof title !== "string" || title.trim().length === 0) {
     throw new Error("create_task.title is required.");
@@ -591,40 +645,52 @@ function readCreateTaskInput(value: unknown): AgentHubCreateTaskToolInput {
   }
 
   return {
+    goalId,
     title: title.trim(),
     description:
       typeof description === "string" && description.trim().length > 0
         ? description.trim()
         : undefined,
     assigneeAgentId,
-    dependsOnTaskIds: dependsOnTaskIds && dependsOnTaskIds.length > 0
-      ? dependsOnTaskIds
+    dependsOnTaskIndexes: dependsOnTaskIndexes && dependsOnTaskIndexes.length > 0
+      ? dependsOnTaskIndexes
       : undefined,
   };
 }
 
 function readApproveTaskInput(value: unknown): AgentHubApproveTaskToolInput {
   const input = readObjectArguments(value, "approve_task");
-  const taskId = input.taskId;
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
 
-  if (typeof taskId !== "string" || taskId.length === 0) {
-    throw new Error("approve_task.taskId is required.");
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("approve_task.goalId is required.");
   }
 
-  return { taskId };
+  if (taskIndex === null) {
+    throw new Error("approve_task.taskIndex is required.");
+  }
+
+  return { goalId, taskIndex };
 }
 
 function readCancelTaskInput(value: unknown): AgentHubCancelTaskToolInput {
   const input = readObjectArguments(value, "cancel_task");
-  const taskId = input.taskId;
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
   const reason = input.reason;
 
-  if (typeof taskId !== "string" || taskId.length === 0) {
-    throw new Error("cancel_task.taskId is required.");
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("cancel_task.goalId is required.");
+  }
+
+  if (taskIndex === null) {
+    throw new Error("cancel_task.taskIndex is required.");
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     reason:
       typeof reason === "string" && reason.trim().length > 0
         ? reason.trim()
@@ -633,18 +699,19 @@ function readCancelTaskInput(value: unknown): AgentHubCancelTaskToolInput {
 }
 
 function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("upload_artifact arguments must be an object.");
-  }
-
-  const input = value as Record<string, unknown>;
-  const taskId = input.taskId;
+  const input = readObjectArguments(value, "upload_artifact");
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
   const title = input.title;
   const localPath = input.localPath;
   const filename = input.filename;
 
-  if (typeof taskId !== "string" || taskId.length === 0) {
-    throw new Error("upload_artifact.taskId is required.");
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("upload_artifact.goalId is required.");
+  }
+
+  if (taskIndex === null) {
+    throw new Error("upload_artifact.taskIndex is required.");
   }
 
   if (typeof title !== "string" || title.trim().length === 0) {
@@ -656,7 +723,8 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     title: title.trim(),
     localPath: localPath.trim(),
     filename:
@@ -667,12 +735,9 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
 }
 
 function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("complete_task arguments must be an object.");
-  }
-
-  const input = value as Record<string, unknown>;
-  const taskId = input.taskId;
+  const input = readObjectArguments(value, "complete_task");
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
   const summary = input.summary;
   const artifactIds = Array.isArray(input.artifactIds)
     ? input.artifactIds.filter((artifactId): artifactId is string =>
@@ -680,8 +745,12 @@ function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
       )
     : undefined;
 
-  if (typeof taskId !== "string" || taskId.length === 0) {
-    throw new Error("complete_task.taskId is required.");
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("complete_task.goalId is required.");
+  }
+
+  if (taskIndex === null) {
+    throw new Error("complete_task.taskIndex is required.");
   }
 
   if (typeof summary !== "string" || summary.trim().length === 0) {
@@ -689,17 +758,24 @@ function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     summary: summary.trim(),
     artifactIds: artifactIds && artifactIds.length > 0 ? artifactIds : undefined,
   };
 }
 
-function readCompleteWorkflowInput(value: unknown): AgentHubCompleteWorkflowToolInput {
-  const input = readObjectArguments(value, "complete_workflow");
+function readCompleteGoalInput(value: unknown): AgentHubCompleteGoalToolInput {
+  const input = readObjectArguments(value, "complete_goal");
+  const goalId = input.goalId;
   const summary = input.summary;
 
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    throw new Error("complete_goal.goalId is required.");
+  }
+
   return {
+    goalId,
     summary:
       typeof summary === "string" && summary.trim().length > 0
         ? summary.trim()
@@ -707,18 +783,31 @@ function readCompleteWorkflowInput(value: unknown): AgentHubCompleteWorkflowTool
   };
 }
 
+function readTaskIndex(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function compactUniqueNumbers(value: unknown[]): number[] {
+  return [...new Set(value.filter((item): item is number =>
+    typeof item === "number" && Number.isInteger(item) && item >= 0,
+  ))];
+}
+
 async function callRelayTool(input: {
   input:
     | AgentHubApproveTaskToolInput
     | AgentHubCancelTaskToolInput
+    | AgentHubCompleteGoalToolInput
+    | AgentHubCompleteTaskToolInput
+    | AgentHubCreateGoalToolInput
     | AgentHubCreateTaskToolInput
-    | AgentHubCompleteWorkflowToolInput
-    | AgentHubSendMessageToolInput
     | AgentHubListArtifactsToolInput
-    | AgentHubListTasksToolInput
+    | AgentHubListGoalsToolInput
     | AgentHubReadArtifactToolInput
-    | AgentHubUploadArtifactToolInput
-    | AgentHubCompleteTaskToolInput;
+    | AgentHubSendMessageToolInput
+    | AgentHubUploadArtifactToolInput;
   relayUrl: string;
   sessionToken: string;
   toolCallId: string;
@@ -745,14 +834,15 @@ async function callRelayTool(input: {
   return (await response.json()) as
     | AgentHubApproveTaskToolResult
     | AgentHubCancelTaskToolResult
+    | AgentHubCompleteGoalToolResult
+    | AgentHubCompleteTaskToolResult
+    | AgentHubCreateGoalToolResult
     | AgentHubCreateTaskToolResult
-    | AgentHubCompleteWorkflowToolResult
-    | AgentHubSendMessageToolResult
     | AgentHubListArtifactsToolResult
-    | AgentHubListTasksToolResult
+    | AgentHubListGoalsToolResult
     | AgentHubReadArtifactToolResult
-    | AgentHubUploadArtifactToolResult
-    | AgentHubCompleteTaskToolResult;
+    | AgentHubSendMessageToolResult
+    | AgentHubUploadArtifactToolResult;
 }
 
 if (

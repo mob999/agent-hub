@@ -6,13 +6,13 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
 import type {
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolName,
   Conversation,
+  ConversationGoal,
   ConversationMessage,
   RealtimeEvent,
   RunEvent,
-  ConversationTask,
   RuntimeKind,
 } from "@agent-hub/core";
 import {
@@ -52,7 +52,7 @@ import {
   getRunnableAgentForUser,
   listConversationMessagesForUser,
   listConversationArtifactsForUser,
-  listConversationTasksForUser,
+  listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
@@ -358,21 +358,12 @@ function groupChatMcpToolsForAgent(input: {
     : [...agentHubNonOrchestratorMcpTools];
 }
 
-function toMcpTaskList(
-  tasks: ConversationTask[],
-): AgentHubListTasksToolResult["tasks"] {
-  return tasks.map((task) => ({
-    id: task.id,
-    title: task.title,
-    assigneeAgentId: task.assigneeAgentId,
-    assigneeRunId: task.assigneeRunId,
-    description: task.description,
-    status: task.status,
-    workflowId: task.workflowId,
-    dependsOnTaskIds: task.dependsOnTaskIds,
-    blockedReason: task.blockedReason,
-    resultArtifactIds: task.resultArtifactIds,
-    summary: task.summary,
+function toMcpGoalList(
+  goals: ConversationGoal[],
+): AgentHubListGoalsToolResult["goals"] {
+  return goals.map((goal) => ({
+    ...goal,
+    tasks: goal.tasks.map((task) => ({ ...task })),
   }));
 }
 
@@ -451,10 +442,11 @@ function buildGroupTaskOrchestratorInstructions(input: {
   return [
     input.agentIdentityInstructions,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
-    "In Task mode, first plan the task graph for group agents.",
-    "Use create_task with { title, description, assigneeAgentId, dependsOnTaskIds? } to declare tasks. Tasks without dependencies are dispatched immediately. Tasks with dependencies wait until upstream tasks succeed.",
-    "When a checkpoint run starts after a task completes, review the task graph, then use approve_task to launch ready downstream tasks, create_task for follow-up or recovery tasks, cancel_task for obsolete tasks, and complete_workflow only when the workflow is done.",
-    "Use list_tasks, list_artifacts, and read_artifact to inspect workflow state and group workspace artifacts.",
+    "In Task mode, first create a goal for the user's objective with create_goal.",
+    "Then create agent tasks under that goal with create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }).",
+    "Tasks without dependencies are dispatched immediately. Tasks with dependencies wait until upstream tasks succeed.",
+    "When a checkpoint run starts after a task completes, review the goal, then use approve_task to launch ready downstream tasks, create_task for follow-up or recovery tasks, cancel_task for obsolete tasks, and complete_goal only when the goal is done.",
+    "Use list_goals, list_artifacts, and read_artifact to inspect goal state and group workspace artifacts.",
     "Use send_message only for progress updates, decisions, or final user-facing notes.",
     "Do not assign a task to yourself unless you are intentionally doing part of the work.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
@@ -496,11 +488,12 @@ function buildGroupTaskOrchestratorPrompt(input: {
     ...roster,
     "",
     "Create tasks only for agents listed above.",
-    "create_task requires assigneeAgentId and may include dependsOnTaskIds for serial work. Tasks without dependencies start immediately; dependent tasks wait until their dependencies succeed.",
-    "Ready downstream tasks do not start automatically. In checkpoint runs, call approve_task({ taskId }) after you review and decide to continue.",
+    "Start by calling create_goal({ title, description }) for the user's objective.",
+    "Then call create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }) for each agent task. Tasks without dependencies start immediately; dependent tasks wait until their dependencies succeed.",
+    "Ready downstream tasks do not start automatically. In checkpoint runs, call approve_task({ goalId, taskIndex }) after you review and decide to continue.",
     "Use list_artifacts/read_artifact when later tasks need reports or files uploaded by earlier tasks.",
     "Do not use send_message to dispatch tasks. Use send_message only for progress updates, decisions, or final notes.",
-    "Call complete_workflow only after there are no waiting, ready, assigned, or running tasks.",
+    "Call complete_goal only after there are no waiting, ready, assigned, or running tasks.",
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
@@ -1584,14 +1577,14 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
     );
   }
 
-  const tasks = await listConversationTasksForUser(db, {
+  const goals = await listConversationGoalsForUser(db, {
     conversationId: c.req.param("conversationId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
     publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
-  if (tasks === null) {
+  if (goals === null) {
     return c.json(
       {
         error: {
@@ -1603,7 +1596,7 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
     );
   }
 
-  return c.json({ tasks });
+  return c.json({ goals });
 });
 
 app.get("/conversations/:conversationId/artifacts", async (c) => {
@@ -1734,9 +1727,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const currentConversationTasks =
+  const currentConversationGoals =
     conversation.type === "group"
-      ? await listConversationTasksForUser(db, {
+      ? await listConversationGoalsForUser(db, {
           conversationId: conversation.id,
           ownerUserId: user.id,
           publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
@@ -1744,7 +1737,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         })
       : [];
 
-  if (currentConversationTasks === null) {
+  if (currentConversationGoals === null) {
     return c.json(
       {
         error: {
@@ -1756,7 +1749,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const agentHubMcpTasks = toMcpTaskList(currentConversationTasks);
+  const agentHubMcpGoals = toMcpGoalList(currentConversationGoals);
 
   const userAgents = await listAgentsForUser(db, { ownerUserId: user.id });
   const agentNamesById = Object.fromEntries(
@@ -1807,7 +1800,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         scenario: "direct chat",
       }),
       agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-      agentHubMcpTasks,
+      agentHubMcpGoals,
       workspacePath: runAgent.workspacePath,
       run: {
         id: randomUUID(),
@@ -1959,7 +1952,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         conversationTitle: conversation.title,
       }),
       agentHubMcpTools: [...agentHubAllMcpTools],
-      agentHubMcpTasks,
+      agentHubMcpGoals,
       workspacePath: orchestrator.workspacePath,
       run: {
         id: randomUUID(),
@@ -2096,7 +2089,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           agentId: runAgent.agent.id,
           orchestratorAgentId: conversation.orchestratorAgentId,
         }),
-        agentHubMcpTasks,
+        agentHubMcpGoals,
         workspacePath: runAgent.workspacePath,
         run: {
           id: randomUUID(),

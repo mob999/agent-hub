@@ -4,22 +4,23 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import path from "node:path";
 
 import type {
-  AgentRunArtifactUpload,
   AgentHubApproveTaskToolInput,
   AgentHubCancelTaskToolInput,
-  AgentHubCreateTaskToolInput,
+  AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
-  AgentHubCompleteWorkflowToolInput,
+  AgentHubCreateGoalToolInput,
+  AgentHubCreateTaskToolInput,
   AgentHubListArtifactsToolInput,
-  AgentHubListTasksToolInput,
+  AgentHubListGoalsToolInput,
   AgentHubMcpToolCall,
-  AgentHubMcpToolName,
   AgentHubMcpToolInput,
+  AgentHubMcpToolName,
   AgentHubMcpToolResult,
   AgentHubReadArtifactToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
+  AgentRunArtifactUpload,
   RunId,
 } from "@agent-hub/core";
 
@@ -322,8 +323,8 @@ function readToolInput(
     return readSendMessageInput(input);
   }
 
-  if (toolName === "list_tasks") {
-    return readListTasksInput(input);
+  if (toolName === "list_goals") {
+    return readListGoalsInput(input);
   }
 
   if (toolName === "list_artifacts") {
@@ -332,6 +333,10 @@ function readToolInput(
 
   if (toolName === "read_artifact") {
     return readReadArtifactInput(input);
+  }
+
+  if (toolName === "create_goal") {
+    return readCreateGoalInput(input);
   }
 
   if (toolName === "create_task") {
@@ -354,14 +359,14 @@ function readToolInput(
     return readCompleteTaskInput(input);
   }
 
-  if (toolName === "complete_workflow") {
-    return readCompleteWorkflowInput(input);
+  if (toolName === "complete_goal") {
+    return readCompleteGoalInput(input);
   }
 
   return null;
 }
 
-function readListTasksInput(input: unknown): AgentHubListTasksToolInput | null {
+function readListGoalsInput(input: unknown): AgentHubListGoalsToolInput | null {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return null;
   }
@@ -369,7 +374,7 @@ function readListTasksInput(input: unknown): AgentHubListTasksToolInput | null {
   const status = (input as Record<string, unknown>).status;
 
   return typeof status === "string" && status.length > 0
-    ? { status: status as AgentHubListTasksToolInput["status"] }
+    ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
 }
 
@@ -417,14 +422,17 @@ function readListArtifactsInput(
   }
 
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = record.taskIndex;
   const limit = record.limit;
 
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    return null;
+  }
+
   return {
-    taskId:
-      typeof taskId === "string" && taskId.length > 0
-        ? taskId
-        : undefined,
+    goalId,
+    taskIndex: readTaskIndex(taskIndex) ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.floor(limit), 50)
@@ -439,10 +447,13 @@ function readReadArtifactInput(
     return null;
   }
 
-  const artifactId = (input as Record<string, unknown>).artifactId;
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const artifactId = record.artifactId;
 
-  return typeof artifactId === "string" && artifactId.length > 0
-    ? { artifactId }
+  return typeof goalId === "string" && goalId.length > 0 &&
+    typeof artifactId === "string" && artifactId.length > 0
+    ? { goalId, artifactId }
     : null;
 }
 
@@ -500,15 +511,21 @@ async function readMessageAttachmentUpload(input: {
 function readUploadArtifactInput(
   input: unknown,
 ): AgentHubUploadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = readTaskIndex(record.taskIndex);
   const title = record.title;
   const localPath = record.localPath;
   const filename = record.filename;
 
   if (
-    typeof taskId !== "string" ||
-    taskId.length === 0 ||
+    typeof goalId !== "string" ||
+    goalId.length === 0 ||
+    taskIndex === null ||
     typeof title !== "string" ||
     title.trim().length === 0 ||
     title.trim().length > 160 ||
@@ -519,7 +536,8 @@ function readUploadArtifactInput(
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     title: title.trim(),
     localPath: localPath.trim(),
     filename:
@@ -530,8 +548,13 @@ function readUploadArtifactInput(
 }
 
 function readCompleteTaskInput(input: unknown): AgentHubCompleteTaskToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = readTaskIndex(record.taskIndex);
   const summary = record.summary;
   const artifactIds = Array.isArray(record.artifactIds)
     ? record.artifactIds.filter((artifactId): artifactId is string =>
@@ -540,8 +563,9 @@ function readCompleteTaskInput(input: unknown): AgentHubCompleteTaskToolInput | 
     : undefined;
 
   if (
-    typeof taskId !== "string" ||
-    taskId.length === 0 ||
+    typeof goalId !== "string" ||
+    goalId.length === 0 ||
+    taskIndex === null ||
     typeof summary !== "string" ||
     summary.trim().length === 0
   ) {
@@ -549,7 +573,8 @@ function readCompleteTaskInput(input: unknown): AgentHubCompleteTaskToolInput | 
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     summary: summary.trim(),
     artifactIds: artifactIds && artifactIds.length > 0 ? artifactIds : undefined,
   };
@@ -659,21 +684,19 @@ function readSendMessageAttachments(
   return attachments.length > 0 ? attachments : undefined;
 }
 
-function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null {
+function readCreateGoalInput(input: unknown): AgentHubCreateGoalToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
   const record = input as Record<string, unknown>;
   const title = record.title;
   const description = record.description;
-  const assigneeAgentId = record.assigneeAgentId;
-  const dependsOnTaskIds = Array.isArray(record.dependsOnTaskIds)
-    ? compactUniqueStrings(record.dependsOnTaskIds)
-    : undefined;
 
   if (
     typeof title !== "string" ||
     title.trim().length === 0 ||
-    title.trim().length > 160 ||
-    typeof assigneeAgentId !== "string" ||
-    assigneeAgentId.length === 0
+    title.trim().length > 160
   ) {
     return null;
   }
@@ -684,33 +707,80 @@ function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null
       typeof description === "string" && description.trim().length > 0
         ? description.trim()
         : undefined,
+  };
+}
+
+function readCreateTaskInput(input: unknown): AgentHubCreateTaskToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const title = record.title;
+  const description = record.description;
+  const assigneeAgentId = record.assigneeAgentId;
+  const dependsOnTaskIndexes = Array.isArray(record.dependsOnTaskIndexes)
+    ? compactUniqueNumbers(record.dependsOnTaskIndexes)
+    : undefined;
+
+  if (
+    typeof goalId !== "string" ||
+    goalId.length === 0 ||
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    title.trim().length > 160 ||
+    typeof assigneeAgentId !== "string" ||
+    assigneeAgentId.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    goalId,
+    title: title.trim(),
+    description:
+      typeof description === "string" && description.trim().length > 0
+        ? description.trim()
+        : undefined,
     assigneeAgentId,
-    taskId: randomUUID(),
-    dependsOnTaskIds: dependsOnTaskIds && dependsOnTaskIds.length > 0
-      ? dependsOnTaskIds
+    dependsOnTaskIndexes: dependsOnTaskIndexes && dependsOnTaskIndexes.length > 0
+      ? dependsOnTaskIndexes
       : undefined,
   };
 }
 
 function readApproveTaskInput(input: unknown): AgentHubApproveTaskToolInput | null {
-  const taskId = (input as Record<string, unknown>).taskId;
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
 
-  return typeof taskId === "string" && taskId.length > 0
-    ? { taskId }
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const taskIndex = readTaskIndex(record.taskIndex);
+
+  return typeof goalId === "string" && goalId.length > 0 && taskIndex !== null
+    ? { goalId, taskIndex }
     : null;
 }
 
 function readCancelTaskInput(input: unknown): AgentHubCancelTaskToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
   const record = input as Record<string, unknown>;
-  const taskId = record.taskId;
+  const goalId = record.goalId;
+  const taskIndex = readTaskIndex(record.taskIndex);
   const reason = record.reason;
 
-  if (typeof taskId !== "string" || taskId.length === 0) {
+  if (typeof goalId !== "string" || goalId.length === 0 || taskIndex === null) {
     return null;
   }
 
   return {
-    taskId,
+    goalId,
+    taskIndex,
     reason:
       typeof reason === "string" && reason.trim().length > 0
         ? reason.trim()
@@ -718,16 +788,21 @@ function readCancelTaskInput(input: unknown): AgentHubCancelTaskToolInput | null
   };
 }
 
-function readCompleteWorkflowInput(
-  input: unknown,
-): AgentHubCompleteWorkflowToolInput | null {
+function readCompleteGoalInput(input: unknown): AgentHubCompleteGoalToolInput | null {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return null;
   }
 
-  const summary = (input as Record<string, unknown>).summary;
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const summary = record.summary;
+
+  if (typeof goalId !== "string" || goalId.length === 0) {
+    return null;
+  }
 
   return {
+    goalId,
     summary:
       typeof summary === "string" && summary.trim().length > 0
         ? summary.trim()
@@ -735,9 +810,15 @@ function readCompleteWorkflowInput(
   };
 }
 
-function compactUniqueStrings(value: unknown[]): string[] {
-  return [...new Set(value.filter((item): item is string =>
-    typeof item === "string" && item.length > 0,
+function readTaskIndex(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function compactUniqueNumbers(value: unknown[]): number[] {
+  return [...new Set(value.filter((item): item is number =>
+    typeof item === "number" && Number.isInteger(item) && item >= 0,
   ))];
 }
 

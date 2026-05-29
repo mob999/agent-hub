@@ -2,7 +2,7 @@ import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbo
 import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationMessage, ConversationTask, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationGoal, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime, formatTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
@@ -15,7 +15,7 @@ const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leadin
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
-  tasks: ConversationTask[]
+  goals: ConversationGoal[]
   artifacts: ConversationArtifact[]
   agents: AgentDetails[]
   user: User | null
@@ -113,7 +113,7 @@ function mentionsFromPrompt(
 export function ChannelWorkspace({
   activeConversation,
   messages,
-  tasks,
+  goals,
   artifacts,
   agents,
   user,
@@ -142,6 +142,10 @@ export function ChannelWorkspace({
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
   const hasSelectedConversation = activeConversation !== null
+  const totalGoalTasks = useMemo(
+    () => goals.reduce((total, goal) => total + goal.tasks.length, 0),
+    [goals],
+  )
   const isAgentDirectMessage = activeConversation?.type === 'direct'
   const selectedAgent = isAgentDirectMessage
     ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
@@ -536,102 +540,136 @@ export function ChannelWorkspace({
                 </p>
               </div>
               <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
-                {tasks.length}
+                {totalGoalTasks}
               </span>
             </div>
-            {tasks.length === 0 ? (
+            {goals.length === 0 ? (
               <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
                 <Task size={32} />
-                <h2 className="cds--type-heading-compact-02">No tasks yet</h2>
+                <h2 className="cds--type-heading-compact-02">No goals yet</h2>
                 <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
                   {isAgentDirectMessage
-                    ? 'Private tasks from this conversation will appear here.'
-                    : 'Send a group message in Task mode. The orchestrator can create tasks and assign them to agents.'}
+                    ? 'Private goals from this conversation will appear here.'
+                    : 'Send a group message in Task mode. The orchestrator can create goals and assign tasks to agents.'}
                 </p>
               </div>
             ) : (
-              <div className="grid gap-2">
-                {tasks.map((task) => {
-                  const assignee = agents.find((agent) => agent.agent.id === task.assigneeAgentId)
-                  const orchestrator = agents.find((agent) => agent.agent.id === task.orchestratorAgentId)
+              <div className="grid gap-3">
+                {goals.map((goal) => {
+                  const orchestrator = agents.find((agent) => agent.agent.id === goal.orchestratorAgentId)
 
                   return (
                     <article
-                      key={task.id}
+                      key={goal.id}
                       className="grid gap-3 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-sm text-[var(--cds-text-primary)]"
                     >
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                         <div className="min-w-0">
-                          <h3 className="truncate text-base font-semibold">{task.title}</h3>
-                          {task.description && (
+                          <h3 className="truncate text-base font-semibold">{goal.title}</h3>
+                          {goal.description && (
                             <p className="mt-1 text-sm text-[var(--cds-text-secondary)]">
-                              {task.description}
+                              {goal.description}
                             </p>
                           )}
                         </div>
                         <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
-                          {task.status}
+                          {goal.status}
                         </span>
                       </div>
                       <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
                         <div>
-                          <dt className="font-semibold uppercase">Assignee</dt>
-                          <dd className="truncate">{assignee?.agent.name ?? task.assigneeAgentId}</dd>
-                        </div>
-                        <div>
                           <dt className="font-semibold uppercase">Orchestrator</dt>
-                          <dd className="truncate">{orchestrator?.agent.name ?? task.orchestratorAgentId}</dd>
+                          <dd className="truncate">{orchestrator?.agent.name ?? goal.orchestratorAgentId}</dd>
                         </div>
                         <div>
-                          <dt className="font-semibold uppercase">Run</dt>
-                          <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
+                          <dt className="font-semibold uppercase">Goal</dt>
+                          <dd className="truncate">{goal.id.slice(0, 8)}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-semibold uppercase">Tasks</dt>
+                          <dd className="truncate">{goal.tasks.length}</dd>
                         </div>
                       </dl>
-                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
-                        <div>
-                          <dt className="font-semibold uppercase">Workflow</dt>
-                          <dd className="truncate">{task.workflowId.slice(0, 8)}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Depends on</dt>
-                          <dd className="truncate">
-                            {task.dependsOnTaskIds && task.dependsOnTaskIds.length > 0
-                              ? task.dependsOnTaskIds.map((id) => id.slice(0, 8)).join(', ')
-                              : 'None'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Checkpoint</dt>
-                          <dd className="truncate">{task.checkpointRunId?.slice(0, 8) ?? 'Not reviewed'}</dd>
-                        </div>
-                      </dl>
-                      {task.blockedReason && (
-                        <div className="border-t border-[var(--cds-border-subtle-01)] pt-3 text-sm text-[var(--cds-text-secondary)]">
-                          <span className="font-semibold text-[var(--cds-text-primary)]">Blocked:</span>{' '}
-                          {task.blockedReason}
-                        </div>
-                      )}
-                      {task.summary && (
+                      {goal.summary && (
                         <div className="border-t border-[var(--cds-border-subtle-01)] pt-3">
-                          <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h4>
-                          <MessageContent className="mt-1 block text-sm leading-5" content={task.summary} />
+                          <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Goal summary</h4>
+                          <MessageContent className="mt-1 block text-sm leading-5" content={goal.summary} />
                         </div>
                       )}
-                      {task.artifacts && task.artifacts.length > 0 && (
-                        <div className="grid gap-1 border-t border-[var(--cds-border-subtle-01)] pt-3">
-                          <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h4>
-                          {task.artifacts.map((artifact) => (
-                            <button
-                              key={artifact.id}
-                              className="w-fit cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                              type="button"
-                              onClick={() => openArtifactEditor(artifact.id)}
+                      <div className="grid gap-2 border-t border-[var(--cds-border-subtle-01)] pt-3">
+                        {goal.tasks.map((task) => {
+                          const assignee = agents.find((agent) => agent.agent.id === task.assigneeAgentId)
+
+                          return (
+                            <section
+                              key={task.id}
+                              className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-3"
                             >
-                              {artifact.title}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
+                                <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold">
+                                  #{task.index}
+                                </span>
+                                <div className="min-w-0">
+                                  <h4 className="truncate text-sm font-semibold">{task.title}</h4>
+                                  {task.description && (
+                                    <p className="mt-1 text-xs text-[var(--cds-text-secondary)]">
+                                      {task.description}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+                                  {task.status}
+                                </span>
+                              </div>
+                              <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
+                                <div>
+                                  <dt className="font-semibold uppercase">Assignee</dt>
+                                  <dd className="truncate">{assignee?.agent.name ?? task.assigneeAgentId}</dd>
+                                </div>
+                                <div>
+                                  <dt className="font-semibold uppercase">Run</dt>
+                                  <dd className="truncate">{task.assigneeRunId ?? 'Not dispatched'}</dd>
+                                </div>
+                                <div>
+                                  <dt className="font-semibold uppercase">Depends on</dt>
+                                  <dd className="truncate">
+                                    {task.dependsOnTaskIndexes && task.dependsOnTaskIndexes.length > 0
+                                      ? task.dependsOnTaskIndexes.map((index) => `#${index}`).join(', ')
+                                      : 'None'}
+                                  </dd>
+                                </div>
+                              </dl>
+                              {task.blockedReason && (
+                                <div className="text-xs text-[var(--cds-text-secondary)]">
+                                  <span className="font-semibold text-[var(--cds-text-primary)]">Blocked:</span>{' '}
+                                  {task.blockedReason}
+                                </div>
+                              )}
+                              {task.summary && (
+                                <div>
+                                  <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h5>
+                                  <MessageContent className="mt-1 block text-sm leading-5" content={task.summary} />
+                                </div>
+                              )}
+                              {task.artifacts && task.artifacts.length > 0 && (
+                                <div className="grid gap-1">
+                                  <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h5>
+                                  {task.artifacts.map((artifact) => (
+                                    <button
+                                      key={artifact.id}
+                                      className="w-fit cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                                      type="button"
+                                      onClick={() => openArtifactEditor(artifact.id)}
+                                    >
+                                      {artifact.title}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          )
+                        })}
+                      </div>
                     </article>
                   )
                 })}

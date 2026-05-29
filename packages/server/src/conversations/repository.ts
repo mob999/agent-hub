@@ -79,6 +79,15 @@ type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 
+export interface ActiveRunContext {
+  createdAt: string;
+  goalId?: string;
+  latestEventType?: string;
+  runId: string;
+  status: string;
+  taskIndex?: number;
+}
+
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -612,12 +621,23 @@ export async function listActiveAgentGroupContexts(
     }));
 }
 
-export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
+export function buildAgentGroupsPrompt(
+  groups: AgentGroupContext[],
+  options: { currentConversationId?: string } = {},
+): string {
   const groupLines = groups.length === 0
     ? ["You are not a member of any active AgentHub groups."]
     : [
         "You are a member of these active AgentHub groups:",
         ...groups.flatMap((group) => {
+          const isCurrentGroup = group.conversationId === options.currentConversationId;
+
+          if (!isCurrentGroup) {
+            return [
+              `- #${group.title} (groupName: ${group.groupName}, conversationId: ${group.conversationId})`,
+            ];
+          }
+
           const orchestrator = group.orchestratorAgentId === undefined
             ? undefined
             : group.agents.find((agent) => agent.id === group.orchestratorAgentId);
@@ -651,12 +671,45 @@ export function buildAgentGroupsPrompt(groups: AgentGroupContext[]): string {
   return [
     "<agenthub_agent_groups>",
     ...groupLines,
+    "Only the current group includes member details. Other groups are listed without member rosters.",
     "Use send_message with target { type: \"group\", groupName } to send a visible message to one of these groups.",
     "To wake another agent in a group, include @AgentName in the message content.",
     "If you are only replying to the current conversation or giving a status update, do not mention @AgentName; mentioning an agent forces AgentHub to start that agent's reply run.",
     "Use send_message with target { type: \"user\" } to send a visible private message to the current user.",
     "Archived groups are not listed and cannot be targeted.",
     "</agenthub_agent_groups>",
+  ].join("\n");
+}
+
+export function buildActiveRunsPrompt(
+  activeRuns: ActiveRunContext[],
+): string | undefined {
+  const filteredRuns = activeRuns.filter((run) =>
+    run.status === "queued" || run.status === "running"
+  );
+
+  if (filteredRuns.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "<agenthub_active_runs>",
+    "You already have active runs in this conversation.",
+    "Do not assume they are complete. Coordinate with the visible conversation state and avoid duplicating the exact same work unless the user explicitly asks.",
+    ...filteredRuns.map((run) => {
+      const details = [
+        `Run ${run.runId}: ${run.status}`,
+        `createdAt: ${run.createdAt}`,
+        run.latestEventType === undefined
+          ? undefined
+          : `latestEvent: ${run.latestEventType}`,
+        run.goalId === undefined ? undefined : `Goal ID: ${run.goalId}`,
+        run.taskIndex === undefined ? undefined : `Task #${run.taskIndex}`,
+      ].filter((detail): detail is string => detail !== undefined);
+
+      return `- ${details.join(", ")}`;
+    }),
+    "</agenthub_active_runs>",
   ].join("\n");
 }
 
@@ -3023,6 +3076,7 @@ function buildMentionedGroupChatAgentInstructions(input: {
 }
 
 export function buildMentionedGroupChatRunPrompt(input: {
+  activeRunsPrompt?: string;
   agentGroupsPrompt: string;
   agentName: string;
   agentNamesById: Record<string, string>;
@@ -3062,6 +3116,8 @@ export function buildMentionedGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     "",
+    input.activeRunsPrompt,
+    input.activeRunsPrompt === undefined ? undefined : "",
     conversationPrompt,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -3076,6 +3132,85 @@ async function listAgentNamesByIdForUser(
     .where(eq(agents.ownerUserId, ownerUserId));
 
   return Object.fromEntries(rows.map((agent) => [agent.id, agent.name]));
+}
+
+async function getActiveRunContextPromptForAgent(
+  db: Db,
+  input: {
+    agentId: string;
+    conversationId: string;
+    ownerUserId: string;
+  },
+): Promise<string | undefined> {
+  const activeRunRows = await db
+    .select({
+      createdAt: runs.createdAt,
+      id: runs.id,
+      status: runs.status,
+    })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.ownerUserId, input.ownerUserId),
+        eq(runs.conversationId, input.conversationId),
+        eq(runs.agentId, input.agentId),
+        inArray(runs.status, ["queued", "running"]),
+      ),
+    )
+    .orderBy(desc(runs.createdAt))
+    .limit(3);
+
+  if (activeRunRows.length === 0) {
+    return undefined;
+  }
+
+  const activeRunIds = activeRunRows.map((run) => run.id);
+  const latestEventRows = await db
+    .select({
+      eventType: runEvents.eventType,
+      runId: runEvents.runId,
+    })
+    .from(runEvents)
+    .where(inArray(runEvents.runId, activeRunIds))
+    .orderBy(desc(runEvents.createdAt));
+  const latestEventTypeByRunId = new Map<string, string>();
+
+  for (const event of latestEventRows) {
+    if (!latestEventTypeByRunId.has(event.runId)) {
+      latestEventTypeByRunId.set(event.runId, event.eventType);
+    }
+  }
+
+  const taskRows = await db
+    .select({
+      goalId: conversationGoalTasks.goalId,
+      runId: conversationGoalTasks.assigneeRunId,
+      taskIndex: conversationGoalTasks.index,
+    })
+    .from(conversationGoalTasks)
+    .where(inArray(conversationGoalTasks.assigneeRunId, activeRunIds));
+  const taskByRunId = new Map(
+    taskRows.flatMap((task) =>
+      task.runId === null
+        ? []
+        : [[task.runId, { goalId: task.goalId, taskIndex: task.taskIndex }]]
+    ),
+  );
+
+  return buildActiveRunsPrompt(
+    activeRunRows.map((run) => {
+      const task = taskByRunId.get(run.id);
+
+      return {
+        createdAt: run.createdAt.toISOString(),
+        goalId: task?.goalId,
+        latestEventType: latestEventTypeByRunId.get(run.id),
+        runId: run.id,
+        status: run.status,
+        taskIndex: task?.taskIndex,
+      };
+    }),
+  );
 }
 
 async function createMentionedGroupChatRuns(
@@ -3138,11 +3273,18 @@ async function createMentionedGroupChatRuns(
         agentId: runAgent.agent.id,
         ownerUserId: input.ownerUserId,
       }),
+      { currentConversationId: input.conversation.id },
     );
+    const activeRunsPrompt = await getActiveRunContextPromptForAgent(db, {
+      agentId: runAgent.agent.id,
+      conversationId: input.conversation.id,
+      ownerUserId: input.ownerUserId,
+    });
     const job: RunQueueJob = {
       conversationId: input.conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: buildMentionedGroupChatRunPrompt({
+        activeRunsPrompt,
         agentGroupsPrompt,
         agentName: runAgent.agent.name,
         agentNamesById,
@@ -3509,6 +3651,7 @@ async function maybeCreateCheckpointRunForTask(
       agentId: runAgent.agent.id,
       ownerUserId: goal.ownerUserId,
     }),
+    { currentConversationId: conversation.id },
   );
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
@@ -3685,6 +3828,7 @@ async function createAssignedTaskRunJob(
         agentId: runAgent.agent.id,
         ownerUserId: input.ownerUserId,
       }),
+      { currentConversationId: input.conversation.id },
     );
 
   return {

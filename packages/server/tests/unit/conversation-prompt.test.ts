@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildActiveRunsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
   artifactUserFacingLinkInstructions,
@@ -152,7 +153,7 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("Profile: No description provided.");
   });
 
-  it("describes the active groups an agent can message", () => {
+  it("only expands member details for the current group", () => {
     const prompt = buildAgentGroupsPrompt([
       {
         agents: [{ description: "Coordinates research.", id: "agent-all", name: "coco" }],
@@ -171,18 +172,36 @@ describe("conversation prompt builder", () => {
         orchestratorAgentId: "agent-design-1",
         title: "Design",
       },
-    ]);
+    ], { currentConversationId: "00000000-0000-4000-8000-000000000021" });
 
     expect(prompt).toContain("- #all (groupName: all, conversationId:");
-    expect(prompt).toContain("orchestrator: @coco");
-    expect(prompt).toContain("@coco [Orchestrator]: Coordinates research.");
+    expect(prompt).not.toContain("@coco");
     expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
     expect(prompt).toContain("@dudu [Orchestrator]: Frontend implementation.");
     expect(prompt).toContain("@jojo: No description provided.");
+    expect(prompt).toContain("Only the current group includes member details.");
     expect(prompt).toContain("target { type: \"group\", groupName }");
     expect(prompt).toContain("do not mention @AgentName");
     expect(prompt).toContain("forces AgentHub to start that agent's reply run");
     expect(prompt).toContain("target { type: \"user\" }");
+  });
+
+  it("does not include group member rosters without a current group", () => {
+    const prompt = buildAgentGroupsPrompt([
+      {
+        agents: [
+          { description: "Coordinates research.", id: "agent-coco", name: "coco" },
+        ],
+        conversationId: "00000000-0000-4000-8000-000000000020",
+        groupName: "Research",
+        orchestratorAgentId: "agent-coco",
+        title: "Research",
+      },
+    ]);
+
+    expect(prompt).toContain("- #Research (groupName: Research, conversationId:");
+    expect(prompt).not.toContain("@coco");
+    expect(prompt).not.toContain("members:");
   });
 
   it("marks mentioned group chat runs when the mentioned agent is orchestrator", () => {
@@ -220,6 +239,65 @@ describe("conversation prompt builder", () => {
     });
 
     expect(prompt).not.toContain("configured Orchestrator");
+  });
+
+  it("formats only active prior runs for mentioned group chat context", () => {
+    const prompt = buildActiveRunsPrompt([
+      {
+        createdAt: "2026-05-26T00:00:00.000Z",
+        goalId: "00000000-0000-4000-8000-000000000099",
+        latestEventType: "run.started",
+        runId: "00000000-0000-4000-8000-000000000010",
+        status: "running",
+        taskIndex: 0,
+      },
+      {
+        createdAt: "2026-05-25T00:00:00.000Z",
+        runId: "00000000-0000-4000-8000-000000000011",
+        status: "failed",
+      },
+    ]);
+
+    expect(prompt).toContain("<agenthub_active_runs>");
+    expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: running");
+    expect(prompt).toContain("latestEvent: run.started");
+    expect(prompt).toContain("Goal ID: 00000000-0000-4000-8000-000000000099");
+    expect(prompt).toContain("Task #0");
+    expect(prompt).not.toContain("00000000-0000-4000-8000-000000000011");
+  });
+
+  it("omits active run context when no prior run is active", () => {
+    expect(
+      buildActiveRunsPrompt([
+        {
+          createdAt: "2026-05-25T00:00:00.000Z",
+          runId: "00000000-0000-4000-8000-000000000011",
+          status: "succeeded",
+        },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("injects active run context into mentioned group chat prompts", () => {
+    const prompt = buildMentionedGroupChatRunPrompt({
+      activeRunsPrompt: buildActiveRunsPrompt([
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          runId: "00000000-0000-4000-8000-000000000010",
+          status: "queued",
+        },
+      ]),
+      agentGroupsPrompt: "<agenthub_agent_groups />",
+      agentName: "jojo",
+      agentNamesById: {},
+      conversationTitle: "Design",
+      currentMessage: "@jojo can you continue?",
+      messages: [],
+      senderAgentName: "dudu",
+    });
+
+    expect(prompt).toContain("<agenthub_active_runs>");
+    expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: queued");
   });
 
   it("resolves text mentions by longest agent name first", () => {

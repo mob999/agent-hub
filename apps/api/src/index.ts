@@ -369,6 +369,7 @@ function toMcpGoalList(
 
 async function buildAgentGroupsPromptForAgent(input: {
   agentId: string;
+  currentConversationId?: string;
   ownerUserId: string;
 }): Promise<string> {
   return buildAgentGroupsPrompt(
@@ -376,6 +377,7 @@ async function buildAgentGroupsPromptForAgent(input: {
       agentId: input.agentId,
       ownerUserId: input.ownerUserId,
     }),
+    { currentConversationId: input.currentConversationId },
   );
 }
 
@@ -1926,6 +1928,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
     const agentGroupsPrompt = await buildAgentGroupsPromptForAgent({
       agentId: orchestrator.agent.id,
+      currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
     const job: RunQueueJob = {
@@ -2065,6 +2068,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         prompt: buildGroupChatRunPrompt({
           agentGroupsPrompt: await buildAgentGroupsPromptForAgent({
             agentId: runAgent.agent.id,
+            currentConversationId: conversation.id,
             ownerUserId: user.id,
           }),
           agentNamesById,

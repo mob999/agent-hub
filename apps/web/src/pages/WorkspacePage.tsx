@@ -10,6 +10,7 @@ import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
+import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
 import {
   ApiRequestError,
@@ -35,11 +36,15 @@ import {
   type SendConversationMessageResponse,
   type RestoreAgentResponse,
   type RestoreGroupConversationResponse,
+  type SearchConversationsResponse,
+  type SearchSort,
+  type SearchTimeFilter,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
   type User,
   type WorkspaceView,
 } from '../lib/api'
+import { searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
 import type { GoalRouteState } from '../App'
@@ -220,6 +225,14 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(undefined)
+  const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(undefined)
+  const [searchSort, setSearchSort] = useState<SearchSort>('relevant')
+  const [searchTime, setSearchTime] = useState<SearchTimeFilter>('any')
+  const [searchResults, setSearchResults] = useState<SearchConversationsResponse | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [isSearchLoading, setIsSearchLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
@@ -229,6 +242,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const conversationsRef = useRef<Conversation[]>([])
 
   const routeConversationId = editorRoute?.conversationId ?? chatConversationId
+  const isSearchRoute = route === '/chat/search'
   const activeView = workspaceViewFromRoute(route)
   const activeRunCount = useMemo(
     () =>
@@ -674,6 +688,89 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   ])
 
   useEffect(() => {
+    if (!user || !isSearchRoute) {
+      return
+    }
+
+    const trimmedQuery = searchQuery.trim()
+    if (trimmedQuery.length === 0) {
+      setSearchResults(null)
+      setSearchError(null)
+      setIsSearchLoading(false)
+      return
+    }
+
+    let active = true
+    setIsSearchLoading(true)
+    setSearchError(null)
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const params = new URLSearchParams()
+          params.set('query', trimmedQuery)
+          params.set('sort', searchSort)
+          params.set('timeFilter', searchTime)
+          if (searchSelectedChannelId) {
+            params.set('channelId', searchSelectedChannelId)
+          }
+          if (searchSelectedSender === 'user') {
+            params.set('senderType', 'user')
+          } else if (searchSelectedSender) {
+            params.set('senderType', 'agent')
+            params.set('senderAgentId', searchSelectedSender)
+          }
+          const response = await apiRequest<SearchConversationsResponse>(`/search?${params.toString()}`)
+          if (!active) {
+            return
+          }
+          setSearchResults(response)
+        } catch (error) {
+          if (!active) {
+            return
+          }
+          if (error instanceof ApiRequestError) {
+            setSearchError(error.message)
+          } else {
+            setSearchError('Unable to search conversations.')
+          }
+        } finally {
+          if (active) {
+            setIsSearchLoading(false)
+          }
+        }
+      })()
+    }, 150)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    isSearchRoute,
+    searchQuery,
+    searchSelectedChannelId,
+    searchSelectedSender,
+    searchSort,
+    searchTime,
+    user,
+  ])
+
+  useEffect(() => {
+    if (!isSearchRoute) {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    setSearchQuery(params.get('q') ?? '')
+    setSearchSelectedChannelId(params.get('channelId') ?? undefined)
+    setSearchSelectedSender(params.get('sender') ?? undefined)
+    setSearchSort(params.get('sort') === 'recent' ? 'recent' : 'relevant')
+    const time = params.get('time')
+    setSearchTime(time === '24h' || time === '7d' || time === '30d' ? time : 'any')
+  }, [isSearchRoute])
+
+  useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
       return
     }
@@ -1083,6 +1180,17 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
 
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
+  }
+  const openSearch = () => {
+    const path = searchRoutePath({
+      channelId: searchSelectedChannelId,
+      query: searchQuery,
+      sender: searchSelectedSender,
+      sort: searchSort,
+      time: searchTime,
+    })
+    window.history.pushState({}, '', path)
+    navigate('/chat/search')
   }
   const openRun = (runId: string) => {
     setSelectedRunId(runId)
@@ -1535,6 +1643,31 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
     }
   }
 
+  const updateSearchFilters = (input: {
+    channelId?: string
+    query?: string
+    sender?: string
+    sort?: SearchSort
+    time?: SearchTimeFilter
+  }) => {
+    const next = {
+      channelId: 'channelId' in input ? input.channelId : searchSelectedChannelId,
+      query: 'query' in input ? (input.query ?? '') : searchQuery,
+      sender: 'sender' in input ? input.sender : searchSelectedSender,
+      sort: 'sort' in input ? (input.sort ?? 'relevant') : searchSort,
+      time: 'time' in input ? (input.time ?? 'any') : searchTime,
+    }
+
+    setSearchSelectedChannelId(next.channelId)
+    setSearchQuery(next.query)
+    setSearchSelectedSender(next.sender)
+    setSearchSort(next.sort)
+    setSearchTime(next.time)
+
+    const path = searchRoutePath(next)
+    window.history.pushState({}, '', path)
+  }
+
   if (authLoading) {
     return (
       <main className="grid min-h-screen content-center gap-6 bg-[var(--cds-background)] p-12" aria-label="Loading workspace">
@@ -1592,6 +1725,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
             activeConversationId={activeConversationId}
             unreadCounts={unreadByConversationId}
             savedOpen={savedOpen}
+            onOpenSearch={openSearch}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
             onOpenActivity={() => navigateToView('runs')}
@@ -1607,55 +1741,81 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               void selectAgentConversation(agentId)
             }}
           />
-          <ChannelWorkspace
-            activeConversation={activeConversation}
-            messages={activeConversationMessages}
-            goals={activeConversationGoals}
-            artifacts={activeConversationArtifacts}
-            agents={agents}
-            user={user}
-            prompt={prompt}
-            isCreatingRun={isCreatingRun}
-            runError={runError ?? agentError}
-            readyAgentCount={readyAgentCount}
-            canEditConversation={canEditActiveConversation}
-            setPrompt={updatePrompt}
-            submitRun={submitRun}
-            openCreateAgent={() => openCreateAgent()}
-            openAgentConversation={(agentId) => {
-              void selectAgentConversation(agentId)
-            }}
-            openEditConversation={openEditActiveConversation}
-            openArtifactEditor={openArtifactEditor}
-            openRun={openRun}
-            focusedGoalRoute={focusedGoalRoute}
-            taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
-            openGoalRoute={(goalId, taskIndex) => {
-              if (activeConversation?.id) {
-                openGoalRoute(activeConversation.id, goalId, taskIndex)
-              }
-            }}
-            openTasksRoute={() => {
-              if (activeConversation?.id) {
-                openTasksRoute(activeConversation.id)
-              }
-            }}
-            closeConversationRoute={() => {
-              if (activeConversation?.id) {
-                closeConversationRoute(activeConversation.id)
-              }
-            }}
-            openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
-            closeArtifactEditor={closeArtifactEditor}
-            activeEditorArtifactId={editorRoute?.artifactId ?? null}
-            editorConversationId={editorRoute?.conversationId ?? null}
-            onActiveEditorArtifactChange={openArtifactEditor}
-            refreshArtifacts={() => {
-              if (activeConversation?.id) {
-                void loadArtifacts(activeConversation.id)
-              }
-            }}
-          />
+          {isSearchRoute ? (
+            <SearchWorkspace
+              agents={agents}
+              conversations={conversations}
+              error={searchError}
+              isLoading={isSearchLoading}
+              query={searchQuery}
+              results={searchResults}
+              selectedChannelId={searchSelectedChannelId}
+              selectedSender={searchSelectedSender}
+              sort={searchSort}
+              time={searchTime}
+              onChannelChange={(value) => updateSearchFilters({ channelId: value })}
+              onOpenConversation={(conversationId) => {
+                selectConversation(conversationId)
+              }}
+              onOpenMessage={(conversationId) => {
+                selectConversation(conversationId)
+              }}
+              onQueryChange={(value) => updateSearchFilters({ query: value })}
+              onSenderChange={(value) => updateSearchFilters({ sender: value })}
+              onSortChange={(value) => updateSearchFilters({ sort: value })}
+              onTimeChange={(value) => updateSearchFilters({ time: value })}
+            />
+          ) : (
+            <ChannelWorkspace
+              activeConversation={activeConversation}
+              messages={activeConversationMessages}
+              goals={activeConversationGoals}
+              artifacts={activeConversationArtifacts}
+              agents={agents}
+              user={user}
+              prompt={prompt}
+              isCreatingRun={isCreatingRun}
+              runError={runError ?? agentError}
+              readyAgentCount={readyAgentCount}
+              canEditConversation={canEditActiveConversation}
+              setPrompt={updatePrompt}
+              submitRun={submitRun}
+              openCreateAgent={() => openCreateAgent()}
+              openAgentConversation={(agentId) => {
+                void selectAgentConversation(agentId)
+              }}
+              openEditConversation={openEditActiveConversation}
+              openArtifactEditor={openArtifactEditor}
+              openRun={openRun}
+              focusedGoalRoute={focusedGoalRoute}
+              taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+              openGoalRoute={(goalId, taskIndex) => {
+                if (activeConversation?.id) {
+                  openGoalRoute(activeConversation.id, goalId, taskIndex)
+                }
+              }}
+              openTasksRoute={() => {
+                if (activeConversation?.id) {
+                  openTasksRoute(activeConversation.id)
+                }
+              }}
+              closeConversationRoute={() => {
+                if (activeConversation?.id) {
+                  closeConversationRoute(activeConversation.id)
+                }
+              }}
+              openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
+              closeArtifactEditor={closeArtifactEditor}
+              activeEditorArtifactId={editorRoute?.artifactId ?? null}
+              editorConversationId={editorRoute?.conversationId ?? null}
+              onActiveEditorArtifactChange={openArtifactEditor}
+              refreshArtifacts={() => {
+                if (activeConversation?.id) {
+                  void loadArtifacts(activeConversation.id)
+                }
+              }}
+            />
+          )}
         </>
       ) : activeView === 'daemon' ? (
         <DaemonPage

@@ -150,6 +150,9 @@ export type ConversationArtifactActionStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+export type SearchSort = 'relevant' | 'recent'
+export type SearchTimeFilter = 'any' | '24h' | '7d' | '30d'
+export type SearchSenderType = 'user' | 'agent' | 'system'
 
 export interface Conversation {
   id: string
@@ -292,6 +295,45 @@ export interface ConversationMessageAttachment {
   type: 'image'
   artifact: ConversationArtifact
   createdAt: string
+}
+
+export interface ConversationSearchHit {
+  type: 'conversation'
+  conversationId: string
+  conversationType: ConversationType
+  title: string
+  subtitle: string
+  matchedFields: Array<'title' | 'description' | 'agentName' | 'agentDescription'>
+  updatedAt: string
+}
+
+export interface MessageSearchHit {
+  type: 'message'
+  conversationId: string
+  messageId: string
+  senderType: SearchSenderType
+  senderAgentId?: string
+  senderLabel: string
+  conversationLabel: string
+  snippet: string
+  matchedFields: Array<'content' | 'senderName' | 'conversationTitle'>
+  createdAt: string
+}
+
+export interface SearchConversationsResponse {
+  query: string
+  filters: {
+    channelId?: string
+    senderAgentId?: string
+    senderType?: SearchSenderType
+    timeFilter: SearchTimeFilter
+    sort: SearchSort
+    limit: number
+    scope: ConversationStatus
+  }
+  conversationHits: ConversationSearchHit[]
+  messageHits: MessageSearchHit[]
+  totalCount: number
 }
 
 export type SendConversationMessageMode = 'chat' | 'task'

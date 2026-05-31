@@ -44,7 +44,7 @@ import {
   type User,
   type WorkspaceView,
 } from '../lib/api'
-import { searchRoutePath } from '../lib/search-route'
+import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
 import type { GoalRouteState } from '../App'
@@ -168,6 +168,10 @@ function getMessageSenderName(message: ConversationMessage, agents: AgentDetails
   return message.senderType === 'system' ? 'AgentHub' : 'Agent'
 }
 
+function readCurrentSearchRouteState() {
+  return getSearchRouteState(`${window.location.pathname}${window.location.search}`)
+}
+
 function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): LocalRun {
   const runAgent = agents.find((agent) => agent.agent.id === summary.run.agentId)
 
@@ -188,6 +192,7 @@ interface WorkspacePageProps {
 }
 
 export function WorkspacePage({ route, chatConversationId = null, goalRoute = null, editorRoute = null, navigate }: WorkspacePageProps) {
+  const initialSearchRouteState = readCurrentSearchRouteState()
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -225,11 +230,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(undefined)
-  const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(undefined)
-  const [searchSort, setSearchSort] = useState<SearchSort>('relevant')
-  const [searchTime, setSearchTime] = useState<SearchTimeFilter>('any')
+  const [searchQuery, setSearchQuery] = useState(initialSearchRouteState.query)
+  const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(initialSearchRouteState.channelId)
+  const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(initialSearchRouteState.sender)
+  const [searchSort, setSearchSort] = useState<SearchSort>(initialSearchRouteState.sort)
+  const [searchTime, setSearchTime] = useState<SearchTimeFilter>(initialSearchRouteState.time)
   const [searchResults, setSearchResults] = useState<SearchConversationsResponse | null>(null)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [isSearchLoading, setIsSearchLoading] = useState(false)
@@ -694,17 +699,17 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
 
     const trimmedQuery = searchQuery.trim()
     if (trimmedQuery.length === 0) {
-      setSearchResults(null)
-      setSearchError(null)
-      setIsSearchLoading(false)
       return
     }
 
     let active = true
-    setIsSearchLoading(true)
-    setSearchError(null)
 
     const timer = window.setTimeout(() => {
+      if (!active) {
+        return
+      }
+      setIsSearchLoading(true)
+      setSearchError(null)
       void (async () => {
         try {
           const params = new URLSearchParams()
@@ -761,13 +766,23 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
       return
     }
 
-    const params = new URLSearchParams(window.location.search)
-    setSearchQuery(params.get('q') ?? '')
-    setSearchSelectedChannelId(params.get('channelId') ?? undefined)
-    setSearchSelectedSender(params.get('sender') ?? undefined)
-    setSearchSort(params.get('sort') === 'recent' ? 'recent' : 'relevant')
-    const time = params.get('time')
-    setSearchTime(time === '24h' || time === '7d' || time === '30d' ? time : 'any')
+    const onPopState = () => {
+      const next = readCurrentSearchRouteState()
+      setSearchQuery(next.query)
+      setSearchSelectedChannelId(next.channelId)
+      setSearchSelectedSender(next.sender)
+      setSearchSort(next.sort)
+      setSearchTime(next.time)
+
+      if (next.query.trim().length === 0) {
+        setSearchResults(null)
+        setSearchError(null)
+        setIsSearchLoading(false)
+      }
+    }
+
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
   }, [isSearchRoute])
 
   useEffect(() => {
@@ -1663,6 +1678,12 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
     setSearchSelectedSender(next.sender)
     setSearchSort(next.sort)
     setSearchTime(next.time)
+
+    if (next.query.trim().length === 0) {
+      setSearchResults(null)
+      setSearchError(null)
+      setIsSearchLoading(false)
+    }
 
     const path = searchRoutePath(next)
     window.history.pushState({}, '', path)

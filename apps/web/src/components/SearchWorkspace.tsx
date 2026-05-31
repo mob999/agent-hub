@@ -121,11 +121,11 @@ export function SearchWorkspace({
           <span className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-02)]">
             <Search size={18} />
           </span>
-          <label className="grid min-w-0 flex-1 gap-1">
-            <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">Search</span>
+          <label className="flex min-w-0 flex-1 items-center gap-3 max-[671px]:items-start max-[671px]:gap-2 max-[671px]:flex-col">
+            <span className="shrink-0 text-sm font-semibold text-[var(--cds-text-secondary)]">Search</span>
             <input
               ref={inputRef}
-              className="min-w-0 border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] px-3 py-2 text-base text-[var(--cds-text-primary)] outline-none focus:border-[var(--cds-focus)]"
+              className="min-w-0 flex-1 self-stretch border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] px-3 py-2 text-base text-[var(--cds-text-primary)] outline-none focus:border-[var(--cds-focus)]"
               placeholder="Search channels, DMs, messages..."
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}

@@ -95,6 +95,22 @@ export interface AgentDetails {
   workspace: AgentWorkspace
 }
 
+export type AgentMemoryScope = 'long_term' | 'daily' | 'transcript'
+
+export interface AgentMemoryFile {
+  content: string
+  exists: boolean
+  file: string
+  label: string
+  scope: AgentMemoryScope
+}
+
+export interface AgentMemoryResponse {
+  date: string
+  files: AgentMemoryFile[]
+  workspaceReady: boolean
+}
+
 export interface UpdateAgentRequest {
   name: string
   description?: string
@@ -132,7 +148,16 @@ export type ConversationType = 'group' | 'direct'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
-export type ConversationTaskStatus = 'created' | 'assigned' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type ConversationGoalStatus = 'active' | 'completed' | 'cancelled' | 'failed'
+export type ConversationGoalTaskStatus =
+  | 'waiting'
+  | 'ready'
+  | 'assigned'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'blocked'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
 export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
 export type ConversationArtifactActionStatus =
@@ -141,6 +166,9 @@ export type ConversationArtifactActionStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+export type SearchSort = 'relevant' | 'recent'
+export type SearchTimeFilter = 'any' | '24h' | '7d' | '30d'
+export type SearchSenderType = 'user' | 'agent' | 'system'
 
 export interface Conversation {
   id: string
@@ -158,23 +186,41 @@ export interface Conversation {
   lastMessageAt?: string
 }
 
-export interface ConversationTask {
+export interface ConversationGoalTask {
   id: string
-  ownerUserId: string
-  conversationId: string
-  creatorRunId: string
-  orchestratorAgentId: string
+  goalId: string
+  index: number
   assigneeAgentId: string
   assigneeRunId?: string
   dispatchMessageId?: string
   title: string
   description?: string
-  status: ConversationTaskStatus
+  status: ConversationGoalTaskStatus
+  dependsOnTaskIndexes?: number[]
+  blockedReason?: string
   summary?: string
   resultArtifactIds?: string[]
   artifacts?: ConversationArtifact[]
   completedAt?: string
-  finalizerRunId?: string
+  checkpointRunId?: string
+  webUrl?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationGoal {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  orchestratorAgentId: string
+  initialRunId: string
+  title: string
+  description?: string
+  status: ConversationGoalStatus
+  summary?: string
+  tasks: ConversationGoalTask[]
+  completedAt?: string
+  webUrl?: string
   createdAt: string
   updatedAt: string
 }
@@ -183,7 +229,9 @@ export interface ConversationArtifact {
   id: string
   ownerUserId: string
   conversationId: string
-  taskId?: string
+  goalId?: string
+  goalTaskId?: string
+  taskIndex?: number
   runId: string
   creatorAgentId: string
   status: ConversationArtifactStatus
@@ -222,6 +270,22 @@ export interface ConversationArtifactAction {
   updatedAt: string
 }
 
+export interface ConversationDeployment {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  goalId?: string
+  taskIndex?: number
+  runId: string
+  creatorAgentId: string
+  title: string
+  entrypoint: string
+  status: 'ready' | 'failed' | 'deleted'
+  url?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact
   latestRevision?: ConversationArtifactRevision
@@ -251,23 +315,65 @@ export interface ConversationMessage {
   content: string
   status: ConversationMessageStatus
   error?: string
+  attachments?: ConversationMessageAttachment[]
   createdAt: string
   updatedAt: string
 }
 
-export type SendConversationMessageMode = 'chat' | 'task'
-
-export interface ConversationMention {
-  type: 'agent'
-  agentId: string
-  label?: string
+export interface ConversationMessageAttachment {
+  id: string
+  messageId: string
+  artifactId: string
+  type: 'image'
+  artifact: ConversationArtifact
+  createdAt: string
 }
+
+export interface ConversationSearchHit {
+  type: 'conversation'
+  conversationId: string
+  conversationType: ConversationType
+  title: string
+  subtitle: string
+  matchedFields: Array<'title' | 'description' | 'agentName' | 'agentDescription'>
+  updatedAt: string
+}
+
+export interface MessageSearchHit {
+  type: 'message'
+  conversationId: string
+  messageId: string
+  senderType: SearchSenderType
+  senderAgentId?: string
+  senderLabel: string
+  conversationLabel: string
+  snippet: string
+  matchedFields: Array<'content' | 'senderName' | 'conversationTitle'>
+  createdAt: string
+}
+
+export interface SearchConversationsResponse {
+  query: string
+  filters: {
+    channelId?: string
+    senderAgentId?: string
+    senderType?: SearchSenderType
+    timeFilter: SearchTimeFilter
+    sort: SearchSort
+    limit: number
+    scope: ConversationStatus
+  }
+  conversationHits: ConversationSearchHit[]
+  messageHits: MessageSearchHit[]
+  totalCount: number
+}
+
+export type SendConversationMessageMode = 'chat' | 'task'
 
 export interface SendConversationMessageRequest {
   content: string
   mode?: SendConversationMessageMode
   agentId?: string
-  mentions?: ConversationMention[]
 }
 
 export interface SendConversationMessageResponse {
@@ -382,8 +488,9 @@ export type RealtimeEvent =
       ownerUserId: string
       createdAt: string
       conversationId: string
-      taskId: string
-      task?: ConversationTask
+      goalId?: string
+      taskId?: string
+      goal?: ConversationGoal
     }
   | {
       type: 'artifact.created'

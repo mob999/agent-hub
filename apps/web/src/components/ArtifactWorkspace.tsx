@@ -1,5 +1,5 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
+import { Code, Document, FileDiff, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -209,6 +209,27 @@ function parseUnifiedDiff(content: string): {
   }
 }
 
+function ArtifactFileIcon({ fileInfo }: { fileInfo: ArtifactFileInfo }) {
+  switch (fileInfo.category) {
+    case 'html':
+      return <Html size={18} />
+    case 'markdown':
+      return <Document size={18} />
+    case 'diff':
+      return <FileDiff size={18} />
+    case 'image':
+      return <Image size={18} />
+    case 'text':
+      return fileInfo.language === 'json'
+        ? <Json size={18} />
+        : <Code size={18} />
+    case 'binary':
+      return fileInfo.label === 'Archive'
+        ? <Zip size={18} />
+        : <Document size={18} />
+  }
+}
+
 export function ArtifactWorkspace({
   artifacts,
   activeArtifactId,
@@ -262,7 +283,7 @@ export function ArtifactWorkspace({
           return
         }
 
-        setError(loadError instanceof ApiRequestError ? loadError.message : 'Unable to load artifact.')
+        setError(loadError instanceof ApiRequestError ? loadError.message : 'Unable to load file.')
       })
 
     return () => {
@@ -360,7 +381,7 @@ export function ArtifactWorkspace({
         method: 'POST',
         body: JSON.stringify({
           content: draft,
-          summary: 'Saved from Artifact workspace',
+          summary: 'Saved from Files workspace',
         }),
       })
       const detailsResponse = await apiRequest<ConversationArtifactDetails>(`/artifacts/${artifact.id}`)
@@ -408,7 +429,7 @@ export function ArtifactWorkspace({
     return (
       <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
         <Launch size={32} />
-        <h2 className="cds--type-heading-compact-02">No artifacts yet</h2>
+        <h2 className="cds--type-heading-compact-02">No files yet</h2>
         <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
           Agent reports, diffs, previews, and deployment records will appear here.
         </p>
@@ -421,12 +442,13 @@ export function ArtifactWorkspace({
       <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[1055px]:border-b max-[1055px]:border-r-0">
         <div className="border-b border-[var(--cds-border-subtle-01)] p-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
-            Artifacts ({artifacts.length})
+            Files ({artifacts.length})
           </h2>
         </div>
         <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
+            const itemFileInfo = inferArtifactFileInfo(item.filename)
 
             return (
               <button
@@ -439,8 +461,15 @@ export function ArtifactWorkspace({
                 }`}
                 onClick={() => onActiveArtifactChange?.(item.id)}
               >
-                <span className="truncate font-semibold">{item.title}</span>
-                <span className="truncate text-xs">{item.filename}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="grid size-5 shrink-0 place-items-center text-[var(--cds-icon-secondary)]">
+                    <ArtifactFileIcon fileInfo={itemFileInfo} />
+                  </span>
+                  <span className="truncate font-semibold">{item.filename}</span>
+                </span>
+                {item.title !== item.filename && (
+                  <span className="truncate pl-7 text-xs">{item.title}</span>
+                )}
               </button>
             )
           })}
@@ -503,7 +532,7 @@ export function ArtifactWorkspace({
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] p-3">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-[var(--cds-text-primary)]">
-              {artifact?.title ?? 'Artifact'}
+              {artifact?.title ?? 'File'}
             </h2>
             <p className="truncate text-sm text-[var(--cds-text-secondary)]">
               {artifact?.filename}
@@ -571,7 +600,7 @@ export function ArtifactWorkspace({
           {error && (
             <InlineNotification
               kind="error"
-              title="Artifact action failed"
+              title="File action failed"
               subtitle={error}
               lowContrast
               hideCloseButton
@@ -579,11 +608,11 @@ export function ArtifactWorkspace({
           )}
           {isLoading ? (
             <div className="grid h-full place-items-center">
-              <InlineLoading description="Loading artifact..." status="active" />
+              <InlineLoading description="Loading file..." status="active" />
             </div>
           ) : artifact === null ? (
             <div className="grid h-full min-h-0 place-items-center text-[var(--cds-text-secondary)]">
-              Select an artifact.
+              Select a file.
             </div>
           ) : fileInfo.category === 'html' ? (
             previewUrl ? (

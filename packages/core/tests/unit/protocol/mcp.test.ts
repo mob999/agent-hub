@@ -1,11 +1,20 @@
 import type {
+  AgentHubApproveTaskToolInput,
+  AgentHubCancelTaskToolInput,
+  AgentHubCompleteGoalToolInput,
+  AgentHubCompleteTaskToolInput,
+  AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
-  AgentHubCompleteTaskToolInput,
-  AgentHubListTasksToolResult,
+  AgentHubDeployStaticSiteToolInput,
+  AgentHubDeployStaticSiteToolResult,
+  AgentHubAppendMemoryToolInput,
+  AgentHubListArtifactsToolInput,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
-  AgentHubSendMessageToGroupToolInput,
-  AgentHubSendMessageToUserToolInput,
+  AgentHubReadMemoryToolInput,
+  AgentHubReadArtifactToolInput,
+  AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -20,62 +29,95 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
-      "send_message_to_group",
-      "send_message_to_user",
-      "list_tasks",
+      "list_goals",
+      "list_artifacts",
+      "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
+      "create_goal",
       "create_task",
-      "upload_artifact",
-      "complete_task",
+      "approve_task",
+      "cancel_task",
+      "complete_goal",
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
-      "send_message_to_group",
-      "send_message_to_user",
-      "list_tasks",
+      "list_goals",
+      "list_artifacts",
+      "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
       "upload_artifact",
+      "deploy_static_site",
       "complete_task",
     ]);
   });
 
-  it("expresses send_message with mentions and task ids", () => {
+  it("expresses send_message with targets and image attachments", () => {
     const input: AgentHubSendMessageToolInput = {
       content: "Deploying this to @Codex",
-      mentions: [
+      target: { type: "group", groupName: "Design" },
+      attachments: [
         {
-          type: "agent",
-          agentId: "00000000-0000-4000-8000-000000000001",
-          label: "Codex",
+          type: "image",
+          localPath: "artifacts/screenshot.png",
+          title: "Screenshot",
         },
       ],
-      taskIds: ["00000000-0000-4000-8000-000000000002"],
     };
 
-    expect(input.mentions?.[0]?.label).toBe("Codex");
-    expect(input.taskIds).toHaveLength(1);
+    expect(input.target).toEqual({ type: "group", groupName: "Design" });
+    expect(input.attachments?.[0]?.localPath).toBe("artifacts/screenshot.png");
   });
 
-  it("expresses list_tasks results with task ids", () => {
-    const result: AgentHubListTasksToolResult = {
+  it("expresses list_goals results with goal-local task indexes", () => {
+    const result: AgentHubListGoalsToolResult = {
       accepted: true,
-      tasks: [
+      goals: [
         {
-          id: "00000000-0000-4000-8000-000000000002",
-          title: "Write tests",
-          assigneeAgentId: "00000000-0000-4000-8000-000000000001",
-          status: "running",
+          id: "00000000-0000-4000-8000-000000000020",
+          ownerUserId: "00000000-0000-4000-8000-000000000021",
+          conversationId: "00000000-0000-4000-8000-000000000022",
+          orchestratorAgentId: "00000000-0000-4000-8000-000000000023",
+          initialRunId: "00000000-0000-4000-8000-000000000024",
+          title: "Ship report",
+          status: "active",
+          tasks: [
+            {
+              id: "00000000-0000-4000-8000-000000000002",
+              goalId: "00000000-0000-4000-8000-000000000020",
+              index: 0,
+              title: "Write tests",
+              assigneeAgentId: "00000000-0000-4000-8000-000000000001",
+              dependsOnTaskIndexes: [],
+              status: "running",
+              resultArtifactIds: [],
+              createdAt: "2026-05-26T00:00:00.000Z",
+              updatedAt: "2026-05-26T00:00:00.000Z",
+            },
+          ],
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z",
         },
       ],
     };
 
-    expect(result.tasks[0]?.id).toBe("00000000-0000-4000-8000-000000000002");
+    expect(result.goals[0]?.tasks[0]?.index).toBe(0);
   });
 
-  it("expresses create_task tool calls and results", () => {
+  it("expresses create_goal and create_task tool calls", () => {
+    const goalInput: AgentHubCreateGoalToolInput = {
+      title: "Ship report",
+      description: "Produce the final report.",
+    };
     const input: AgentHubCreateTaskToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
       title: "Write tests",
       description: "Cover the orchestrator dispatch path.",
       assigneeAgentId: "00000000-0000-4000-8000-000000000001",
-      taskId: "00000000-0000-4000-8000-000000000002",
+      dependsOnTaskIndexes: [0],
     };
     const call: AgentHubMcpToolCall = {
       runId: "00000000-0000-4000-8000-000000000003",
@@ -87,19 +129,87 @@ describe("AgentHub MCP protocol", () => {
     const result: AgentHubCreateTaskToolResult = {
       accepted: true,
       task: {
-        id: input.taskId,
+        id: "00000000-0000-4000-8000-000000000002",
+        goalId: input.goalId,
+        index: 1,
         title: input.title,
         assigneeAgentId: input.assigneeAgentId,
+        dependsOnTaskIndexes: input.dependsOnTaskIndexes,
+        status: "waiting",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
       },
     };
 
+    expect(goalInput.title).toBe("Ship report");
     expect(call.name).toBe("create_task");
-    expect(result.task.id).toBe(input.taskId);
+    expect(result.task.goalId).toBe(input.goalId);
+    expect(result.task.dependsOnTaskIndexes).toEqual(input.dependsOnTaskIndexes);
+  });
+
+  it("expresses goal task control tools", () => {
+    const approve: AgentHubApproveTaskToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 1,
+    };
+    const cancel: AgentHubCancelTaskToolInput = {
+      goalId: approve.goalId,
+      taskIndex: approve.taskIndex,
+      reason: "No longer needed.",
+    };
+    const complete: AgentHubCompleteGoalToolInput = {
+      goalId: approve.goalId,
+      summary: "Goal completed.",
+    };
+
+    expect(approve.taskIndex).toBe(cancel.taskIndex);
+    expect(complete.summary).toContain("completed");
+  });
+
+  it("expresses group workspace artifact tools scoped by goal", () => {
+    const list: AgentHubListArtifactsToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 0,
+      limit: 10,
+    };
+    const read: AgentHubReadArtifactToolInput = {
+      goalId: list.goalId,
+      artifactId: "00000000-0000-4000-8000-000000000011",
+    };
+
+    expect(list.limit).toBe(10);
+    expect(read.goalId).toBe(list.goalId);
+  });
+
+  it("expresses memory tools scoped to the current agent workspace", () => {
+    const append: AgentHubAppendMemoryToolInput = {
+      scope: "long_term",
+      title: "User preference",
+      content: "The user prefers concise implementation plans.",
+      tags: ["preference"],
+    };
+    const search: AgentHubSearchMemoryToolInput = {
+      query: "implementation plans",
+      scopes: ["long_term", "daily", "transcript"],
+      fromDate: "2026-06-01",
+      toDate: "2026-06-01",
+      limit: 5,
+    };
+    const read: AgentHubReadMemoryToolInput = {
+      scope: "transcript",
+      date: "2026-06-01",
+      maxBytes: 4096,
+    };
+
+    expect(append.scope).toBe("long_term");
+    expect(search.scopes).toContain("transcript");
+    expect(read.scope).toBe("transcript");
   });
 
   it("expresses upload_artifact and complete_task tool calls", () => {
     const uploadInput: AgentHubUploadArtifactToolInput = {
-      taskId: "00000000-0000-4000-8000-000000000010",
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 0,
       title: "Research report",
       localPath: "artifacts/report.md",
       filename: "report.md",
@@ -110,7 +220,8 @@ describe("AgentHub MCP protocol", () => {
         id: "00000000-0000-4000-8000-000000000011",
         ownerUserId: "00000000-0000-4000-8000-000000000012",
         conversationId: "00000000-0000-4000-8000-000000000013",
-        taskId: uploadInput.taskId,
+        goalId: uploadInput.goalId,
+        taskIndex: uploadInput.taskIndex,
         runId: "00000000-0000-4000-8000-000000000014",
         creatorAgentId: "00000000-0000-4000-8000-000000000015",
         status: "ready",
@@ -126,7 +237,8 @@ describe("AgentHub MCP protocol", () => {
       },
     };
     const completeInput: AgentHubCompleteTaskToolInput = {
-      taskId: uploadInput.taskId,
+      goalId: uploadInput.goalId,
+      taskIndex: uploadInput.taskIndex,
       summary: "Report uploaded.",
       artifactIds: [uploadResult.artifact.id],
     };
@@ -137,24 +249,57 @@ describe("AgentHub MCP protocol", () => {
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
   });
 
-  it("expresses cross-conversation message tools", () => {
-    const groupInput: AgentHubSendMessageToGroupToolInput = {
-      groupName: "#Design",
+  it("expresses deploy_static_site tool calls", () => {
+    const input: AgentHubDeployStaticSiteToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 0,
+      title: "Landing page",
+      localPath: "dist",
+      entrypoint: "index.html",
+    };
+    const result: AgentHubDeployStaticSiteToolResult = {
+      accepted: true,
+      deployment: {
+        id: "00000000-0000-4000-8000-000000000030",
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        goalId: input.goalId,
+        taskIndex: input.taskIndex,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        status: "ready",
+        title: input.title,
+        entrypoint: "index.html",
+        url: "http://localhost:3000/deployments/00000000-0000-4000-8000-000000000030/",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    };
+
+    expect(input.localPath).toBe("dist");
+    expect(result.deployment.url).toContain("/deployments/");
+  });
+
+  it("expresses cross-conversation messages through send_message target", () => {
+    const groupInput: AgentHubSendMessageToolInput = {
+      target: { type: "group", groupName: "#Design" },
       content: "I found something relevant for this group.",
     };
-    const userInput: AgentHubSendMessageToUserToolInput = {
+    const userInput: AgentHubSendMessageToolInput = {
+      target: { type: "user" },
       content: "I need your confirmation before continuing.",
     };
     const groupCall: AgentHubMcpToolCall = {
       runId: "00000000-0000-4000-8000-000000000003",
       toolCallId: "tool_group",
-      name: "send_message_to_group",
+      name: "send_message",
       input: groupInput,
       createdAt: "2026-05-26T00:00:00.000Z",
     };
 
-    expect(groupCall.name).toBe("send_message_to_group");
-    expect(groupInput.groupName).toBe("#Design");
+    expect(groupCall.name).toBe("send_message");
+    expect(groupInput.target).toEqual({ type: "group", groupName: "#Design" });
+    expect(userInput.target).toEqual({ type: "user" });
     expect(userInput.content).toContain("confirmation");
   });
 });

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -6,13 +8,13 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { loadApiEnv } from "@agent-hub/config";
 import { createDb } from "@agent-hub/db";
 import type {
-  AgentHubListTasksToolResult,
+  AgentHubListGoalsToolResult,
   AgentHubMcpToolName,
   Conversation,
+  ConversationGoal,
   ConversationMessage,
   RealtimeEvent,
   RunEvent,
-  ConversationTask,
   RuntimeKind,
 } from "@agent-hub/core";
 import {
@@ -28,7 +30,9 @@ import {
   createAgentProvisioningRecords,
   createAgentHubRedisClient,
   createLogger,
+  buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildRecentDirectMessagesPrompt,
   createRunRecord,
   buildConversationRunPrompt,
   createConversationArtifactAction,
@@ -40,6 +44,7 @@ import {
   enqueueAgentProvisioningJob,
   enqueueArtifactActionJob,
   enqueueRunJob,
+  enqueueMemoryAppendJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
@@ -47,17 +52,20 @@ import {
   getConversationArtifactForUser,
   getConversationArtifactContentForUser,
   getConversationArtifactDetailsForUser,
+  getConversationDeploymentFileForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
   listConversationArtifactsForUser,
-  listConversationTasksForUser,
+  listConversationDeploymentsForUser,
+  listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
   listAgentsForUser,
   listActiveAgentGroupContexts,
   listDaemonDevicesWithRuntimes,
+  listRecentDirectConversationMessagesForAgent,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
   groupConversationKeyFromTitle,
@@ -66,6 +74,8 @@ import {
   readArtifactContent,
   restoreAgentForUser,
   restoreGroupConversationForUser,
+  searchConversationsForUser,
+  resolveTextMentionedAgentIds,
   subscribeRealtimeEvents,
   toAgentRun,
   updateConversationOrchestrator,
@@ -231,21 +241,6 @@ function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && runtimeKinds.has(value as RuntimeKind);
 }
 
-function buildAgentInstructions(description: string | undefined): string | undefined {
-  const trimmedDescription = description?.trim();
-
-  if (trimmedDescription === undefined || trimmedDescription.length === 0) {
-    return undefined;
-  }
-
-  return [
-    "AgentHub agent profile:",
-    "Follow this agent profile when responding.",
-    "",
-    trimmedDescription,
-  ].join("\n");
-}
-
 function isValidAgentIdList(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
@@ -256,32 +251,6 @@ function isValidAgentIdList(value: unknown): value is string[] {
     ) &&
     new Set(value).size === value.length
   );
-}
-
-function parseMentionedAgentIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const agentIds = value.flatMap((mention) => {
-    if (
-      typeof mention !== "object" ||
-      mention === null ||
-      Array.isArray(mention)
-    ) {
-      return [];
-    }
-
-    const record = mention as Record<string, unknown>;
-
-    return record.type === "agent" &&
-      typeof record.agentId === "string" &&
-      uuidPattern.test(record.agentId)
-      ? [record.agentId]
-      : [];
-  });
-
-  return [...new Set(agentIds)];
 }
 
 function parseOptionalAgentId(value: unknown): string | undefined {
@@ -300,6 +269,86 @@ function parseRecordStatusFilter(
   return value === "active" || value === "archived" || value === "all"
     ? value
     : null;
+}
+
+function parseSearchSort(value: unknown): "relevant" | "recent" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "relevant" || value === "recent" ? value : null;
+}
+
+function parseSearchTimeFilter(
+  value: unknown,
+): "any" | "24h" | "7d" | "30d" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "any" || value === "24h" || value === "7d" || value === "30d"
+    ? value
+    : null;
+}
+
+function parseSenderType(
+  value: unknown,
+): "user" | "agent" | "system" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "user" || value === "agent" || value === "system"
+    ? value
+    : null;
+}
+
+const memoryDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function todayUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function readAgentMemoryFile(input: {
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+  workspacePath: string;
+}): Promise<{
+  content: string;
+  exists: boolean;
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+}> {
+  const fullPath = path.join(input.workspacePath, input.file);
+
+  try {
+    return {
+      content: await readFile(fullPath, "utf8"),
+      exists: true,
+      file: input.file.replace(/\\/g, "/"),
+      label: input.label,
+      scope: input.scope,
+    };
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return {
+        content: "",
+        exists: false,
+        file: input.file.replace(/\\/g, "/"),
+        label: input.label,
+        scope: input.scope,
+      };
+    }
+
+    throw error;
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -397,22 +446,116 @@ function groupChatMcpToolsForAgent(input: {
     : [...agentHubNonOrchestratorMcpTools];
 }
 
-function toMcpTaskList(
-  tasks: ConversationTask[],
-): AgentHubListTasksToolResult["tasks"] {
-  return tasks.map((task) => ({
-    id: task.id,
-    title: task.title,
-    assigneeAgentId: task.assigneeAgentId,
-    assigneeRunId: task.assigneeRunId,
-    description: task.description,
-    status: task.status,
-    summary: task.summary,
+function toMcpGoalList(
+  goals: ConversationGoal[],
+): AgentHubListGoalsToolResult["goals"] {
+  return goals.map((goal) => ({
+    ...goal,
+    tasks: goal.tasks.map((task) => ({ ...task })),
   }));
+}
+
+function conversationMessageCompressionRole(
+  message: ConversationMessage,
+  agentNamesById: Record<string, string>,
+): string {
+  if (message.senderType === "user") {
+    return "User";
+  }
+
+  if (message.senderType === "agent") {
+    return message.senderAgentId === undefined
+      ? "Agent"
+      : agentNamesById[message.senderAgentId] ?? "Agent";
+  }
+
+  return "System";
+}
+
+function buildCompressibleConversationText(
+  messages: ConversationMessage[],
+  agentNamesById: Record<string, string>,
+): string {
+  const history = messages
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) =>
+      [
+        `${conversationMessageCompressionRole(message, agentNamesById)}:`,
+        message.content.trim(),
+      ].join("\n")
+    );
+
+  return [
+    "Summarize the older AgentHub conversation history below for future context.",
+    "Preserve user goals, decisions, constraints, open questions, task/artifact references, and agent responsibilities.",
+    "Write a concise Markdown memory entry. Do not produce a visible chat reply.",
+    "",
+    "<older_conversation_history>",
+    history.join("\n\n"),
+    "</older_conversation_history>",
+  ].join("\n");
+}
+
+function applyContextCompressionToJob(
+  job: RunQueueJob,
+  input: {
+    agentNamesById: Record<string, string>;
+    currentUserMessage: string;
+    messages: ConversationMessage[];
+  },
+): RunQueueJob {
+  const recentMessageCount = 20;
+
+  if (input.messages.length <= recentMessageCount) {
+    return job;
+  }
+
+  const olderMessages = input.messages.slice(0, -recentMessageCount);
+  const recentMessages = input.messages.slice(-recentMessageCount);
+  const compressibleText = buildCompressibleConversationText(
+    olderMessages,
+    input.agentNamesById,
+  );
+
+  if (compressibleText.length < env.AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD) {
+    return job;
+  }
+
+  const fullConversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
+    currentUserMessage: input.currentUserMessage,
+    messages: input.messages,
+  });
+  const recentConversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
+    currentUserMessage: input.currentUserMessage,
+    messages: recentMessages,
+  });
+  const compactedConversationPrompt = [
+    "<compressed_older_context>",
+    "{{compressed_context}}",
+    "</compressed_older_context>",
+    "",
+    recentConversationPrompt,
+  ].join("\n");
+  const promptTemplate = job.prompt.includes(fullConversationPrompt)
+    ? job.prompt.replace(fullConversationPrompt, compactedConversationPrompt)
+    : [job.prompt, "", compactedConversationPrompt].join("\n");
+
+  return {
+    ...job,
+    prompt: promptTemplate.replace("{{compressed_context}}", "(pending context compression)"),
+    contextCompression: {
+      compressibleText,
+      promptTemplate,
+      thresholdChars: env.AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD,
+    },
+  };
 }
 
 async function buildAgentGroupsPromptForAgent(input: {
   agentId: string;
+  currentConversationId?: string;
   ownerUserId: string;
 }): Promise<string> {
   return buildAgentGroupsPrompt(
@@ -420,17 +563,23 @@ async function buildAgentGroupsPromptForAgent(input: {
       agentId: input.agentId,
       ownerUserId: input.ownerUserId,
     }),
+    { currentConversationId: input.currentConversationId },
   );
 }
 
 function buildGroupChatAgentInstructions(input: {
-  agentInstructions?: string;
+  agentIdentityInstructions: string;
   conversationTitle: string;
+  isOrchestrator?: boolean;
 }): string {
   return [
-    input.agentInstructions,
+    input.agentIdentityInstructions,
     `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
+    input.isOrchestrator === true
+      ? "You are the configured Orchestrator for this group, even in Chat mode."
+      : undefined,
     "Visible group replies must be sent with the AgentHub MCP tool send_message.",
+    "For ordinary replies or progress updates, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "Do not answer a group chat by writing normal assistant text.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -442,6 +591,8 @@ function buildGroupChatRunPrompt(input: {
   agentName: string;
   conversationTitle: string;
   currentUserMessage: string;
+  directMessagesPrompt?: string;
+  isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
   const conversationPrompt = buildConversationRunPrompt({
@@ -453,8 +604,15 @@ function buildGroupChatRunPrompt(input: {
   return [
     "<agenthub_group_chat_protocol>",
     `You are ${input.agentName} in #${input.conversationTitle}.`,
+    input.isOrchestrator === true
+      ? "You are the configured Orchestrator for this group, even in Chat mode."
+      : undefined,
+    input.isOrchestrator === true
+      ? "You may coordinate other agents by sending visible messages with @AgentName or @all, but only reply when useful."
+      : undefined,
     "Decide whether you should reply to the user's latest message.",
     "If you should reply, call the MCP tool send_message with { content: string }.",
+    "For ordinary replies, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "If the user explicitly asks you to reply, you should normally call send_message.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
@@ -462,20 +620,25 @@ function buildGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
+    input.directMessagesPrompt,
+    input.directMessagesPrompt === undefined ? undefined : "",
     conversationPrompt,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function buildGroupTaskOrchestratorInstructions(input: {
-  agentInstructions?: string;
+  agentIdentityInstructions: string;
   conversationTitle: string;
 }): string {
   return [
-    input.agentInstructions,
+    input.agentIdentityInstructions,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
-    "In Task mode, break the user's request into concrete tasks for group agents.",
-    "For each task, call create_task with { title, description, assigneeAgentId }.",
-    "After creating tasks, call send_message with a visible dispatch message that @mentions each assignee and includes the created taskIds.",
+    "In Task mode, first create a goal for the user's objective with create_goal.",
+    "Then create agent tasks under that goal with create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }).",
+    "Tasks without dependencies are dispatched immediately. Tasks with dependencies wait until upstream tasks succeed.",
+    "When a checkpoint run starts after a task completes, review the goal, then use approve_task to launch ready downstream tasks, create_task for follow-up or recovery tasks, cancel_task for obsolete tasks, and complete_goal only when the goal is done.",
+    "Use list_goals, list_artifacts, and read_artifact to inspect goal state and group workspace artifacts.",
+    "Use send_message only for progress updates, decisions, or final user-facing notes.",
     "Do not assign a task to yourself unless you are intentionally doing part of the work.",
   ].filter((line): line is string => line !== undefined && line.trim().length > 0)
     .join("\n\n");
@@ -489,17 +652,25 @@ function buildGroupTaskOrchestratorPrompt(input: {
   conversationTitle: string;
   currentUserMessage: string;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
+  orchestratorAgentId?: string;
 }): string {
   const conversationPrompt = buildConversationRunPrompt({
     agentNamesById: input.agentNamesById,
     currentUserMessage: input.currentUserMessage,
     messages: input.messages ?? [],
   });
-  const roster = input.agents.map((agent) =>
-    `- ${agent.agent.name}: ${agent.agent.id}${
-      agent.agent.description ? ` (${agent.agent.description})` : ""
-    }`,
-  );
+  const roster = input.agents.map((agent) => {
+    const description = agent.agent.description?.trim();
+    const role = agent.agent.id === input.orchestratorAgentId
+      ? " [Orchestrator]"
+      : "";
+
+    return `- @${agent.agent.name}${role}: ${agent.agent.id}; ${
+      description === undefined || description.length === 0
+        ? "No description provided."
+        : description
+    }`;
+  });
 
   return [
     "<agenthub_group_task_protocol>",
@@ -508,8 +679,12 @@ function buildGroupTaskOrchestratorPrompt(input: {
     ...roster,
     "",
     "Create tasks only for agents listed above.",
-    "create_task requires assigneeAgentId and returns a task id.",
-    "After creating tasks, call send_message with content, mentions, and taskIds so AgentHub can dispatch the assigned agents.",
+    "Start by calling create_goal({ title, description }) for the user's objective.",
+    "Then call create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }) for each agent task. Tasks without dependencies start immediately; dependent tasks wait until their dependencies succeed.",
+    "Ready downstream tasks do not start automatically. In checkpoint runs, call approve_task({ goalId, taskIndex }) after you review and decide to continue.",
+    "Use list_artifacts/read_artifact when later tasks need reports or files uploaded by earlier tasks.",
+    "Do not use send_message to dispatch tasks. Use send_message only for progress updates, decisions, or final notes.",
+    "Call complete_goal only after there are no waiting, ready, assigned, or running tasks.",
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
@@ -865,6 +1040,88 @@ app.get("/agents/:agentId", async (c) => {
   return c.json({ agent });
 });
 
+app.get("/agents/:agentId/memory", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const date = c.req.query("date") ?? todayUtcDate();
+  if (!memoryDatePattern.test(date)) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_MEMORY_DATE",
+          message: "date must use yyyy-mm-dd format.",
+        },
+      },
+      400,
+    );
+  }
+
+  const agent = await getAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (agent === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const workspacePath = agent.workspace.workspacePath;
+  if (workspacePath === undefined) {
+    return c.json({
+      date,
+      files: [],
+      workspaceReady: false,
+    });
+  }
+
+  const files = await Promise.all([
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "long_term",
+      label: "MEMORY.md",
+      file: "MEMORY.md",
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "daily",
+      label: `${date}.md`,
+      file: path.join("memory", `${date}.md`),
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "transcript",
+      label: `transcripts/${date}.md`,
+      file: path.join("memory", "transcripts", `${date}.md`),
+    }),
+  ]);
+
+  return c.json({
+    date,
+    files,
+    workspaceReady: true,
+  });
+});
+
 app.patch("/agents/:agentId", async (c) => {
   const user = c.get("user");
 
@@ -1000,6 +1257,67 @@ app.patch("/agents/:agentId/restore", async (c) => {
   }
 
   return c.json({ agent: result.agent });
+});
+
+app.use("/search", requireAuth);
+app.get("/search", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const query = c.req.query("query")?.trim() ?? "";
+  const channelId = c.req.query("channelId");
+  const senderAgentId = c.req.query("senderAgentId");
+  const senderType = parseSenderType(c.req.query("senderType"));
+  const sort = parseSearchSort(c.req.query("sort"));
+  const timeFilter = parseSearchTimeFilter(c.req.query("timeFilter"));
+  const limitRaw = c.req.query("limit");
+  const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
+
+  if (
+    query.length === 0 ||
+    query.length > 200 ||
+    (channelId !== undefined && !uuidPattern.test(channelId)) ||
+    (senderAgentId !== undefined && !uuidPattern.test(senderAgentId)) ||
+    senderType === null ||
+    sort === null ||
+    timeFilter === null ||
+    (limit !== undefined && (!Number.isFinite(limit) || limit <= 0))
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_SEARCH_REQUEST",
+          message:
+            "query (1-200) is required; optional channelId/senderAgentId must be UUID; senderType/sort/timeFilter must be valid.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json(
+    await searchConversationsForUser(db, {
+      ownerUserId: user.id,
+      query,
+      channelId,
+      senderAgentId,
+      senderType: senderType ?? undefined,
+      sort: sort ?? undefined,
+      timeFilter: timeFilter ?? undefined,
+      limit,
+    }),
+  );
 });
 
 app.use("/conversations", requireAuth);
@@ -1559,6 +1877,8 @@ app.get("/conversations/:conversationId/messages", async (c) => {
     ownerUserId: user.id,
     limit,
     before,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (messages === null) {
@@ -1591,14 +1911,14 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
     );
   }
 
-  const tasks = await listConversationTasksForUser(db, {
+  const goals = await listConversationGoalsForUser(db, {
     conversationId: c.req.param("conversationId"),
     ownerUserId: user.id,
     publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
     publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
-  if (tasks === null) {
+  if (goals === null) {
     return c.json(
       {
         error: {
@@ -1610,7 +1930,7 @@ app.get("/conversations/:conversationId/tasks", async (c) => {
     );
   }
 
-  return c.json({ tasks });
+  return c.json({ goals });
 });
 
 app.get("/conversations/:conversationId/artifacts", async (c) => {
@@ -1650,6 +1970,42 @@ app.get("/conversations/:conversationId/artifacts", async (c) => {
   return c.json({ artifacts });
 });
 
+app.get("/conversations/:conversationId/deployments", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const deployments = await listConversationDeploymentsForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (deployments === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ deployments });
+});
+
 app.post("/conversations/:conversationId/messages", async (c) => {
   const user = c.get("user");
 
@@ -1668,7 +2024,6 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agentId?: unknown;
     content?: unknown;
-    mentions?: unknown;
     mode?: unknown;
   };
   const content = typeof body.content === "string" ? body.content.trim() : "";
@@ -1723,7 +2078,6 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     typeof body.agentId === "string" && body.agentId.length > 0
       ? body.agentId
       : undefined;
-  const mentionedAgentIds = parseMentionedAgentIds(body.mentions);
   const now = new Date().toISOString();
   const priorMessages = await listConversationMessagesForUser(db, {
     conversationId: conversation.id,
@@ -1743,9 +2097,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const currentConversationTasks =
+  const currentConversationGoals =
     conversation.type === "group"
-      ? await listConversationTasksForUser(db, {
+      ? await listConversationGoalsForUser(db, {
           conversationId: conversation.id,
           ownerUserId: user.id,
           publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
@@ -1753,7 +2107,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         })
       : [];
 
-  if (currentConversationTasks === null) {
+  if (currentConversationGoals === null) {
     return c.json(
       {
         error: {
@@ -1765,10 +2119,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const agentHubMcpTasks = toMcpTaskList(currentConversationTasks);
+  const agentHubMcpGoals = toMcpGoalList(currentConversationGoals);
 
+  const userAgents = await listAgentsForUser(db, { ownerUserId: user.id });
   const agentNamesById = Object.fromEntries(
-    (await listAgentsForUser(db, { ownerUserId: user.id })).map((agent) => [
+    userAgents.map((agent) => [
       agent.agent.id,
       agent.agent.name,
     ]),
@@ -1798,7 +2153,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       agentId: runAgent.agent.id,
       ownerUserId: user.id,
     });
-    const job: RunQueueJob = {
+    const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: [
@@ -1809,9 +2164,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           messages: priorMessages,
         }),
       ].join("\n\n"),
-      agentInstructions: buildAgentInstructions(runAgent.agent.description),
+      agentInstructions: buildAgentIdentityInstructions({
+        agentDescription: runAgent.agent.description,
+        agentName: runAgent.agent.name,
+        scenario: "direct chat",
+      }),
       agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
-      agentHubMcpTasks,
+      agentHubMcpGoals,
       workspacePath: runAgent.workspacePath,
       run: {
         id: randomUUID(),
@@ -1822,7 +2181,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         updatedAt: now,
       },
       runtime: runAgent.runtime,
-    };
+    }, {
+      agentNamesById,
+      currentUserMessage: content,
+      messages: priorMessages,
+    });
     const result = await createUserMessageAndRun(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -1843,6 +2206,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     }
 
     const queueMessageId = await enqueueRunJob(redis, job);
+    await Promise.all(
+      result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
+    );
     const assistant = result.messages.assistant;
     await publishRealtimeEvents(
       realtimeEventsForCreatedRuns({
@@ -1873,6 +2239,12 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const groupAgentIds = conversation.agentIds ?? [];
+  const mentionedAgentIds = resolveTextMentionedAgentIds(
+    content,
+    userAgents
+      .filter((agent) => groupAgentIds.includes(agent.agent.id))
+      .map((agent) => ({ id: agent.agent.id, name: agent.agent.name })),
+  );
 
   if (mode === "task") {
     if (conversation.orchestratorAgentId === undefined) {
@@ -1931,9 +2303,10 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
     const agentGroupsPrompt = await buildAgentGroupsPromptForAgent({
       agentId: orchestrator.agent.id,
+      currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
-    const job: RunQueueJob = {
+    const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
       prompt: buildGroupTaskOrchestratorPrompt({
@@ -1944,13 +2317,20 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         conversationTitle: conversation.title,
         currentUserMessage: content,
         messages: priorMessages,
+        orchestratorAgentId: conversation.orchestratorAgentId,
       }),
       agentInstructions: buildGroupTaskOrchestratorInstructions({
-        agentInstructions: buildAgentInstructions(orchestrator.agent.description),
+        agentIdentityInstructions: buildAgentIdentityInstructions({
+          agentDescription: orchestrator.agent.description,
+          agentName: orchestrator.agent.name,
+          conversationTitle: conversation.title,
+          isOrchestrator: true,
+          scenario: "task orchestrator",
+        }),
         conversationTitle: conversation.title,
       }),
       agentHubMcpTools: [...agentHubAllMcpTools],
-      agentHubMcpTasks,
+      agentHubMcpGoals,
       workspacePath: orchestrator.workspacePath,
       run: {
         id: randomUUID(),
@@ -1961,7 +2341,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         updatedAt: now,
       },
       runtime: orchestrator.runtime,
-    };
+    }, {
+      agentNamesById,
+      currentUserMessage: content,
+      messages: priorMessages,
+    });
     const result = await createUserMessageAndRuns(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -1982,6 +2366,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     }
 
     const queueMessageId = await enqueueRunJob(redis, job);
+    await Promise.all(
+      result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
+    );
     await publishRealtimeEvents(
       realtimeEventsForCreatedRuns({
         conversation: result.conversation,
@@ -2054,40 +2441,68 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const jobs = await Promise.all(
-    runAgents.map(async (runAgent): Promise<RunQueueJob> => ({
-      conversationId: conversation.id,
-      daemonDeviceId: runAgent.daemonDeviceId,
-      prompt: buildGroupChatRunPrompt({
-        agentGroupsPrompt: await buildAgentGroupsPromptForAgent({
-          agentId: runAgent.agent.id,
-          ownerUserId: user.id,
+    runAgents.map(async (runAgent): Promise<RunQueueJob> => {
+      const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
+
+      return applyContextCompressionToJob({
+        conversationId: conversation.id,
+        daemonDeviceId: runAgent.daemonDeviceId,
+        prompt: buildGroupChatRunPrompt({
+          agentGroupsPrompt: await buildAgentGroupsPromptForAgent({
+            agentId: runAgent.agent.id,
+            currentConversationId: conversation.id,
+            ownerUserId: user.id,
+          }),
+          agentNamesById,
+          agentName: runAgent.agent.name,
+          conversationTitle: conversation.title,
+          currentUserMessage: content,
+          directMessagesPrompt: buildRecentDirectMessagesPrompt({
+            agentName: runAgent.agent.name,
+            agentNamesById,
+            messages: await listRecentDirectConversationMessagesForAgent(db, {
+              agentId: runAgent.agent.id,
+              limit: 20,
+              ownerUserId: user.id,
+              publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+              publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+            }),
+          }),
+          isOrchestrator,
+          messages: priorMessages,
         }),
+        agentInstructions: buildGroupChatAgentInstructions({
+          agentIdentityInstructions: buildAgentIdentityInstructions({
+            agentDescription: runAgent.agent.description,
+            agentName: runAgent.agent.name,
+            conversationTitle: conversation.title,
+            isOrchestrator,
+            scenario: "group chat",
+          }),
+          conversationTitle: conversation.title,
+          isOrchestrator,
+        }),
+        agentHubMcpTools: groupChatMcpToolsForAgent({
+          agentId: runAgent.agent.id,
+          orchestratorAgentId: conversation.orchestratorAgentId,
+        }),
+        agentHubMcpGoals,
+        workspacePath: runAgent.workspacePath,
+        run: {
+          id: randomUUID(),
+          agentId: runAgent.agent.id,
+          daemonDeviceId: runAgent.daemonDeviceId,
+          status: "queued",
+          createdAt: now,
+          updatedAt: now,
+        },
+        runtime: runAgent.runtime,
+      }, {
         agentNamesById,
-        agentName: runAgent.agent.name,
-        conversationTitle: conversation.title,
         currentUserMessage: content,
         messages: priorMessages,
-      }),
-      agentInstructions: buildGroupChatAgentInstructions({
-        agentInstructions: buildAgentInstructions(runAgent.agent.description),
-        conversationTitle: conversation.title,
-      }),
-      agentHubMcpTools: groupChatMcpToolsForAgent({
-        agentId: runAgent.agent.id,
-        orchestratorAgentId: conversation.orchestratorAgentId,
-      }),
-      agentHubMcpTasks,
-      workspacePath: runAgent.workspacePath,
-      run: {
-        id: randomUUID(),
-        agentId: runAgent.agent.id,
-        daemonDeviceId: runAgent.daemonDeviceId,
-        status: "queued",
-        createdAt: now,
-        updatedAt: now,
-      },
-      runtime: runAgent.runtime,
-    })),
+      });
+    }),
   );
   const result = await createUserMessageAndRuns(db, {
     ownerUserId: user.id,
@@ -2110,6 +2525,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
   const queueMessageIds = await Promise.all(
     jobs.map((job) => enqueueRunJob(redis, job)),
+  );
+  await Promise.all(
+    result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
   );
   await publishRealtimeEvents(
     realtimeEventsForCreatedRuns({
@@ -2316,6 +2734,114 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
       "content-type": fileInfo.mimeType,
     },
     status: 200,
+  });
+});
+
+async function deploymentResponse(input: {
+  deploymentId: string;
+  ownerUserId: string;
+  requestedPath?: string;
+}) {
+  const record = await getConversationDeploymentFileForUser(db, {
+    deploymentId: input.deploymentId,
+    ownerUserId: input.ownerUserId,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    requestedPath: input.requestedPath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (record === null) {
+    return previewUnavailableResponse({
+      message: "Deployment file was not found.",
+      status: 404,
+    });
+  }
+
+  const fileInfo = inferArtifactFileInfo({
+    filename: record.filename,
+  });
+  const body = record.content;
+  const arrayBuffer = body.buffer.slice(
+    body.byteOffset,
+    body.byteOffset + body.byteLength,
+  ) as ArrayBuffer;
+
+  return new Response(arrayBuffer, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": fileInfo.mimeType,
+    },
+    status: 200,
+  });
+}
+
+function getDeploymentRequestedPath(input: {
+  deploymentId: string;
+  requestUrl: string;
+}): string | undefined {
+  const pathname = new URL(input.requestUrl).pathname;
+  const prefix = `/deployments/${input.deploymentId}/`;
+
+  if (!pathname.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const requestedPath = pathname.slice(prefix.length);
+  return requestedPath.length === 0
+    ? undefined
+    : decodeURIComponent(requestedPath);
+}
+
+app.get("/deployments/:deploymentId", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const redirectUrl = new URL(c.req.url);
+  redirectUrl.pathname = `/deployments/${deploymentId}/`;
+  return c.redirect(redirectUrl.toString(), 302);
+});
+
+app.get("/deployments/:deploymentId/*", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  return deploymentResponse({
+    deploymentId,
+    ownerUserId: user.id,
+    requestedPath: getDeploymentRequestedPath({
+      deploymentId,
+      requestUrl: c.req.url,
+    }),
   });
 });
 
@@ -2619,7 +3145,11 @@ app.post("/runs", async (c) => {
 
     daemonDeviceId = runnableAgent.daemonDeviceId;
     workspacePath = runnableAgent.workspacePath;
-    agentInstructions = buildAgentInstructions(runnableAgent.agent.description);
+    agentInstructions = buildAgentIdentityInstructions({
+      agentDescription: runnableAgent.agent.description,
+      agentName: runnableAgent.agent.name,
+      scenario: "manual run",
+    });
     agentHubMcpTools = [...agentHubNonOrchestratorMcpTools];
     runPrompt = [
       await buildAgentGroupsPromptForAgent({
@@ -2681,6 +3211,11 @@ app.post("/runs", async (c) => {
     createdAt: now,
   });
   const queueMessageId = await enqueueRunJob(redis, job);
+  await Promise.all(
+    appendResult.memoryAppendJobs.map((memoryJob) =>
+      enqueueMemoryAppendJob(redis, memoryJob)
+    ),
+  );
   await publishRealtimeEvents(appendResult.realtimeEvents);
 
   return c.json(

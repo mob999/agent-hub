@@ -3,7 +3,8 @@ import type { AgentRun, RunId } from "./run.js";
 
 export type ConversationId = string;
 export type ConversationMessageId = string;
-export type ConversationTaskId = string;
+export type ConversationGoalId = string;
+export type ConversationGoalTaskId = string;
 export type ConversationArtifactId = string;
 
 export type ConversationType = "group" | "direct";
@@ -14,13 +15,20 @@ export type ConversationMessageStatus =
   | "streaming"
   | "failed"
   | "cancelled";
-export type ConversationTaskStatus =
-  | "created"
+export type ConversationGoalStatus =
+  | "active"
+  | "completed"
+  | "cancelled"
+  | "failed";
+export type ConversationGoalTaskStatus =
+  | "waiting"
+  | "ready"
   | "assigned"
   | "running"
   | "succeeded"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "blocked";
 export type ConversationArtifactStatus =
   | "pending"
   | "ready"
@@ -59,6 +67,7 @@ export interface ConversationMessage {
   content: string;
   status: ConversationMessageStatus;
   error?: string;
+  attachments?: ConversationMessageAttachment[];
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -67,7 +76,9 @@ export interface ConversationArtifact {
   id: ConversationArtifactId;
   ownerUserId: UserId;
   conversationId: ConversationId;
-  taskId?: ConversationTaskId;
+  goalId?: ConversationGoalId;
+  goalTaskId?: ConversationGoalTaskId;
+  taskIndex?: number;
   runId: RunId;
   creatorAgentId: AgentId;
   status: ConversationArtifactStatus;
@@ -81,8 +92,18 @@ export interface ConversationArtifact {
   updatedAt: IsoDateTime;
 }
 
+export interface ConversationMessageAttachment {
+  id: string;
+  messageId: ConversationMessageId;
+  artifactId: ConversationArtifactId;
+  type: "image";
+  artifact: ConversationArtifact;
+  createdAt: IsoDateTime;
+}
+
 export type ConversationArtifactRevisionId = string;
 export type ConversationArtifactActionId = string;
+export type ConversationDeploymentId = string;
 
 export interface ConversationArtifactRevision {
   id: ConversationArtifactRevisionId;
@@ -116,23 +137,57 @@ export interface ConversationArtifactDetails {
   availableActions: ConversationArtifactActionType[];
 }
 
-export interface ConversationTask {
-  id: ConversationTaskId;
+export interface ConversationDeployment {
+  id: ConversationDeploymentId;
   ownerUserId: UserId;
   conversationId: ConversationId;
-  creatorRunId: RunId;
-  orchestratorAgentId: AgentId;
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  runId: RunId;
+  creatorAgentId: AgentId;
+  title: string;
+  entrypoint: string;
+  status: "ready" | "failed" | "deleted";
+  url?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationGoalTask {
+  id: ConversationGoalTaskId;
+  goalId: ConversationGoalId;
+  index: number;
   assigneeAgentId: AgentId;
   assigneeRunId?: RunId;
   dispatchMessageId?: ConversationMessageId;
+  dependsOnTaskIndexes?: number[];
   title: string;
   description?: string;
-  status: ConversationTaskStatus;
+  status: ConversationGoalTaskStatus;
+  blockedReason?: string;
   summary?: string;
   resultArtifactIds?: ConversationArtifactId[];
   artifacts?: ConversationArtifact[];
   completedAt?: IsoDateTime;
-  finalizerRunId?: RunId;
+  checkpointRunId?: RunId;
+  webUrl?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationGoal {
+  id: ConversationGoalId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  orchestratorAgentId: AgentId;
+  initialRunId: RunId;
+  title: string;
+  description?: string;
+  status: ConversationGoalStatus;
+  summary?: string;
+  tasks: ConversationGoalTask[];
+  completedAt?: IsoDateTime;
+  webUrl?: string;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -187,8 +242,8 @@ export interface ListConversationMessagesResponse {
   messages: ConversationMessage[];
 }
 
-export interface ListConversationTasksResponse {
-  tasks: ConversationTask[];
+export interface ListConversationGoalsResponse {
+  goals: ConversationGoal[];
 }
 
 export interface ListConversationArtifactsResponse {
@@ -218,17 +273,10 @@ export interface CreateConversationArtifactActionResponse {
 
 export type SendConversationMessageMode = "chat" | "task";
 
-export interface ConversationMention {
-  type: "agent";
-  agentId: AgentId;
-  label?: string;
-}
-
 export interface SendConversationMessageRequest {
   content: string;
   mode?: SendConversationMessageMode;
   agentId?: AgentId;
-  mentions?: ConversationMention[];
 }
 
 export interface SendConversationMessageResponse {

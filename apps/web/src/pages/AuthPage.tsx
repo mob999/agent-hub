@@ -25,7 +25,13 @@ const authRedirectStorageKey = 'agenthub.auth.redirect'
 function readPendingAuthRedirect(): RoutePath | null {
   const value = window.sessionStorage.getItem(authRedirectStorageKey)
   const isChatConversationRoute = value?.startsWith('/chat/') === true &&
-    value.split('/').filter(Boolean).length === 2
+    (
+      [2, 4, 6].includes(value.split('/').filter(Boolean).length) ||
+      (
+        value.split('/').filter(Boolean).length === 3 &&
+        ['tasks', 'deployments'].includes(value.split('/').filter(Boolean)[2] ?? '')
+      )
+    )
   const isEditorRoute = value?.startsWith('/editor/') === true &&
     [2, 3].includes(value.split('/').filter(Boolean).length)
 

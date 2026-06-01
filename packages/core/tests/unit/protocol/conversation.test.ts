@@ -5,10 +5,10 @@ import type {
   ConversationArtifactRevision,
   CreateGroupConversationRequest,
   CreateGroupConversationResponse,
+  ConversationGoal,
   ConversationMessage,
   UpdateGroupConversationRequest,
   UpdateGroupConversationResponse,
-  ConversationTask,
 } from "../../../src/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -89,12 +89,14 @@ describe("conversation protocol", () => {
     expect(response.conversation.agentIds).toEqual(request.agentIds);
   });
 
-  it("expresses conversation tasks", () => {
+  it("expresses conversation goals and tasks", () => {
     const artifact: ConversationArtifact = {
       id: "00000000-0000-4000-8000-000000000020",
       ownerUserId: "00000000-0000-4000-8000-000000000011",
       conversationId: "00000000-0000-4000-8000-000000000012",
-      taskId: "00000000-0000-4000-8000-000000000010",
+      goalId: "00000000-0000-4000-8000-000000000099",
+      goalTaskId: "00000000-0000-4000-8000-000000000010",
+      taskIndex: 0,
       runId: "00000000-0000-4000-8000-000000000016",
       creatorAgentId: "00000000-0000-4000-8000-000000000015",
       status: "ready",
@@ -108,31 +110,46 @@ describe("conversation protocol", () => {
       createdAt: "2026-05-26T00:00:01.000Z",
       updatedAt: "2026-05-26T00:00:01.000Z",
     };
-    const task: ConversationTask = {
-      id: "00000000-0000-4000-8000-000000000010",
+    const goal: ConversationGoal = {
+      id: "00000000-0000-4000-8000-000000000099",
       ownerUserId: "00000000-0000-4000-8000-000000000011",
       conversationId: "00000000-0000-4000-8000-000000000012",
-      creatorRunId: "00000000-0000-4000-8000-000000000013",
+      initialRunId: "00000000-0000-4000-8000-000000000013",
       orchestratorAgentId: "00000000-0000-4000-8000-000000000014",
-      assigneeAgentId: "00000000-0000-4000-8000-000000000015",
-      assigneeRunId: "00000000-0000-4000-8000-000000000016",
-      dispatchMessageId: "00000000-0000-4000-8000-000000000017",
       title: "Build the page",
-      description: "Implement the task.",
       status: "succeeded",
       summary: "Built the page and uploaded a report.",
-      resultArtifactIds: [artifact.id],
-      artifacts: [artifact],
+      tasks: [
+        {
+          id: "00000000-0000-4000-8000-000000000010",
+          goalId: "00000000-0000-4000-8000-000000000099",
+          index: 0,
+          assigneeAgentId: "00000000-0000-4000-8000-000000000015",
+          assigneeRunId: "00000000-0000-4000-8000-000000000016",
+          dispatchMessageId: "00000000-0000-4000-8000-000000000017",
+          dependsOnTaskIndexes: [],
+          title: "Build the page",
+          description: "Implement the task.",
+          status: "succeeded",
+          summary: "Built the page and uploaded a report.",
+          resultArtifactIds: [artifact.id],
+          artifacts: [artifact],
+          completedAt: "2026-05-26T00:00:02.000Z",
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:01.000Z",
+        },
+      ],
       completedAt: "2026-05-26T00:00:02.000Z",
-      finalizerRunId: "00000000-0000-4000-8000-000000000021",
       createdAt: "2026-05-26T00:00:00.000Z",
       updatedAt: "2026-05-26T00:00:01.000Z",
     };
 
-    expect(task.status).toBe("succeeded");
-    expect(task.assigneeRunId).toBeDefined();
-    expect(task.artifacts?.[0]?.downloadUrl).toContain("/download");
-    expect(task.artifacts?.[0]?.editorUrl).toContain("/editor/");
+    expect(goal.status).toBe("succeeded");
+    expect(goal.id).toBe("00000000-0000-4000-8000-000000000099");
+    expect(goal.tasks[0]?.index).toBe(0);
+    expect(goal.tasks[0]?.assigneeRunId).toBeDefined();
+    expect(goal.tasks[0]?.artifacts?.[0]?.downloadUrl).toContain("/download");
+    expect(goal.tasks[0]?.artifacts?.[0]?.editorUrl).toContain("/editor/");
   });
 
   it("expresses artifact revisions and actions", () => {

@@ -4,7 +4,7 @@
   "private": true,
   "description": "AgentHub monorepo",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "node scripts/run-dev.mjs turbo dev",
     "build": "turbo build",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",

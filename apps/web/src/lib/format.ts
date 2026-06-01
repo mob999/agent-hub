@@ -5,10 +5,29 @@ export function formatTime(value: string | null | undefined): string {
     return 'Never'
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, '0')
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+export function formatMessageTime(value: string | null | undefined): string {
+  if (!value) {
+    return 'Never'
+  }
+
+  const date = new Date(value)
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const messageDayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const pad = (part: number) => String(part).padStart(2, '0')
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+
+  if (todayStart - messageDayStart === 24 * 60 * 60 * 1000) {
+    return `昨天 ${time}`
+  }
+
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`
 }
 
 export function runTagType(status: RunStatus): 'gray' | 'blue' | 'green' | 'red' | 'warm-gray' {
@@ -75,6 +94,14 @@ export function isDisplayRunEvent(event: RunEvent): boolean {
 export function eventMessageContent(event: RunEvent): string {
   if (event.type === 'message.delta') {
     return event.content ?? ''
+  }
+
+  return ''
+}
+
+export function eventLogLine(event: RunEvent): string {
+  if (event.type === 'log.line') {
+    return event.line ?? ''
   }
 
   return ''

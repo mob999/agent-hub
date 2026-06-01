@@ -8,13 +8,18 @@ import type {
   DaemonRuntime,
   DaemonClientMessage,
   DaemonServerMessage,
+  AgentHubMcpToolCall,
+  AgentHubMcpToolResult,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
+  AgentRunStaticSiteDeploy,
   RunId,
 } from "@agent-hub/core";
 import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
+import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
 import { CodexAdapter } from "./runtime/codex";
 import {
@@ -42,6 +47,12 @@ function send(ws: WebSocket, message: DaemonClientMessage): void {
   }
 }
 
+interface PendingDaemonRequest<T> {
+  resolve(result: T): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | undefined {
   try {
     return JSON.parse(data.toString()) as DaemonServerMessage;
@@ -53,6 +64,7 @@ function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | unde
 const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
+const mcpToolCallTimeoutMs = 30_000;
 
 async function handleArtifactAction(input: {
   env: ReturnType<typeof loadDaemonEnv>;
@@ -94,6 +106,10 @@ export async function startDaemon(): Promise<void> {
   const mcpRelay = new AgentHubMcpRelay();
   await mcpRelay.start();
   const adapter = new CodexAdapter({
+    dailyMemoryRefreshIntervalMs:
+      env.AGENTHUB_DAILY_MEMORY_REFRESH_INTERVAL_MINUTES * 60 * 1000,
+    dailyMemoryRefreshTranscriptMaxBytes:
+      env.AGENTHUB_DAILY_MEMORY_REFRESH_TRANSCRIPT_MAX_BYTES,
     executablePath: env.CODEX_EXECUTABLE_PATH,
     mcpRelay,
   });
@@ -106,8 +122,16 @@ export async function startDaemon(): Promise<void> {
   const abortControllers = new Map<RunId, AbortController>();
   const pendingArtifactUploads = new Map<
     string,
+    PendingDaemonRequest<AgentHubUploadArtifactToolResult>
+  >();
+  const pendingStaticSiteDeployments = new Map<
+    string,
+    PendingDaemonRequest<AgentHubDeployStaticSiteToolResult>
+  >();
+  const pendingMcpToolCalls = new Map<
+    string,
     {
-      resolve(result: AgentHubUploadArtifactToolResult): void;
+      resolve(result: AgentHubMcpToolResult): void;
       reject(error: Error): void;
       timer: ReturnType<typeof setTimeout>;
     }
@@ -156,6 +180,46 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
+    if (
+      message.type === "static_site.deploy.ack" ||
+      message.type === "static_site.deploy.rejected"
+    ) {
+      const pending = pendingStaticSiteDeployments.get(message.deploymentId);
+      if (pending === undefined) {
+        return;
+      }
+
+      clearTimeout(pending.timer);
+      pendingStaticSiteDeployments.delete(message.deploymentId);
+      if (message.type === "static_site.deploy.ack") {
+        pending.resolve({ accepted: true, deployment: message.deployment });
+      } else {
+        pending.reject(new Error(message.reason));
+      }
+      return;
+    }
+
+    if (
+      message.type === "agenthub.tool.call.result" ||
+      message.type === "agenthub.tool.call.rejected"
+    ) {
+      const pending = pendingMcpToolCalls.get(message.requestId);
+
+      if (pending === undefined) {
+        return;
+      }
+
+      clearTimeout(pending.timer);
+      pendingMcpToolCalls.delete(message.requestId);
+
+      if (message.type === "agenthub.tool.call.result") {
+        pending.resolve(message.result);
+      } else {
+        pending.reject(new Error(message.reason));
+      }
+      return;
+    }
+
     if (message.type === "artifact.action.assigned") {
       void (async () => {
         try {
@@ -182,6 +246,45 @@ export async function startDaemon(): Promise<void> {
           logger.error(
             { err: error, actionId: message.actionId },
             "Artifact action failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "memory.append") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(
+            env.AGENTHUB_WORKSPACE_ROOT,
+            message.workspacePath,
+          );
+          const result = await appendMemory({
+            workspacePath: message.workspacePath,
+            kind: message.kind,
+            title: message.title,
+            content: message.content,
+            tags: message.tags,
+            date: message.date,
+            dedupeKey: message.dedupeKey,
+          });
+          send(ws, {
+            type: "memory.appended",
+            requestId: message.requestId,
+            entryId: result.entryId,
+            file: result.file,
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "memory.append_failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Memory append failed",
           );
         }
       })();
@@ -299,7 +402,9 @@ export async function startDaemon(): Promise<void> {
           type: "artifact.upload",
           uploadId,
           runId: message.run.id,
-          taskId: upload.taskId,
+          goalId: upload.goalId,
+          taskIndex: upload.taskIndex,
+          messageTarget: upload.messageTarget,
           title: upload.title,
           filename: upload.filename,
           sizeBytes: upload.sizeBytes,
@@ -310,17 +415,75 @@ export async function startDaemon(): Promise<void> {
       });
     };
 
+    const callAgentHubMcpTool = (
+      call: AgentHubMcpToolCall,
+    ): Promise<AgentHubMcpToolResult> => {
+      const requestId = randomUUID();
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingMcpToolCalls.delete(requestId);
+          reject(new Error("AgentHub MCP tool call timed out."));
+        }, mcpToolCallTimeoutMs);
+
+        pendingMcpToolCalls.set(requestId, {
+          resolve,
+          reject,
+          timer,
+        });
+        send(ws, {
+          type: "agenthub.tool.call",
+          requestId,
+          call,
+          sentAt: nowIsoDateTime(),
+        });
+      });
+    };
+
+    const deployStaticSite = (
+      deployment: AgentRunStaticSiteDeploy,
+    ): Promise<AgentHubDeployStaticSiteToolResult> => {
+      const deploymentId = randomUUID();
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingStaticSiteDeployments.delete(deploymentId);
+          reject(new Error("Static site deployment timed out."));
+        }, artifactUploadTimeoutMs);
+
+        pendingStaticSiteDeployments.set(deploymentId, {
+          resolve,
+          reject,
+          timer,
+        });
+        send(ws, {
+          type: "static_site.deploy",
+          deploymentId,
+          runId: message.run.id,
+          goalId: deployment.goalId,
+          taskIndex: deployment.taskIndex,
+          title: deployment.title,
+          entrypoint: deployment.entrypoint,
+          files: deployment.files,
+          sentAt: nowIsoDateTime(),
+        });
+      });
+    };
+
     void (async () => {
       try {
         for await (const event of adapter.run({
           run: message.run,
           prompt: message.prompt,
+          contextCompression: message.contextCompression,
           agentInstructions: message.agentInstructions,
           workspacePath: message.workspacePath,
           runtime: message.runtime,
           agentHubMcpTools: message.agentHubMcpTools,
-          agentHubMcpTasks: message.agentHubMcpTasks,
+          agentHubMcpGoals: message.agentHubMcpGoals,
           uploadArtifact,
+          deployStaticSite,
+          callAgentHubMcpTool,
           abortSignal: abortController.signal,
         })) {
           send(ws, {
@@ -405,6 +568,16 @@ export async function startDaemon(): Promise<void> {
         clearTimeout(pending.timer);
         pendingArtifactUploads.delete(uploadId);
         pending.reject(new Error("Daemon websocket closed during artifact upload."));
+      }
+      for (const [deploymentId, pending] of pendingStaticSiteDeployments) {
+        clearTimeout(pending.timer);
+        pendingStaticSiteDeployments.delete(deploymentId);
+        pending.reject(new Error("Daemon websocket closed during static site deployment."));
+      }
+      for (const [requestId, pending] of pendingMcpToolCalls) {
+        clearTimeout(pending.timer);
+        pendingMcpToolCalls.delete(requestId);
+        pending.reject(new Error("Daemon websocket closed during MCP tool call."));
       }
 
       const nextReconnectDelayMs = reconnectDelayMs;

@@ -10,6 +10,7 @@ import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
+import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
 import {
   ApiRequestError,
@@ -23,26 +24,31 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
+  type ConversationDeployment,
+  type ConversationGoal,
   type ConversationMessage,
-  type ConversationTask,
   type CreateGroupConversationResponse,
   type DaemonDevice,
   type LocalRun,
   type RealtimeEvent,
-  type ConversationMention,
   type RuntimeKind,
   type RunEvent,
   type SendConversationMessageMode,
   type SendConversationMessageResponse,
   type RestoreAgentResponse,
   type RestoreGroupConversationResponse,
+  type SearchConversationsResponse,
+  type SearchSort,
+  type SearchTimeFilter,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
   type User,
   type WorkspaceView,
 } from '../lib/api'
+import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
+import type { ChatPanelRoute, GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
@@ -163,6 +169,10 @@ function getMessageSenderName(message: ConversationMessage, agents: AgentDetails
   return message.senderType === 'system' ? 'AgentHub' : 'Agent'
 }
 
+function readCurrentSearchRouteState() {
+  return getSearchRouteState(`${window.location.pathname}${window.location.search}`)
+}
+
 function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): LocalRun {
   const runAgent = agents.find((agent) => agent.agent.id === summary.run.agentId)
 
@@ -176,12 +186,24 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   chatConversationId?: string | null
+  chatPanelRoute?: ChatPanelRoute
+  focusedMessageId?: string | null
+  goalRoute?: GoalRouteState | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, chatConversationId = null, editorRoute = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({
+  route,
+  chatConversationId = null,
+  chatPanelRoute = null,
+  focusedMessageId = null,
+  goalRoute = null,
+  editorRoute = null,
+  navigate,
+}: WorkspacePageProps) {
+  const initialSearchRouteState = readCurrentSearchRouteState()
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
@@ -206,8 +228,9 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
-  const [tasksByConversation, setTasksByConversation] = useState<Record<string, ConversationTask[]>>({})
+  const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
+  const [deploymentsByConversation, setDeploymentsByConversation] = useState<Record<string, ConversationDeployment[]>>({})
   const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
   const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
@@ -219,6 +242,14 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState(initialSearchRouteState.query)
+  const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(initialSearchRouteState.channelId)
+  const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(initialSearchRouteState.sender)
+  const [searchSort, setSearchSort] = useState<SearchSort>(initialSearchRouteState.sort)
+  const [searchTime, setSearchTime] = useState<SearchTimeFilter>(initialSearchRouteState.time)
+  const [searchResults, setSearchResults] = useState<SearchConversationsResponse | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [isSearchLoading, setIsSearchLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
@@ -228,6 +259,7 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const conversationsRef = useRef<Conversation[]>([])
 
   const routeConversationId = editorRoute?.conversationId ?? chatConversationId
+  const isSearchRoute = route === '/chat/search'
   const activeView = workspaceViewFromRoute(route)
   const activeRunCount = useMemo(
     () =>
@@ -258,13 +290,26 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
     () => (activeConversationId === null ? [] : messagesByConversation[activeConversationId] ?? []),
     [activeConversationId, messagesByConversation],
   )
-  const activeConversationTasks = useMemo(
-    () => (activeConversationId === null ? [] : tasksByConversation[activeConversationId] ?? []),
-    [activeConversationId, tasksByConversation],
+  const activeConversationGoals = useMemo(
+    () => (activeConversationId === null ? [] : goalsByConversation[activeConversationId] ?? []),
+    [activeConversationId, goalsByConversation],
+  )
+  const focusedGoalRoute = useMemo(() =>
+    goalRoute !== null && goalRoute.conversationId === activeConversation?.id
+      ? { goalId: goalRoute.goalId, taskIndex: goalRoute.taskIndex }
+      : null,
+    [
+      activeConversation?.id,
+      goalRoute,
+    ],
   )
   const activeConversationArtifacts = useMemo(
     () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
     [activeConversationId, artifactsByConversation],
+  )
+  const activeConversationDeployments = useMemo(
+    () => (activeConversationId === null ? [] : deploymentsByConversation[activeConversationId] ?? []),
+    [activeConversationId, deploymentsByConversation],
   )
 
   const clearConversationUnread = useCallback((conversationId: string) => {
@@ -446,12 +491,12 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
 
   const loadTasks = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ tasks: ConversationTask[] }>(
+      const response = await apiRequest<{ goals: ConversationGoal[] }>(
         `/conversations/${conversationId}/tasks`,
       )
-      setTasksByConversation((current) => ({
+      setGoalsByConversation((current) => ({
         ...current,
-        [conversationId]: response.tasks,
+        [conversationId]: response.goals,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -468,6 +513,22 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
       setArtifactsByConversation((current) => ({
         ...current,
         [conversationId]: response.artifacts,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadDeployments = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
+        `/conversations/${conversationId}/deployments`,
+      )
+      setDeploymentsByConversation((current) => ({
+        ...current,
+        [conversationId]: response.deployments,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -664,6 +725,99 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   ])
 
   useEffect(() => {
+    if (!user || !isSearchRoute) {
+      return
+    }
+
+    const trimmedQuery = searchQuery.trim()
+    if (trimmedQuery.length === 0) {
+      return
+    }
+
+    let active = true
+
+    const timer = window.setTimeout(() => {
+      if (!active) {
+        return
+      }
+      setIsSearchLoading(true)
+      setSearchError(null)
+      void (async () => {
+        try {
+          const params = new URLSearchParams()
+          params.set('query', trimmedQuery)
+          params.set('sort', searchSort)
+          params.set('timeFilter', searchTime)
+          if (searchSelectedChannelId) {
+            params.set('channelId', searchSelectedChannelId)
+          }
+          if (searchSelectedSender === 'user') {
+            params.set('senderType', 'user')
+          } else if (searchSelectedSender) {
+            params.set('senderType', 'agent')
+            params.set('senderAgentId', searchSelectedSender)
+          }
+          const response = await apiRequest<SearchConversationsResponse>(`/search?${params.toString()}`)
+          if (!active) {
+            return
+          }
+          setSearchResults(response)
+        } catch (error) {
+          if (!active) {
+            return
+          }
+          if (error instanceof ApiRequestError) {
+            setSearchError(error.message)
+          } else {
+            setSearchError('Unable to search conversations.')
+          }
+        } finally {
+          if (active) {
+            setIsSearchLoading(false)
+          }
+        }
+      })()
+    }, 150)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    isSearchRoute,
+    searchQuery,
+    searchSelectedChannelId,
+    searchSelectedSender,
+    searchSort,
+    searchTime,
+    user,
+  ])
+
+  useEffect(() => {
+    if (!isSearchRoute) {
+      return
+    }
+
+    const onPopState = () => {
+      const next = readCurrentSearchRouteState()
+      setSearchQuery(next.query)
+      setSearchSelectedChannelId(next.channelId)
+      setSearchSelectedSender(next.sender)
+      setSearchSort(next.sort)
+      setSearchTime(next.time)
+
+      if (next.query.trim().length === 0) {
+        setSearchResults(null)
+        setSearchError(null)
+        setIsSearchLoading(false)
+      }
+    }
+
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [isSearchRoute])
+
+  useEffect(() => {
     if (!agents.some((agent) => agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')) {
       return
     }
@@ -690,7 +844,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
     mode: SendConversationMessageMode,
-    mentions: ConversationMention[],
   ) => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
@@ -738,9 +891,6 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           body: JSON.stringify({
             content: trimmedPrompt,
             mode,
-            ...(activeConversation.type === 'group' && mentions.length > 0
-              ? { mentions }
-              : {}),
           }),
         },
       )
@@ -963,15 +1113,15 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         }
       })
     }
-    const upsertTask = (task: ConversationTask) => {
-      setTasksByConversation((current) => {
-        const currentTasks = current[task.conversationId] ?? []
+    const upsertGoal = (goal: ConversationGoal) => {
+      setGoalsByConversation((current) => {
+        const currentGoals = current[goal.conversationId] ?? []
 
         return {
           ...current,
-          [task.conversationId]: [
-            task,
-            ...currentTasks.filter((item) => item.id !== task.id),
+          [goal.conversationId]: [
+            goal,
+            ...currentGoals.filter((item) => item.id !== goal.id),
           ],
         }
       })
@@ -1027,8 +1177,8 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
           upsertRunEvent(event)
           break
         case 'task.updated':
-          if (event.task !== undefined) {
-            upsertTask(event.task)
+          if (event.goal !== undefined) {
+            upsertGoal(event.goal)
           } else {
             void loadTasks(event.conversationId)
           }
@@ -1078,6 +1228,23 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
+  const openSearch = () => {
+    const path = searchRoutePath({
+      channelId: searchSelectedChannelId,
+      query: searchQuery,
+      sender: searchSelectedSender,
+      sort: searchSort,
+      time: searchTime,
+    })
+    window.history.pushState({}, '', path)
+    navigate('/chat/search')
+  }
+  const openRun = (runId: string) => {
+    setSelectedRunId(runId)
+    navigate('/runs')
+    void loadRuns()
+    void refreshRun(runId)
+  }
 
   const openConversationEditor = (conversationId: string, artifactId?: string | null) => {
     navigate(
@@ -1102,6 +1269,25 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
         ? '/chat'
         : `/chat/${encodeURIComponent(activeConversationId)}` as RoutePath,
     )
+  }
+  const openGoalRoute = (conversationId: string, goalId: string, taskIndex?: number | null) => {
+    navigate(
+      taskIndex === undefined || taskIndex === null
+        ? `/chat/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}` as RoutePath
+        : `/chat/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}/tasks/${taskIndex}` as RoutePath,
+    )
+  }
+  const openTasksRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
+  }
+  const openDeploymentsRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/deployments` as RoutePath)
+  }
+  const openMessageRoute = (conversationId: string, messageId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}` as RoutePath)
+  }
+  const closeConversationRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
   const selectConversation = (conversationId: string) => {
     if (activeConversationId !== conversationId) {
@@ -1510,6 +1696,37 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
     }
   }
 
+  const updateSearchFilters = (input: {
+    channelId?: string
+    query?: string
+    sender?: string
+    sort?: SearchSort
+    time?: SearchTimeFilter
+  }) => {
+    const next = {
+      channelId: 'channelId' in input ? input.channelId : searchSelectedChannelId,
+      query: 'query' in input ? (input.query ?? '') : searchQuery,
+      sender: 'sender' in input ? input.sender : searchSelectedSender,
+      sort: 'sort' in input ? (input.sort ?? 'relevant') : searchSort,
+      time: 'time' in input ? (input.time ?? 'any') : searchTime,
+    }
+
+    setSearchSelectedChannelId(next.channelId)
+    setSearchQuery(next.query)
+    setSearchSelectedSender(next.sender)
+    setSearchSort(next.sort)
+    setSearchTime(next.time)
+
+    if (next.query.trim().length === 0) {
+      setSearchResults(null)
+      setSearchError(null)
+      setIsSearchLoading(false)
+    }
+
+    const path = searchRoutePath(next)
+    window.history.pushState({}, '', path)
+  }
+
   if (authLoading) {
     return (
       <main className="grid min-h-screen content-center gap-6 bg-[var(--cds-background)] p-12" aria-label="Loading workspace">
@@ -1567,8 +1784,10 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
             activeConversationId={activeConversationId}
             unreadCounts={unreadByConversationId}
             savedOpen={savedOpen}
+            onOpenSearch={openSearch}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onOpenActivity={() => navigateToView('runs')}
             onRestoreAgent={(agentId) => {
               void restoreAgent(agentId)
             }}
@@ -1581,34 +1800,94 @@ export function WorkspacePage({ route, chatConversationId = null, editorRoute = 
               void selectAgentConversation(agentId)
             }}
           />
-          <ChannelWorkspace
-            activeConversation={activeConversation}
-            messages={activeConversationMessages}
-            tasks={activeConversationTasks}
-            artifacts={activeConversationArtifacts}
-            agents={agents}
-            user={user}
-            prompt={prompt}
-            isCreatingRun={isCreatingRun}
-            runError={runError ?? agentError}
-            readyAgentCount={readyAgentCount}
-            canEditConversation={canEditActiveConversation}
-            setPrompt={updatePrompt}
-            submitRun={submitRun}
-            openCreateAgent={() => openCreateAgent()}
-            openEditConversation={openEditActiveConversation}
-            openArtifactEditor={openArtifactEditor}
-            openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
-            closeArtifactEditor={closeArtifactEditor}
-            activeEditorArtifactId={editorRoute?.artifactId ?? null}
-            editorConversationId={editorRoute?.conversationId ?? null}
-            onActiveEditorArtifactChange={openArtifactEditor}
-            refreshArtifacts={() => {
-              if (activeConversation?.id) {
-                void loadArtifacts(activeConversation.id)
-              }
-            }}
-          />
+          {isSearchRoute ? (
+            <SearchWorkspace
+              agents={agents}
+              conversations={conversations}
+              error={searchError}
+              isLoading={isSearchLoading}
+              query={searchQuery}
+              results={searchResults}
+              selectedChannelId={searchSelectedChannelId}
+              selectedSender={searchSelectedSender}
+              sort={searchSort}
+              time={searchTime}
+              onChannelChange={(value) => updateSearchFilters({ channelId: value })}
+              onOpenConversation={(conversationId) => {
+                selectConversation(conversationId)
+              }}
+              onOpenMessage={(conversationId, messageId) => {
+                openMessageRoute(conversationId, messageId)
+              }}
+              onQueryChange={(value) => updateSearchFilters({ query: value })}
+              onSenderChange={(value) => updateSearchFilters({ sender: value })}
+              onSortChange={(value) => updateSearchFilters({ sort: value })}
+              onTimeChange={(value) => updateSearchFilters({ time: value })}
+            />
+          ) : (
+            <ChannelWorkspace
+              activeConversation={activeConversation}
+              messages={activeConversationMessages}
+              goals={activeConversationGoals}
+              artifacts={activeConversationArtifacts}
+              deployments={activeConversationDeployments}
+              agents={agents}
+              user={user}
+              prompt={prompt}
+              isCreatingRun={isCreatingRun}
+              runError={runError ?? agentError}
+              readyAgentCount={readyAgentCount}
+              canEditConversation={canEditActiveConversation}
+              setPrompt={updatePrompt}
+              submitRun={submitRun}
+              openCreateAgent={() => openCreateAgent()}
+              openAgentConversation={(agentId) => {
+                void selectAgentConversation(agentId)
+              }}
+              openEditConversation={openEditActiveConversation}
+              openArtifactEditor={openArtifactEditor}
+              openRun={openRun}
+              focusedGoalRoute={focusedGoalRoute}
+              focusedMessageId={focusedMessageId}
+              taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+              deploymentRouteActive={chatPanelRoute === 'deployments'}
+              openGoalRoute={(goalId, taskIndex) => {
+                if (activeConversation?.id) {
+                  openGoalRoute(activeConversation.id, goalId, taskIndex)
+                }
+              }}
+              openTasksRoute={() => {
+                if (activeConversation?.id) {
+                  openTasksRoute(activeConversation.id)
+                }
+              }}
+              openDeploymentsRoute={() => {
+                if (activeConversation?.id) {
+                  openDeploymentsRoute(activeConversation.id)
+                }
+              }}
+              closeConversationRoute={() => {
+                if (activeConversation?.id) {
+                  closeConversationRoute(activeConversation.id)
+                }
+              }}
+              openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
+              closeArtifactEditor={closeArtifactEditor}
+              activeEditorArtifactId={editorRoute?.artifactId ?? null}
+              editorConversationId={editorRoute?.conversationId ?? null}
+              onActiveEditorArtifactChange={openArtifactEditor}
+              refreshArtifacts={() => {
+                if (activeConversation?.id) {
+                  void loadArtifacts(activeConversation.id)
+                }
+              }}
+              refreshDeployments={() => {
+                if (activeConversation?.id) {
+                  void loadDeployments(activeConversation.id)
+                }
+              }}
+            />
+          )}
         </>
       ) : activeView === 'daemon' ? (
         <DaemonPage

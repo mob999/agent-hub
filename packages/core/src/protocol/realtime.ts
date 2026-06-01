@@ -4,9 +4,9 @@ import type {
   ConversationArtifactAction,
   ConversationArtifactId,
   ConversationId,
+  ConversationGoal,
+  ConversationGoalId,
   ConversationMessage,
-  ConversationTask,
-  ConversationTaskId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
@@ -54,8 +54,9 @@ export interface RunEventCreatedRealtimeEvent extends RealtimeEventBase {
 
 export interface TaskUpdatedRealtimeEvent extends RealtimeEventBase {
   conversationId: ConversationId;
-  task?: ConversationTask;
-  taskId: ConversationTaskId;
+  goal?: ConversationGoal;
+  goalId?: ConversationGoalId;
+  taskId?: string;
   type: "task.updated";
 }
 

@@ -2,102 +2,230 @@ import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
   ConversationArtifactId,
+  ConversationDeployment,
+  ConversationGoal,
+  ConversationGoalId,
+  ConversationGoalStatus,
+  ConversationGoalTask,
   ConversationId,
   ConversationMessageId,
-  ConversationMention,
-  ConversationTaskStatus,
-  ConversationTaskId,
 } from "./conversation.js";
 import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
-  | "send_message_to_group"
-  | "send_message_to_user"
-  | "list_tasks"
+  | "list_goals"
+  | "list_artifacts"
+  | "read_artifact"
+  | "append_memory"
+  | "search_memory"
+  | "read_memory"
+  | "create_goal"
   | "create_task"
+  | "approve_task"
+  | "cancel_task"
   | "upload_artifact"
-  | "complete_task";
+  | "deploy_static_site"
+  | "complete_task"
+  | "complete_goal";
 
 export const agentHubAllMcpTools = [
   "send_message",
-  "send_message_to_group",
-  "send_message_to_user",
-  "list_tasks",
+  "list_goals",
+  "list_artifacts",
+  "read_artifact",
+  "append_memory",
+  "search_memory",
+  "read_memory",
+  "create_goal",
   "create_task",
-  "upload_artifact",
-  "complete_task",
+  "approve_task",
+  "cancel_task",
+  "complete_goal",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
-  "send_message_to_group",
-  "send_message_to_user",
-  "list_tasks",
+  "list_goals",
+  "list_artifacts",
+  "read_artifact",
+  "append_memory",
+  "search_memory",
+  "read_memory",
   "upload_artifact",
+  "deploy_static_site",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
+export type AgentHubSendMessageTarget =
+  | { type: "current" }
+  | { type: "group"; groupName: string }
+  | { type: "user" };
+
+export interface AgentHubSendMessageAttachmentInput {
+  type: "image";
+  localPath?: string;
+  artifactId?: ConversationArtifactId;
+  title?: string;
+  filename?: string;
+}
+
 export interface AgentHubSendMessageToolInput {
+  target?: AgentHubSendMessageTarget;
   content: string;
-  mentions?: ConversationMention[];
-  taskIds?: ConversationTaskId[];
+  attachments?: AgentHubSendMessageAttachmentInput[];
 }
 
 export interface AgentHubSendMessageToolResult {
   accepted: true;
-}
-
-export interface AgentHubSendMessageToGroupToolInput {
-  groupName: string;
-  content: string;
-}
-
-export interface AgentHubSendMessageToUserToolInput {
-  content: string;
-}
-
-export interface AgentHubCrossConversationMessageToolResult {
-  accepted: true;
   conversationId?: ConversationId;
   messageId?: ConversationMessageId;
+  attachments?: ConversationArtifact[];
 }
 
-export interface AgentHubListTasksToolInput {
-  status?: ConversationTaskStatus;
+export interface AgentHubCreateGoalToolInput {
+  title: string;
+  description?: string;
 }
 
-export interface AgentHubListTasksToolResult {
+export interface AgentHubCreateGoalToolResult {
   accepted: true;
-  tasks: Array<{
-    id: ConversationTaskId;
-    title: string;
-    assigneeAgentId: AgentId;
-    assigneeRunId?: RunId;
-    description?: string;
-    status: ConversationTaskStatus;
-    summary?: string;
-  }>;
+  goal: ConversationGoal;
+}
+
+export interface AgentHubListGoalsToolInput {
+  status?: ConversationGoalStatus;
+}
+
+export interface AgentHubListGoalsToolResult {
+  accepted: true;
+  goals: ConversationGoal[];
 }
 
 export interface AgentHubCreateTaskToolInput {
+  goalId: ConversationGoalId;
   title: string;
   description?: string;
   assigneeAgentId: AgentId;
-  taskId?: ConversationTaskId;
+  dependsOnTaskIndexes?: number[];
 }
 
 export interface AgentHubCreateTaskToolResult {
   accepted: true;
-  task: {
-    id: ConversationTaskId;
-    title: string;
-    assigneeAgentId: AgentId;
-  };
+  task: ConversationGoalTask;
+}
+
+export interface AgentHubApproveTaskToolInput {
+  goalId: ConversationGoalId;
+  taskIndex: number;
+}
+
+export interface AgentHubApproveTaskToolResult {
+  accepted: true;
+  goalId: ConversationGoalId;
+  taskIndex: number;
+  runId?: RunId;
+}
+
+export interface AgentHubCancelTaskToolInput {
+  goalId: ConversationGoalId;
+  taskIndex: number;
+  reason?: string;
+}
+
+export interface AgentHubCancelTaskToolResult {
+  accepted: true;
+  goalId: ConversationGoalId;
+  taskIndex: number;
+}
+
+export interface AgentHubCompleteGoalToolInput {
+  goalId: ConversationGoalId;
+  summary?: string;
+}
+
+export interface AgentHubCompleteGoalToolResult {
+  accepted: true;
+  goal: ConversationGoal;
+}
+
+export interface AgentHubListArtifactsToolInput {
+  goalId: ConversationGoalId;
+  taskIndex?: number;
+  limit?: number;
+}
+
+export interface AgentHubListArtifactsToolResult {
+  accepted: true;
+  artifacts: ConversationArtifact[];
+}
+
+export interface AgentHubReadArtifactToolInput {
+  goalId: ConversationGoalId;
+  artifactId: ConversationArtifactId;
+}
+
+export interface AgentHubReadArtifactToolResult {
+  accepted: true;
+  artifact: ConversationArtifact;
+  contentBase64?: string;
+  contentText?: string;
+  encoding: "base64" | "text";
+  truncated?: boolean;
+}
+
+export type AgentHubMemoryScope = "long_term" | "daily" | "transcript";
+
+export interface AgentHubAppendMemoryToolInput {
+  scope?: Exclude<AgentHubMemoryScope, "transcript">;
+  title?: string;
+  content: string;
+  tags?: string[];
+}
+
+export interface AgentHubAppendMemoryToolResult {
+  accepted: true;
+  entryId: string;
+  file: string;
+}
+
+export interface AgentHubSearchMemoryToolInput {
+  query: string;
+  scopes?: AgentHubMemoryScope[];
+  fromDate?: string;
+  toDate?: string;
+  limit?: number;
+}
+
+export interface AgentHubMemorySearchResult {
+  file: string;
+  line: number;
+  score: number;
+  scope: AgentHubMemoryScope;
+  snippet: string;
+}
+
+export interface AgentHubSearchMemoryToolResult {
+  accepted: true;
+  results: AgentHubMemorySearchResult[];
+}
+
+export interface AgentHubReadMemoryToolInput {
+  scope: AgentHubMemoryScope;
+  date?: string;
+  maxBytes?: number;
+}
+
+export interface AgentHubReadMemoryToolResult {
+  accepted: true;
+  content: string;
+  file: string;
+  truncated: boolean;
 }
 
 export interface AgentHubUploadArtifactToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   title: string;
   localPath: string;
   filename?: string;
@@ -108,8 +236,22 @@ export interface AgentHubUploadArtifactToolResult {
   artifact: ConversationArtifact;
 }
 
+export interface AgentHubDeployStaticSiteToolInput {
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  title: string;
+  localPath: string;
+  entrypoint?: string;
+}
+
+export interface AgentHubDeployStaticSiteToolResult {
+  accepted: true;
+  deployment: ConversationDeployment;
+}
+
 export interface AgentHubCompleteTaskToolInput {
-  taskId: ConversationTaskId;
+  goalId: ConversationGoalId;
+  taskIndex: number;
   summary: string;
   artifactIds?: ConversationArtifactId[];
 }
@@ -120,19 +262,36 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
-  | AgentHubSendMessageToGroupToolInput
-  | AgentHubSendMessageToUserToolInput
-  | AgentHubListTasksToolInput
+  | AgentHubCreateGoalToolInput
+  | AgentHubListGoalsToolInput
+  | AgentHubListArtifactsToolInput
+  | AgentHubReadArtifactToolInput
+  | AgentHubAppendMemoryToolInput
+  | AgentHubSearchMemoryToolInput
+  | AgentHubReadMemoryToolInput
   | AgentHubCreateTaskToolInput
+  | AgentHubApproveTaskToolInput
+  | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
-  | AgentHubCompleteTaskToolInput;
+  | AgentHubDeployStaticSiteToolInput
+  | AgentHubCompleteTaskToolInput
+  | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
-  | AgentHubCrossConversationMessageToolResult
-  | AgentHubListTasksToolResult
+  | AgentHubCreateGoalToolResult
+  | AgentHubListGoalsToolResult
+  | AgentHubListArtifactsToolResult
+  | AgentHubReadArtifactToolResult
+  | AgentHubAppendMemoryToolResult
+  | AgentHubSearchMemoryToolResult
+  | AgentHubReadMemoryToolResult
   | AgentHubCreateTaskToolResult
+  | AgentHubApproveTaskToolResult
+  | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
-  | AgentHubCompleteTaskToolResult;
+  | AgentHubDeployStaticSiteToolResult
+  | AgentHubCompleteTaskToolResult
+  | AgentHubCompleteGoalToolResult;
 
 export interface AgentHubMcpToolCall {
   runId: RunId;

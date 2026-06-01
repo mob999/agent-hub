@@ -144,7 +144,8 @@ describe("CodexAdapter", () => {
     calls[0].process.close(0);
     await eventsPromise;
 
-    expect(calls[0].process.stdinText).toBe("use this context");
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nuse this context$/);
   });
 
   it("passes agent instructions as Codex developer instructions", async () => {
@@ -168,7 +169,8 @@ describe("CodexAdapter", () => {
     expect(calls[0].args).toContain(
       `developer_instructions=${JSON.stringify(agentInstructions)}`,
     );
-    expect(calls[0].process.stdinText).toBe("ship the page");
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nship the page$/);
   });
 
   it("injects a per-run AgentHub MCP stdio server and emits MCP tool events", async () => {
@@ -245,7 +247,7 @@ describe("CodexAdapter", () => {
     );
   });
 
-  it("returns structured create_task results through the MCP session", async () => {
+  it("relays create_task calls through the MCP session", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const { relay, sessions } = createMcpRelayMock();
     const adapter = new CodexAdapter({
@@ -265,22 +267,16 @@ describe("CodexAdapter", () => {
       toolCallId: "tool_2",
       name: "create_task",
       input: {
+        goalId: "goal_1",
         title: "Write tests",
         assigneeAgentId: "agent_2",
-        taskId: "task_1",
+        dependsOnTaskIndexes: [0],
       },
       createdAt: "2026-05-21T00:00:01.000Z",
     });
     calls[0].process.close(0);
 
-    expect(result).toEqual({
-      accepted: true,
-      task: {
-        id: "task_1",
-        title: "Write tests",
-        assigneeAgentId: "agent_2",
-      },
-    });
+    expect(result).toEqual({ accepted: true });
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -288,14 +284,15 @@ describe("CodexAdapter", () => {
           name: "create_task",
           input: expect.objectContaining({
             title: "Write tests",
-            taskId: "task_1",
+            goalId: "goal_1",
+            dependsOnTaskIndexes: [0],
           }),
         }),
       ]),
     );
   });
 
-  it("returns current group tasks through the MCP session", async () => {
+  it("returns current group goals through the MCP session", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const { relay, sessions } = createMcpRelayMock();
     const adapter = new CodexAdapter({
@@ -304,70 +301,68 @@ describe("CodexAdapter", () => {
     });
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({
-        agentHubMcpTools: ["list_tasks", "create_task"],
-        agentHubMcpTasks: [
+        agentHubMcpTools: ["list_goals"],
+        agentHubMcpGoals: [
           {
-            id: "task_1",
+            id: "goal_1",
+            ownerUserId: "user_1",
+            conversationId: "conversation_1",
+            orchestratorAgentId: "agent_1",
+            initialRunId: "run_1",
             title: "Research market",
-            assigneeAgentId: "agent_2",
-            status: "running",
+            status: "active",
+            tasks: [
+              {
+                id: "task_1",
+                goalId: "goal_1",
+                index: 0,
+                title: "Research market",
+                assigneeAgentId: "agent_2",
+                status: "running",
+                createdAt: "2026-05-21T00:00:00.000Z",
+                updatedAt: "2026-05-21T00:00:00.000Z",
+              },
+            ],
+            createdAt: "2026-05-21T00:00:00.000Z",
+            updatedAt: "2026-05-21T00:00:00.000Z",
           },
         ],
       })),
     );
 
     expect(calls[0].args).toContain(
-      "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='list_tasks,create_task'",
+      "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='list_goals'",
     );
 
     const firstResult = await sessions[0].onToolCall({
       runId: "run_1",
       toolCallId: "tool_3",
-      name: "list_tasks",
+      name: "list_goals",
       input: {},
       createdAt: "2026-05-21T00:00:01.000Z",
-    });
-    await sessions[0].onToolCall({
-      runId: "run_1",
-      toolCallId: "task_2",
-      name: "create_task",
-      input: {
-        title: "Write report",
-        assigneeAgentId: "agent_3",
-      },
-      createdAt: "2026-05-21T00:00:02.000Z",
     });
     const secondResult = await sessions[0].onToolCall({
       runId: "run_1",
       toolCallId: "tool_4",
-      name: "list_tasks",
-      input: {},
+      name: "list_goals",
+      input: { status: "completed" },
       createdAt: "2026-05-21T00:00:03.000Z",
     });
     calls[0].process.close(0);
 
-    expect(firstResult).toEqual({
+    expect(firstResult).toMatchObject({
       accepted: true,
-      tasks: [
+      goals: [
         {
-          id: "task_1",
+          id: "goal_1",
           title: "Research market",
-          assigneeAgentId: "agent_2",
-          status: "running",
+          status: "active",
         },
       ],
     });
     expect(secondResult).toEqual({
       accepted: true,
-      tasks: [
-        expect.objectContaining({ id: "task_1" }),
-        expect.objectContaining({
-          id: "task_2",
-          title: "Write report",
-          assigneeAgentId: "agent_3",
-          status: "created",
-        }),
-      ],
+      goals: [],
     });
     await eventsPromise;
   });

@@ -8,24 +8,35 @@ import type {
   IsoDateTime,
 } from "./agent.js";
 import type { AgentHubMcpToolName } from "./mcp.js";
-import type { AgentHubListTasksToolResult } from "./mcp.js";
+import type {
+  AgentHubListGoalsToolResult,
+  AgentHubMcpToolCall,
+  AgentHubMcpToolResult,
+  AgentHubSendMessageTarget,
+} from "./mcp.js";
 import type {
   ConversationArtifact,
   ConversationArtifactActionId,
   ConversationArtifactActionType,
   ConversationArtifactId,
-  ConversationTaskId,
+  ConversationDeployment,
+  ConversationGoalId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
 
 export interface DaemonRunAssignment {
   run: AgentRun;
   prompt: string;
+  contextCompression?: {
+    compressibleText: string;
+    promptTemplate: string;
+    thresholdChars: number;
+  };
   agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
-  agentHubMcpTasks?: AgentHubListTasksToolResult["tasks"];
+  agentHubMcpGoals?: AgentHubListGoalsToolResult["goals"];
 }
 
 export type DaemonClientMessage =
@@ -60,10 +71,18 @@ export type DaemonClientMessage =
       sentAt: IsoDateTime;
     }
   | {
+      type: "agenthub.tool.call";
+      requestId: string;
+      call: AgentHubMcpToolCall;
+      sentAt: IsoDateTime;
+    }
+  | {
       type: "artifact.upload";
       uploadId: string;
       runId: RunId;
-      taskId: ConversationTaskId;
+      goalId?: ConversationGoalId;
+      taskIndex?: number;
+      messageTarget?: AgentHubSendMessageTarget;
       title: string;
       filename: string;
       sizeBytes: number;
@@ -83,6 +102,34 @@ export type DaemonClientMessage =
       type: "agent.create_failed";
       agentId: AgentId;
       daemonDeviceId: DaemonDeviceId;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "static_site.deploy";
+      deploymentId: string;
+      runId: RunId;
+      goalId?: ConversationGoalId;
+      taskIndex?: number;
+      title: string;
+      entrypoint: string;
+      files: Array<{
+        path: string;
+        sizeBytes: number;
+        contentBase64: string;
+      }>;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "memory.appended";
+      requestId: string;
+      entryId: string;
+      file: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "memory.append_failed";
+      requestId: string;
       reason: string;
       sentAt: IsoDateTime;
     }
@@ -138,6 +185,42 @@ export type DaemonServerMessage =
   | {
       type: "artifact.upload.rejected";
       uploadId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "static_site.deploy.ack";
+      deploymentId: string;
+      deployment: ConversationDeployment;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "static_site.deploy.rejected";
+      deploymentId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "memory.append";
+      requestId: string;
+      workspacePath: string;
+      kind: "daily" | "transcript";
+      title?: string;
+      content: string;
+      tags?: string[];
+      date?: string;
+      dedupeKey?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call.result";
+      requestId: string;
+      result: AgentHubMcpToolResult;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "agenthub.tool.call.rejected";
+      requestId: string;
       reason: string;
       sentAt: IsoDateTime;
     };

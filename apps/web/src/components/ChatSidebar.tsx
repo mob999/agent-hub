@@ -14,6 +14,8 @@ interface ChatSidebarProps {
   savedOpen: boolean
   onCreateAgent: () => void
   onCreateGroup: () => void
+  onOpenSearch: () => void
+  onOpenActivity: () => void
   onRestoreAgent: (agentId: string) => void
   onRestoreGroup: (conversationId: string) => void
   onToggleSaved: () => void
@@ -57,6 +59,8 @@ export function ChatSidebar({
   savedOpen,
   onCreateAgent,
   onCreateGroup,
+  onOpenSearch,
+  onOpenActivity,
   onRestoreAgent,
   onRestoreGroup,
   onToggleSaved,
@@ -77,7 +81,7 @@ export function ChatSidebar({
   const archivedGroupConversations = archivedConversations
     .filter((conversation) => conversation.type === 'group' && conversation.key !== 'all')
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-  const savedCount = archivedAgents.length + archivedGroupConversations.length
+  const archivedCount = archivedAgents.length + archivedGroupConversations.length
   const directConversationByAgentId = new Map(
     conversations
       .filter((conversation) => conversation.type === 'direct' && conversation.directAgentId !== undefined)
@@ -97,12 +101,20 @@ export function ChatSidebar({
       </header>
 
       <section className="grid gap-0.5 p-3" aria-label="Quick actions">
-        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
+        <button
+          className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          type="button"
+          onClick={onOpenSearch}
+        >
           <Search size={16} />
           <span>Search</span>
           <kbd className="text-[var(--cds-text-secondary)]">Ctrl K</kbd>
         </button>
-        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
+        <button
+          className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          type="button"
+          onClick={onOpenActivity}
+        >
           <Activity size={16} />
           <span>Activity</span>
           <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
@@ -118,14 +130,14 @@ export function ChatSidebar({
           onClick={onToggleSaved}
         >
           <Bookmark size={16} />
-          <span>Saved</span>
+          <span>Archived</span>
           <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
-            {savedCount}
+            {archivedCount}
           </span>
         </button>
         {savedOpen && (
           <div className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] p-2">
-            {savedCount === 0 ? (
+            {archivedCount === 0 ? (
               <p className="px-1 py-2 text-sm text-[var(--cds-text-secondary)]">No archived items.</p>
             ) : (
               <>

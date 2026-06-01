@@ -2,6 +2,7 @@ import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
   ConversationArtifactId,
+  ConversationDeployment,
   ConversationGoal,
   ConversationGoalId,
   ConversationGoalStatus,
@@ -16,11 +17,15 @@ export type AgentHubMcpToolName =
   | "list_goals"
   | "list_artifacts"
   | "read_artifact"
+  | "append_memory"
+  | "search_memory"
+  | "read_memory"
   | "create_goal"
   | "create_task"
   | "approve_task"
   | "cancel_task"
   | "upload_artifact"
+  | "deploy_static_site"
   | "complete_task"
   | "complete_goal";
 
@@ -29,6 +34,9 @@ export const agentHubAllMcpTools = [
   "list_goals",
   "list_artifacts",
   "read_artifact",
+  "append_memory",
+  "search_memory",
+  "read_memory",
   "create_goal",
   "create_task",
   "approve_task",
@@ -41,7 +49,11 @@ export const agentHubNonOrchestratorMcpTools = [
   "list_goals",
   "list_artifacts",
   "read_artifact",
+  "append_memory",
+  "search_memory",
+  "read_memory",
   "upload_artifact",
+  "deploy_static_site",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
@@ -162,6 +174,55 @@ export interface AgentHubReadArtifactToolResult {
   truncated?: boolean;
 }
 
+export type AgentHubMemoryScope = "long_term" | "daily" | "transcript";
+
+export interface AgentHubAppendMemoryToolInput {
+  scope?: Exclude<AgentHubMemoryScope, "transcript">;
+  title?: string;
+  content: string;
+  tags?: string[];
+}
+
+export interface AgentHubAppendMemoryToolResult {
+  accepted: true;
+  entryId: string;
+  file: string;
+}
+
+export interface AgentHubSearchMemoryToolInput {
+  query: string;
+  scopes?: AgentHubMemoryScope[];
+  fromDate?: string;
+  toDate?: string;
+  limit?: number;
+}
+
+export interface AgentHubMemorySearchResult {
+  file: string;
+  line: number;
+  score: number;
+  scope: AgentHubMemoryScope;
+  snippet: string;
+}
+
+export interface AgentHubSearchMemoryToolResult {
+  accepted: true;
+  results: AgentHubMemorySearchResult[];
+}
+
+export interface AgentHubReadMemoryToolInput {
+  scope: AgentHubMemoryScope;
+  date?: string;
+  maxBytes?: number;
+}
+
+export interface AgentHubReadMemoryToolResult {
+  accepted: true;
+  content: string;
+  file: string;
+  truncated: boolean;
+}
+
 export interface AgentHubUploadArtifactToolInput {
   goalId: ConversationGoalId;
   taskIndex: number;
@@ -173,6 +234,19 @@ export interface AgentHubUploadArtifactToolInput {
 export interface AgentHubUploadArtifactToolResult {
   accepted: true;
   artifact: ConversationArtifact;
+}
+
+export interface AgentHubDeployStaticSiteToolInput {
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  title: string;
+  localPath: string;
+  entrypoint?: string;
+}
+
+export interface AgentHubDeployStaticSiteToolResult {
+  accepted: true;
+  deployment: ConversationDeployment;
 }
 
 export interface AgentHubCompleteTaskToolInput {
@@ -192,10 +266,14 @@ export type AgentHubMcpToolInput =
   | AgentHubListGoalsToolInput
   | AgentHubListArtifactsToolInput
   | AgentHubReadArtifactToolInput
+  | AgentHubAppendMemoryToolInput
+  | AgentHubSearchMemoryToolInput
+  | AgentHubReadMemoryToolInput
   | AgentHubCreateTaskToolInput
   | AgentHubApproveTaskToolInput
   | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
+  | AgentHubDeployStaticSiteToolInput
   | AgentHubCompleteTaskToolInput
   | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
@@ -204,10 +282,14 @@ export type AgentHubMcpToolResult =
   | AgentHubListGoalsToolResult
   | AgentHubListArtifactsToolResult
   | AgentHubReadArtifactToolResult
+  | AgentHubAppendMemoryToolResult
+  | AgentHubSearchMemoryToolResult
+  | AgentHubReadMemoryToolResult
   | AgentHubCreateTaskToolResult
   | AgentHubApproveTaskToolResult
   | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
+  | AgentHubDeployStaticSiteToolResult
   | AgentHubCompleteTaskToolResult
   | AgentHubCompleteGoalToolResult;
 

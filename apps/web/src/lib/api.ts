@@ -95,6 +95,22 @@ export interface AgentDetails {
   workspace: AgentWorkspace
 }
 
+export type AgentMemoryScope = 'long_term' | 'daily' | 'transcript'
+
+export interface AgentMemoryFile {
+  content: string
+  exists: boolean
+  file: string
+  label: string
+  scope: AgentMemoryScope
+}
+
+export interface AgentMemoryResponse {
+  date: string
+  files: AgentMemoryFile[]
+  workspaceReady: boolean
+}
+
 export interface UpdateAgentRequest {
   name: string
   description?: string
@@ -250,6 +266,22 @@ export interface ConversationArtifactAction {
   runId?: string
   error?: string
   result?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationDeployment {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  goalId?: string
+  taskIndex?: number
+  runId: string
+  creatorAgentId: string
+  title: string
+  entrypoint: string
+  status: 'ready' | 'failed' | 'deleted'
+  url?: string
   createdAt: string
   updatedAt: string
 }

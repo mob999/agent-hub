@@ -24,6 +24,7 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
+  type ConversationDeployment,
   type ConversationGoal,
   type ConversationMessage,
   type CreateGroupConversationResponse,
@@ -47,7 +48,7 @@ import {
 import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
-import type { GoalRouteState } from '../App'
+import type { ChatPanelRoute, GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
@@ -185,13 +186,23 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   chatConversationId?: string | null
+  chatPanelRoute?: ChatPanelRoute
+  focusedMessageId?: string | null
   goalRoute?: GoalRouteState | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, chatConversationId = null, goalRoute = null, editorRoute = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({
+  route,
+  chatConversationId = null,
+  chatPanelRoute = null,
+  focusedMessageId = null,
+  goalRoute = null,
+  editorRoute = null,
+  navigate,
+}: WorkspacePageProps) {
   const initialSearchRouteState = readCurrentSearchRouteState()
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -219,6 +230,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
+  const [deploymentsByConversation, setDeploymentsByConversation] = useState<Record<string, ConversationDeployment[]>>({})
   const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
   const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
@@ -294,6 +306,10 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const activeConversationArtifacts = useMemo(
     () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
     [activeConversationId, artifactsByConversation],
+  )
+  const activeConversationDeployments = useMemo(
+    () => (activeConversationId === null ? [] : deploymentsByConversation[activeConversationId] ?? []),
+    [activeConversationId, deploymentsByConversation],
   )
 
   const clearConversationUnread = useCallback((conversationId: string) => {
@@ -497,6 +513,22 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
       setArtifactsByConversation((current) => ({
         ...current,
         [conversationId]: response.artifacts,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadDeployments = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
+        `/conversations/${conversationId}/deployments`,
+      )
+      setDeploymentsByConversation((current) => ({
+        ...current,
+        [conversationId]: response.deployments,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -1248,6 +1280,12 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const openTasksRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
   }
+  const openDeploymentsRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/deployments` as RoutePath)
+  }
+  const openMessageRoute = (conversationId: string, messageId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}` as RoutePath)
+  }
   const closeConversationRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
@@ -1778,8 +1816,8 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               onOpenConversation={(conversationId) => {
                 selectConversation(conversationId)
               }}
-              onOpenMessage={(conversationId) => {
-                selectConversation(conversationId)
+              onOpenMessage={(conversationId, messageId) => {
+                openMessageRoute(conversationId, messageId)
               }}
               onQueryChange={(value) => updateSearchFilters({ query: value })}
               onSenderChange={(value) => updateSearchFilters({ sender: value })}
@@ -1792,6 +1830,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               messages={activeConversationMessages}
               goals={activeConversationGoals}
               artifacts={activeConversationArtifacts}
+              deployments={activeConversationDeployments}
               agents={agents}
               user={user}
               prompt={prompt}
@@ -1809,7 +1848,9 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               openArtifactEditor={openArtifactEditor}
               openRun={openRun}
               focusedGoalRoute={focusedGoalRoute}
+              focusedMessageId={focusedMessageId}
               taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+              deploymentRouteActive={chatPanelRoute === 'deployments'}
               openGoalRoute={(goalId, taskIndex) => {
                 if (activeConversation?.id) {
                   openGoalRoute(activeConversation.id, goalId, taskIndex)
@@ -1818,6 +1859,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               openTasksRoute={() => {
                 if (activeConversation?.id) {
                   openTasksRoute(activeConversation.id)
+                }
+              }}
+              openDeploymentsRoute={() => {
+                if (activeConversation?.id) {
+                  openDeploymentsRoute(activeConversation.id)
                 }
               }}
               closeConversationRoute={() => {
@@ -1833,6 +1879,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               refreshArtifacts={() => {
                 if (activeConversation?.id) {
                   void loadArtifacts(activeConversation.id)
+                }
+              }}
+              refreshDeployments={() => {
+                if (activeConversation?.id) {
+                  void loadDeployments(activeConversation.id)
                 }
               }}
             />

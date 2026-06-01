@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -30,6 +32,7 @@ import {
   createLogger,
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildRecentDirectMessagesPrompt,
   createRunRecord,
   buildConversationRunPrompt,
   createConversationArtifactAction,
@@ -41,6 +44,7 @@ import {
   enqueueAgentProvisioningJob,
   enqueueArtifactActionJob,
   enqueueRunJob,
+  enqueueMemoryAppendJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
@@ -48,10 +52,12 @@ import {
   getConversationArtifactForUser,
   getConversationArtifactContentForUser,
   getConversationArtifactDetailsForUser,
+  getConversationDeploymentFileForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
   listConversationArtifactsForUser,
+  listConversationDeploymentsForUser,
   listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
@@ -59,6 +65,7 @@ import {
   listAgentsForUser,
   listActiveAgentGroupContexts,
   listDaemonDevicesWithRuntimes,
+  listRecentDirectConversationMessagesForAgent,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
   groupConversationKeyFromTitle,
@@ -296,6 +303,54 @@ function parseSenderType(
     : null;
 }
 
+const memoryDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function todayUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function readAgentMemoryFile(input: {
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+  workspacePath: string;
+}): Promise<{
+  content: string;
+  exists: boolean;
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+}> {
+  const fullPath = path.join(input.workspacePath, input.file);
+
+  try {
+    return {
+      content: await readFile(fullPath, "utf8"),
+      exists: true,
+      file: input.file.replace(/\\/g, "/"),
+      label: input.label,
+      scope: input.scope,
+    };
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return {
+        content: "",
+        exists: false,
+        file: input.file.replace(/\\/g, "/"),
+        label: input.label,
+        scope: input.scope,
+      };
+    }
+
+    throw error;
+  }
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
     switch (character) {
@@ -400,6 +455,104 @@ function toMcpGoalList(
   }));
 }
 
+function conversationMessageCompressionRole(
+  message: ConversationMessage,
+  agentNamesById: Record<string, string>,
+): string {
+  if (message.senderType === "user") {
+    return "User";
+  }
+
+  if (message.senderType === "agent") {
+    return message.senderAgentId === undefined
+      ? "Agent"
+      : agentNamesById[message.senderAgentId] ?? "Agent";
+  }
+
+  return "System";
+}
+
+function buildCompressibleConversationText(
+  messages: ConversationMessage[],
+  agentNamesById: Record<string, string>,
+): string {
+  const history = messages
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) =>
+      [
+        `${conversationMessageCompressionRole(message, agentNamesById)}:`,
+        message.content.trim(),
+      ].join("\n")
+    );
+
+  return [
+    "Summarize the older AgentHub conversation history below for future context.",
+    "Preserve user goals, decisions, constraints, open questions, task/artifact references, and agent responsibilities.",
+    "Write a concise Markdown memory entry. Do not produce a visible chat reply.",
+    "",
+    "<older_conversation_history>",
+    history.join("\n\n"),
+    "</older_conversation_history>",
+  ].join("\n");
+}
+
+function applyContextCompressionToJob(
+  job: RunQueueJob,
+  input: {
+    agentNamesById: Record<string, string>;
+    currentUserMessage: string;
+    messages: ConversationMessage[];
+  },
+): RunQueueJob {
+  const recentMessageCount = 20;
+
+  if (input.messages.length <= recentMessageCount) {
+    return job;
+  }
+
+  const olderMessages = input.messages.slice(0, -recentMessageCount);
+  const recentMessages = input.messages.slice(-recentMessageCount);
+  const compressibleText = buildCompressibleConversationText(
+    olderMessages,
+    input.agentNamesById,
+  );
+
+  if (compressibleText.length < env.AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD) {
+    return job;
+  }
+
+  const fullConversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
+    currentUserMessage: input.currentUserMessage,
+    messages: input.messages,
+  });
+  const recentConversationPrompt = buildConversationRunPrompt({
+    agentNamesById: input.agentNamesById,
+    currentUserMessage: input.currentUserMessage,
+    messages: recentMessages,
+  });
+  const compactedConversationPrompt = [
+    "<compressed_older_context>",
+    "{{compressed_context}}",
+    "</compressed_older_context>",
+    "",
+    recentConversationPrompt,
+  ].join("\n");
+  const promptTemplate = job.prompt.includes(fullConversationPrompt)
+    ? job.prompt.replace(fullConversationPrompt, compactedConversationPrompt)
+    : [job.prompt, "", compactedConversationPrompt].join("\n");
+
+  return {
+    ...job,
+    prompt: promptTemplate.replace("{{compressed_context}}", "(pending context compression)"),
+    contextCompression: {
+      compressibleText,
+      promptTemplate,
+      thresholdChars: env.AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD,
+    },
+  };
+}
+
 async function buildAgentGroupsPromptForAgent(input: {
   agentId: string;
   currentConversationId?: string;
@@ -438,6 +591,7 @@ function buildGroupChatRunPrompt(input: {
   agentName: string;
   conversationTitle: string;
   currentUserMessage: string;
+  directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
@@ -466,6 +620,8 @@ function buildGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
+    input.directMessagesPrompt,
+    input.directMessagesPrompt === undefined ? undefined : "",
     conversationPrompt,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -882,6 +1038,88 @@ app.get("/agents/:agentId", async (c) => {
   }
 
   return c.json({ agent });
+});
+
+app.get("/agents/:agentId/memory", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const date = c.req.query("date") ?? todayUtcDate();
+  if (!memoryDatePattern.test(date)) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_MEMORY_DATE",
+          message: "date must use yyyy-mm-dd format.",
+        },
+      },
+      400,
+    );
+  }
+
+  const agent = await getAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (agent === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const workspacePath = agent.workspace.workspacePath;
+  if (workspacePath === undefined) {
+    return c.json({
+      date,
+      files: [],
+      workspaceReady: false,
+    });
+  }
+
+  const files = await Promise.all([
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "long_term",
+      label: "MEMORY.md",
+      file: "MEMORY.md",
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "daily",
+      label: `${date}.md`,
+      file: path.join("memory", `${date}.md`),
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "transcript",
+      label: `transcripts/${date}.md`,
+      file: path.join("memory", "transcripts", `${date}.md`),
+    }),
+  ]);
+
+  return c.json({
+    date,
+    files,
+    workspaceReady: true,
+  });
 });
 
 app.patch("/agents/:agentId", async (c) => {
@@ -1732,6 +1970,42 @@ app.get("/conversations/:conversationId/artifacts", async (c) => {
   return c.json({ artifacts });
 });
 
+app.get("/conversations/:conversationId/deployments", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const deployments = await listConversationDeploymentsForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (deployments === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ deployments });
+});
+
 app.post("/conversations/:conversationId/messages", async (c) => {
   const user = c.get("user");
 
@@ -1879,7 +2153,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       agentId: runAgent.agent.id,
       ownerUserId: user.id,
     });
-    const job: RunQueueJob = {
+    const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: [
@@ -1907,7 +2181,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         updatedAt: now,
       },
       runtime: runAgent.runtime,
-    };
+    }, {
+      agentNamesById,
+      currentUserMessage: content,
+      messages: priorMessages,
+    });
     const result = await createUserMessageAndRun(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -1928,6 +2206,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     }
 
     const queueMessageId = await enqueueRunJob(redis, job);
+    await Promise.all(
+      result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
+    );
     const assistant = result.messages.assistant;
     await publishRealtimeEvents(
       realtimeEventsForCreatedRuns({
@@ -2025,7 +2306,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
-    const job: RunQueueJob = {
+    const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
       prompt: buildGroupTaskOrchestratorPrompt({
@@ -2060,7 +2341,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         updatedAt: now,
       },
       runtime: orchestrator.runtime,
-    };
+    }, {
+      agentNamesById,
+      currentUserMessage: content,
+      messages: priorMessages,
+    });
     const result = await createUserMessageAndRuns(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -2081,6 +2366,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     }
 
     const queueMessageId = await enqueueRunJob(redis, job);
+    await Promise.all(
+      result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
+    );
     await publishRealtimeEvents(
       realtimeEventsForCreatedRuns({
         conversation: result.conversation,
@@ -2156,7 +2444,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     runAgents.map(async (runAgent): Promise<RunQueueJob> => {
       const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
 
-      return {
+      return applyContextCompressionToJob({
         conversationId: conversation.id,
         daemonDeviceId: runAgent.daemonDeviceId,
         prompt: buildGroupChatRunPrompt({
@@ -2169,6 +2457,17 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           agentName: runAgent.agent.name,
           conversationTitle: conversation.title,
           currentUserMessage: content,
+          directMessagesPrompt: buildRecentDirectMessagesPrompt({
+            agentName: runAgent.agent.name,
+            agentNamesById,
+            messages: await listRecentDirectConversationMessagesForAgent(db, {
+              agentId: runAgent.agent.id,
+              limit: 20,
+              ownerUserId: user.id,
+              publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+              publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+            }),
+          }),
           isOrchestrator,
           messages: priorMessages,
         }),
@@ -2198,7 +2497,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           updatedAt: now,
         },
         runtime: runAgent.runtime,
-      };
+      }, {
+        agentNamesById,
+        currentUserMessage: content,
+        messages: priorMessages,
+      });
     }),
   );
   const result = await createUserMessageAndRuns(db, {
@@ -2222,6 +2525,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
   const queueMessageIds = await Promise.all(
     jobs.map((job) => enqueueRunJob(redis, job)),
+  );
+  await Promise.all(
+    result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
   );
   await publishRealtimeEvents(
     realtimeEventsForCreatedRuns({
@@ -2428,6 +2734,114 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
       "content-type": fileInfo.mimeType,
     },
     status: 200,
+  });
+});
+
+async function deploymentResponse(input: {
+  deploymentId: string;
+  ownerUserId: string;
+  requestedPath?: string;
+}) {
+  const record = await getConversationDeploymentFileForUser(db, {
+    deploymentId: input.deploymentId,
+    ownerUserId: input.ownerUserId,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    requestedPath: input.requestedPath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (record === null) {
+    return previewUnavailableResponse({
+      message: "Deployment file was not found.",
+      status: 404,
+    });
+  }
+
+  const fileInfo = inferArtifactFileInfo({
+    filename: record.filename,
+  });
+  const body = record.content;
+  const arrayBuffer = body.buffer.slice(
+    body.byteOffset,
+    body.byteOffset + body.byteLength,
+  ) as ArrayBuffer;
+
+  return new Response(arrayBuffer, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": fileInfo.mimeType,
+    },
+    status: 200,
+  });
+}
+
+function getDeploymentRequestedPath(input: {
+  deploymentId: string;
+  requestUrl: string;
+}): string | undefined {
+  const pathname = new URL(input.requestUrl).pathname;
+  const prefix = `/deployments/${input.deploymentId}/`;
+
+  if (!pathname.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const requestedPath = pathname.slice(prefix.length);
+  return requestedPath.length === 0
+    ? undefined
+    : decodeURIComponent(requestedPath);
+}
+
+app.get("/deployments/:deploymentId", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const redirectUrl = new URL(c.req.url);
+  redirectUrl.pathname = `/deployments/${deploymentId}/`;
+  return c.redirect(redirectUrl.toString(), 302);
+});
+
+app.get("/deployments/:deploymentId/*", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  return deploymentResponse({
+    deploymentId,
+    ownerUserId: user.id,
+    requestedPath: getDeploymentRequestedPath({
+      deploymentId,
+      requestUrl: c.req.url,
+    }),
   });
 });
 
@@ -2797,6 +3211,11 @@ app.post("/runs", async (c) => {
     createdAt: now,
   });
   const queueMessageId = await enqueueRunJob(redis, job);
+  await Promise.all(
+    appendResult.memoryAppendJobs.map((memoryJob) =>
+      enqueueMemoryAppendJob(redis, memoryJob)
+    ),
+  );
   await publishRealtimeEvents(appendResult.realtimeEvents);
 
   return c.json(

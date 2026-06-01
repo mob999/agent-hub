@@ -39,6 +39,28 @@ export function conversationArtifactRevisionStorageKey(input: {
   ].join("/");
 }
 
+export function conversationDeploymentStoragePrefix(input: {
+  conversationId: string;
+  deploymentId: string;
+}): string {
+  return [
+    "deployments",
+    input.conversationId,
+    input.deploymentId,
+    "files",
+  ].join("/");
+}
+
+export function conversationDeploymentFileStorageKey(input: {
+  storagePrefix: string;
+  filePath: string;
+}): string {
+  return [
+    input.storagePrefix,
+    ...input.filePath.split("/").filter(Boolean),
+  ].join("/");
+}
+
 export function resolveStorageKey(storageRoot: string, storageKey: string): string {
   const normalizedKey = storageKey.split("/").filter(Boolean).join(path.sep);
   const root = path.resolve(storageRoot);
@@ -63,6 +85,19 @@ export async function writeArtifactContent(input: {
   await writeFile(filePath, content);
 
   return content.byteLength;
+}
+
+export async function writeArtifactBuffer(input: {
+  content: Buffer;
+  storageKey: string;
+  storageRoot: string;
+}): Promise<number> {
+  const filePath = resolveStorageKey(input.storageRoot, input.storageKey);
+
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, input.content);
+
+  return input.content.byteLength;
 }
 
 export async function writeArtifactTextContent(input: {
@@ -111,4 +146,12 @@ export function buildArtifactEditorUrl(input: {
     `/editor/${input.conversationId}/${input.artifactId}`,
     input.publicWebBaseUrl,
   ).toString();
+}
+
+export function buildDeploymentUrl(input: {
+  deploymentId: string;
+  publicApiBaseUrl: string;
+}): string {
+  return new URL(`/deployments/${input.deploymentId}/`, input.publicApiBaseUrl)
+    .toString();
 }

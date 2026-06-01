@@ -8,12 +8,14 @@ import type {
   AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
+  AgentRunStaticSiteDeploy,
 } from "@agent-hub/core/runtime";
 import type {
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
   AgentHubListGoalsToolResult,
   AgentHubUploadArtifactToolResult,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubMcpToolName,
   AgentRuntimeConfig,
   DaemonRuntime,
@@ -23,6 +25,12 @@ import type {
 } from "@agent-hub/core/protocol";
 
 import type { AgentHubMcpSessionHandle } from "../mcp/relay";
+import {
+  appendMemory,
+  buildMemoryPrompt,
+  hasDailyMemoryDedupeKey,
+  readTranscriptForDailyMemoryRefresh,
+} from "../memory";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 type SpawnedProcess = Pick<
@@ -37,6 +45,8 @@ export type SpawnCodexProcess = (
 ) => SpawnedProcess;
 
 export interface CodexAdapterOptions {
+  dailyMemoryRefreshIntervalMs?: number;
+  dailyMemoryRefreshTranscriptMaxBytes?: number;
   executablePath?: string;
   mcpRelay?: AgentHubMcpRelayLike;
   mcpServerCommand?: AgentHubMcpServerCommand;
@@ -55,6 +65,9 @@ export interface AgentHubMcpRelayLike {
     onArtifactUpload?(
       upload: AgentRunArtifactUpload,
     ): Promise<AgentHubUploadArtifactToolResult>;
+    onStaticSiteDeploy?(
+      deployment: AgentRunStaticSiteDeploy,
+    ): Promise<AgentHubDeployStaticSiteToolResult>;
     onToolCall(call: {
       createdAt: string;
       input: AgentHubMcpToolInput;
@@ -395,15 +408,201 @@ function createAgentHubMcpConfigArgs(input: {
   ];
 }
 
+async function runHiddenCodexPrompt(input: {
+  agentInstructions?: string;
+  executablePath: string;
+  prompt: string;
+  spawnProcess: SpawnCodexProcess;
+  workspacePath: string;
+}): Promise<string> {
+  const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
+    input.agentInstructions,
+  );
+  const process = input.spawnProcess(input.executablePath, [
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--cd",
+    input.workspacePath,
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+    ...(developerInstructionsConfig === undefined
+      ? []
+      : ["-c", developerInstructionsConfig]),
+    "-",
+  ], {
+    ...createCodexSpawnOptions({
+      cwd: input.workspacePath,
+      stdio: "pipe",
+    }),
+  });
+  const stdout = new LineDecoder();
+  const stderr = new LineDecoder();
+  const output: string[] = [];
+  const errors: string[] = [];
+
+  process.stdout.on("data", (chunk) => {
+    for (const line of stdout.push(chunk)) {
+      const parsed = parseJsonLine(line);
+
+      if (!parsed.ok) {
+        output.push(parsed.line);
+        continue;
+      }
+
+      for (const event of mapCodexJsonEvents(parsed.value, "memory_compaction")) {
+        if (event.type === "message.delta") {
+          output.push(event.content);
+        }
+      }
+    }
+  });
+  process.stderr.on("data", (chunk) => errors.push(...stderr.push(chunk)));
+
+  process.stdin.write(input.prompt);
+  process.stdin.end();
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    process.once("error", reject);
+    process.once("close", resolve);
+  });
+
+  const lastStdout = stdout.flush();
+  const lastStderr = stderr.flush();
+
+  if (lastStdout !== undefined) {
+    output.push(lastStdout);
+  }
+
+  if (lastStderr !== undefined) {
+    errors.push(lastStderr);
+  }
+
+  if (exitCode !== 0) {
+    throw new Error(errors.join("\n") || `Codex compaction exited with code ${exitCode}`);
+  }
+
+  return output.join("\n").trim();
+}
+
+function periodicDailyMemoryDedupeKey(input: {
+  date: string;
+  intervalMs: number;
+  now: Date;
+}): string {
+  const bucket = Math.floor(input.now.getTime() / input.intervalMs);
+
+  return `periodic-daily-memory:${input.date}:${bucket}`;
+}
+
+async function maybeRefreshDailyMemory(input: {
+  agentInstructions?: string;
+  executablePath: string;
+  intervalMs: number;
+  maxTranscriptBytes: number;
+  spawnProcess: SpawnCodexProcess;
+  workspacePath: string;
+}): Promise<
+  | {
+      refreshed: false;
+    }
+  | {
+      refreshed: true;
+      date: string;
+      summary: string;
+      sourceChars: number;
+      transcriptFile: string;
+      truncated: boolean;
+    }
+> {
+  if (input.intervalMs <= 0) {
+    return { refreshed: false };
+  }
+
+  const now = new Date();
+  const transcript = await readTranscriptForDailyMemoryRefresh({
+    workspacePath: input.workspacePath,
+    maxBytes: input.maxTranscriptBytes,
+  });
+
+  if (transcript.content.length === 0) {
+    return { refreshed: false };
+  }
+
+  const dedupeKey = periodicDailyMemoryDedupeKey({
+    date: transcript.date,
+    intervalMs: input.intervalMs,
+    now,
+  });
+
+  if (
+    await hasDailyMemoryDedupeKey(input.workspacePath, {
+      date: transcript.date,
+      dedupeKey,
+    })
+  ) {
+    return { refreshed: false };
+  }
+
+  const summary = await runHiddenCodexPrompt({
+    agentInstructions: [
+      input.agentInstructions,
+      [
+        "You are updating this AgentHub agent's daily memory from its local transcript.",
+        "Return concise Markdown notes for durable context from today.",
+        "Preserve user goals, decisions, side effects, task/artifact/deployment references, open questions, and follow-ups.",
+        "Ignore routine chatter and do not produce a visible chat reply.",
+        "Keep the memory entry under 6000 characters.",
+      ].join("\n"),
+    ].filter((line): line is string => line !== undefined).join("\n\n"),
+    executablePath: input.executablePath,
+    prompt: [
+      `<transcript file="${transcript.file}" date="${transcript.date}" truncated="${transcript.truncated ? "true" : "false"}">`,
+      transcript.content,
+      "</transcript>",
+    ].join("\n"),
+    spawnProcess: input.spawnProcess,
+    workspacePath: input.workspacePath,
+  });
+
+  if (summary.trim().length === 0) {
+    return { refreshed: false };
+  }
+
+  await appendMemory({
+    workspacePath: input.workspacePath,
+    kind: "daily",
+    title: "Periodic daily memory update",
+    content: summary,
+    tags: ["daily-memory", "periodic-summary"],
+    dedupeKey,
+  });
+
+  return {
+    refreshed: true,
+    date: transcript.date,
+    summary,
+    sourceChars: transcript.content.length,
+    transcriptFile: transcript.file,
+    truncated: transcript.truncated,
+  };
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
+  #dailyMemoryRefreshIntervalMs: number;
+  #dailyMemoryRefreshTranscriptMaxBytes: number;
   #executablePath: string;
   #mcpRelay: AgentHubMcpRelayLike | undefined;
   #mcpServerCommand: AgentHubMcpServerCommand;
   #spawnProcess: SpawnCodexProcess;
 
   constructor(options: CodexAdapterOptions = {}) {
+    this.#dailyMemoryRefreshIntervalMs =
+      options.dailyMemoryRefreshIntervalMs ?? 4 * 60 * 60 * 1000;
+    this.#dailyMemoryRefreshTranscriptMaxBytes =
+      options.dailyMemoryRefreshTranscriptMaxBytes ?? 60 * 1024;
     this.#executablePath = options.executablePath ?? "codex";
     this.#mcpRelay = options.mcpRelay;
     this.#mcpServerCommand =
@@ -475,6 +674,7 @@ export class CodexAdapter implements AgentAdapter {
       runId: input.run.id,
       workspacePath: input.workspacePath,
       onArtifactUpload: input.uploadArtifact,
+      onStaticSiteDeploy: input.deployStaticSite,
       onToolCall: async (call) => {
         if (input.callAgentHubMcpTool !== undefined) {
           return input.callAgentHubMcpTool(call);
@@ -537,6 +737,8 @@ export class CodexAdapter implements AgentAdapter {
     const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
+    let stdinInitialized = false;
+    let pendingCloseExitCode: number | null | undefined;
 
     const complete = (
       status: Extract<RunEvent, { type: "run.completed" }>["status"],
@@ -556,6 +758,23 @@ export class CodexAdapter implements AgentAdapter {
         createdAt: nowIsoDateTime(),
       });
       queue.end();
+    };
+    const completeFromExitCode = (exitCode: number | null): void => {
+      if (!stdinInitialized) {
+        pendingCloseExitCode = exitCode;
+        return;
+      }
+
+      complete(
+        exitCode === 0 ? "succeeded" : "failed",
+        exitCode === 0 ? undefined : `Codex exited with code ${exitCode}`,
+      );
+    };
+    const markStdinInitialized = (): void => {
+      stdinInitialized = true;
+      if (pendingCloseExitCode !== undefined) {
+        completeFromExitCode(pendingCloseExitCode);
+      }
     };
 
     const handleStdoutLine = (line: string) => {
@@ -606,10 +825,7 @@ export class CodexAdapter implements AgentAdapter {
         return;
       }
 
-      complete(
-        exitCode === 0 ? "succeeded" : "failed",
-        exitCode === 0 ? undefined : `Codex exited with code ${exitCode}`,
-      );
+      completeFromExitCode(exitCode);
     });
 
     input.abortSignal?.addEventListener(
@@ -627,8 +843,106 @@ export class CodexAdapter implements AgentAdapter {
       workspacePath: input.workspacePath,
       createdAt: nowIsoDateTime(),
     });
-    process.stdin.write(input.prompt);
-    process.stdin.end();
+    void (async () => {
+      try {
+        let runPrompt = input.prompt;
+        let contextCompacted = false;
+
+        if (
+          input.contextCompression !== undefined &&
+          input.contextCompression.compressibleText.length >=
+            input.contextCompression.thresholdChars
+        ) {
+          const compressedContext = await runHiddenCodexPrompt({
+            agentInstructions: [
+              input.agentInstructions,
+              "You are compacting older AgentHub conversation context. Return a concise factual Markdown summary. Do not include visible chat replies.",
+            ].filter((line): line is string => line !== undefined).join("\n\n"),
+            executablePath: this.#executablePath,
+            prompt: input.contextCompression.compressibleText,
+            spawnProcess: this.#spawnProcess,
+            workspacePath: input.workspacePath,
+          });
+          await appendMemory({
+            workspacePath: input.workspacePath,
+            kind: "daily",
+            title: "Context compression",
+            content: compressedContext,
+            tags: ["context-compression"],
+            dedupeKey: `context-compression:${input.run.id}`,
+          });
+          contextCompacted = true;
+          queue.push({
+            type: "runtime.event",
+            runId: input.run.id,
+            raw: {
+              runtimeKind: "codex",
+              nativeType: "memory.compacted",
+              payload: {
+                compressedChars: compressedContext.length,
+                sourceChars: input.contextCompression.compressibleText.length,
+              },
+            },
+            createdAt: nowIsoDateTime(),
+          });
+          runPrompt = input.contextCompression.promptTemplate.replace(
+            "{{compressed_context}}",
+            compressedContext,
+          );
+        }
+
+        if (!contextCompacted) {
+          const periodicRefresh = await maybeRefreshDailyMemory({
+            agentInstructions: input.agentInstructions,
+            executablePath: this.#executablePath,
+            intervalMs: this.#dailyMemoryRefreshIntervalMs,
+            maxTranscriptBytes: this.#dailyMemoryRefreshTranscriptMaxBytes,
+            spawnProcess: this.#spawnProcess,
+            workspacePath: input.workspacePath,
+          });
+
+          if (periodicRefresh.refreshed) {
+            queue.push({
+              type: "runtime.event",
+              runId: input.run.id,
+              raw: {
+                runtimeKind: "codex",
+                nativeType: "memory.periodic_refreshed",
+                payload: {
+                  date: periodicRefresh.date,
+                  summaryChars: periodicRefresh.summary.length,
+                  sourceChars: periodicRefresh.sourceChars,
+                  transcriptFile: periodicRefresh.transcriptFile,
+                  truncated: periodicRefresh.truncated,
+                },
+              },
+              createdAt: nowIsoDateTime(),
+            });
+          }
+        }
+
+        const memoryPrompt = await buildMemoryPrompt({
+          workspacePath: input.workspacePath,
+        });
+
+        process.stdin.write([memoryPrompt, runPrompt].join("\n\n"));
+        process.stdin.end();
+        markStdinInitialized();
+      } catch (error) {
+        process.stdin.write(input.prompt);
+        process.stdin.end();
+        markStdinInitialized();
+        queue.push(
+          createLogLineEvent(
+            input.run.id,
+            "stderr",
+            `Memory prompt/compaction failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        );
+      }
+    })();
 
     return queue;
   }

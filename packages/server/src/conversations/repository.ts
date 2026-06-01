@@ -7,6 +7,7 @@ import type {
   AgentHubCancelTaskToolInput,
   AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubDeployStaticSiteToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubReadArtifactToolInput,
   AgentHubMcpToolCall,
@@ -24,6 +25,7 @@ import type {
   ConversationMessageAttachment,
   ConversationArtifactDetails,
   ConversationArtifactRevision,
+  ConversationDeployment,
   ConversationGoal,
   ConversationGoalTask,
   RealtimeEvent,
@@ -40,6 +42,7 @@ import {
   conversationArtifactActions,
   conversationArtifacts,
   conversationArtifactRevisions,
+  conversationDeployments,
   conversationMessageArtifacts,
   conversationMessages,
   conversationGoals,
@@ -55,14 +58,22 @@ import { getRunnableAgentForUser } from "../agents/repository.js";
 import {
   buildArtifactDownloadUrl,
   buildArtifactEditorUrl,
+  buildDeploymentUrl,
+  conversationDeploymentFileStorageKey,
+  conversationDeploymentStoragePrefix,
   conversationArtifactRevisionStorageKey,
   conversationArtifactStorageKey,
   sanitizeArtifactFilename,
   writeArtifactContent,
+  writeArtifactBuffer,
   writeArtifactTextContent,
   readArtifactContent,
 } from "../artifacts/index.js";
-import type { ArtifactActionQueueJob, RunQueueJob } from "../queue/index.js";
+import type {
+  ArtifactActionQueueJob,
+  MemoryAppendQueueJob,
+  RunQueueJob,
+} from "../queue/index.js";
 import { createRealtimeEvent } from "../realtime/index.js";
 
 export const defaultGroupConversationKey = "all";
@@ -78,6 +89,7 @@ type ConversationMessageArtifactRow =
 type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
+type ConversationDeploymentRow = typeof conversationDeployments.$inferSelect;
 
 export interface ActiveRunContext {
   createdAt: string;
@@ -126,6 +138,7 @@ export type RestoreGroupConversationResult =
 
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
+  memoryAppendJobs: MemoryAppendQueueJob[];
   toolResult?: AgentHubMcpToolResult;
   realtimeEvents: RealtimeEvent[];
 }
@@ -147,6 +160,21 @@ export interface PersistConversationArtifactUploadInput {
   sourcePath?: string;
   storageRoot: string;
   goalId?: string;
+  taskIndex?: number;
+  title: string;
+}
+
+export interface PersistStaticSiteDeploymentInput {
+  entrypoint: string;
+  files: Array<{
+    path: string;
+    contentBase64: string;
+    sizeBytes: number;
+  }>;
+  goalId?: string;
+  publicApiBaseUrl?: string;
+  runId: string;
+  storageRoot: string;
   taskIndex?: number;
   title: string;
 }
@@ -1455,6 +1483,70 @@ export async function listConversationMessagesForUser(
   );
 }
 
+export async function listRecentDirectConversationMessagesForAgent(
+  db: Db,
+  input: {
+    agentId: string;
+    limit?: number;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
+): Promise<ConversationMessage[]> {
+  const [conversation] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.type, "direct"),
+        eq(conversations.directAgentId, input.agentId),
+      ),
+    )
+    .limit(1);
+
+  if (conversation === undefined) {
+    return [];
+  }
+
+  return (
+    await listConversationMessagesForUser(db, {
+      conversationId: conversation.id,
+      ownerUserId: input.ownerUserId,
+      limit: input.limit ?? 20,
+      publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    })
+  ) ?? [];
+}
+
+export function buildRecentDirectMessagesPrompt(input: {
+  agentName: string;
+  agentNamesById?: Record<string, string>;
+  messages: ConversationMessage[];
+}): string | undefined {
+  const history = input.messages
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) => {
+      const role = conversationPromptRole(message, input.agentNamesById);
+
+      return `${role}:\n${message.content.trim()}`;
+    });
+
+  if (history.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "<recent_private_chat_history>",
+    `These are the latest private one-on-one messages between the user and ${input.agentName}.`,
+    "Use them only as background context for this group chat. Do not leak unrelated private details unless they are clearly relevant to the current group discussion.",
+    "",
+    history.join("\n\n"),
+    "</recent_private_chat_history>",
+  ].join("\n");
+}
+
 export async function listConversationGoalsForUser(
   db: Db,
   input: {
@@ -1552,6 +1644,33 @@ export async function listConversationArtifactsForUser(
     toConversationArtifact(row, {
       publicApiBaseUrl: input.publicApiBaseUrl,
       publicWebBaseUrl: input.publicWebBaseUrl,
+    }),
+  );
+}
+
+export async function listConversationDeploymentsForUser(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<ConversationDeployment[] | null> {
+  const conversation = await getConversationForUser(db, input);
+
+  if (conversation === null) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationDeployments)
+    .where(eq(conversationDeployments.conversationId, input.conversationId))
+    .orderBy(desc(conversationDeployments.createdAt));
+
+  return rows.map((row) =>
+    toConversationDeployment(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
     }),
   );
 }
@@ -2089,6 +2208,7 @@ export async function createUserMessageAndRun(
   },
 ): Promise<{
   conversation: Conversation;
+  memoryAppendJobs: MemoryAppendQueueJob[];
   messages: {
     user: ConversationMessage;
     assistant: ConversationMessage;
@@ -2182,6 +2302,10 @@ export async function createUserMessageAndRun(
 
     return {
       conversation: toConversation(conversationRow, agentIds),
+      memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
+        conversation: conversationRow,
+        message: toConversationMessage(userMessage),
+      }),
       messages: {
         user: toConversationMessage(userMessage),
         assistant: toConversationMessage(assistantMessage),
@@ -2200,6 +2324,7 @@ export async function createUserMessageAndRuns(
   },
 ): Promise<{
   conversation: Conversation;
+  memoryAppendJobs: MemoryAppendQueueJob[];
   messages: {
     user: ConversationMessage;
     assistants: ConversationMessage[];
@@ -2286,6 +2411,10 @@ export async function createUserMessageAndRuns(
 
     return {
       conversation: toConversation(conversationRow, agentIds),
+      memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
+        conversation: conversationRow,
+        message: toConversationMessage(userMessage),
+      }),
       messages: {
         user: toConversationMessage(userMessage),
         assistants: [],
@@ -2606,6 +2735,43 @@ function readUploadArtifactToolInput(
         title,
         localPath,
         filename: filename && filename.length > 0 ? filename : undefined,
+      }
+    : null;
+}
+
+function readDeployStaticSiteToolInput(
+  input: unknown,
+): AgentHubDeployStaticSiteToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("title" in input) ||
+    !("localPath" in input)
+  ) {
+    return null;
+  }
+
+  const deploymentInput = input as AgentHubDeployStaticSiteToolInput;
+  const title = deploymentInput.title.trim();
+  const localPath = deploymentInput.localPath.trim();
+  const entrypoint = deploymentInput.entrypoint?.trim();
+
+  return title.length > 0 &&
+    title.length <= 160 &&
+    localPath.length > 0 &&
+    (deploymentInput.goalId === undefined ||
+      typeof deploymentInput.goalId === "string") &&
+    (deploymentInput.taskIndex === undefined ||
+      (typeof deploymentInput.taskIndex === "number" &&
+        Number.isInteger(deploymentInput.taskIndex) &&
+        deploymentInput.taskIndex >= 0))
+    ? {
+        goalId: deploymentInput.goalId,
+        taskIndex: deploymentInput.taskIndex,
+        title,
+        localPath,
+        entrypoint: entrypoint && entrypoint.length > 0 ? entrypoint : undefined,
       }
     : null;
 }
@@ -2976,6 +3142,381 @@ async function listConversationAgentRefs(
     .orderBy(asc(conversationAgentMembers.position));
 }
 
+async function createConversationTranscriptMemoryJobs(
+  db: Db,
+  input: {
+    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "title" | "type" | "directAgentId">;
+    message: ConversationMessage;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  const agentIds = input.conversation.type === "direct"
+    ? [input.conversation.directAgentId].filter((id): id is string => id !== null && id !== undefined)
+    : (await listConversationAgentRefs(db, input.conversation)).map((agent) => agent.id);
+  const uniqueAgentIds = [...new Set(agentIds)];
+  const createdAt = input.message.createdAt;
+  const date = createdAt.slice(0, 10);
+  const sender = input.message.senderType === "agent"
+    ? `agent:${input.message.senderAgentId ?? "unknown"}`
+    : input.message.senderType;
+  const content = [
+    `Conversation: #${input.conversation.title} (${input.conversation.id})`,
+    `Message: ${input.message.id}`,
+    `Sender: ${sender}`,
+    input.message.runId === undefined ? undefined : `Run: ${input.message.runId}`,
+    `Created at: ${createdAt}`,
+    "",
+    input.message.content.trim() || "(empty message)",
+    ...((input.message.attachments ?? []).length === 0
+      ? []
+      : [
+          "",
+          "Attachments:",
+          ...(input.message.attachments ?? []).map((attachment) => {
+            const artifact = attachment.artifact;
+            const link = artifact.editorUrl ?? artifact.downloadUrl;
+
+            return link === undefined
+              ? `- ${artifact.title} (${artifact.id})`
+              : `- [${artifact.title}](${link}) (${artifact.id})`;
+          }),
+        ]),
+  ].filter((line): line is string => line !== undefined).join("\n");
+  const jobs: MemoryAppendQueueJob[] = [];
+
+  for (const agentId of uniqueAgentIds) {
+    const runAgent = await getRunnableAgentForUser(db, {
+      agentId,
+      ownerUserId: input.conversation.ownerUserId,
+    });
+
+    if (runAgent === null) {
+      continue;
+    }
+
+    jobs.push({
+      agentId,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      workspacePath: runAgent.workspacePath,
+      kind: "transcript",
+      title: input.conversation.title,
+      content,
+      date,
+      dedupeKey: `message:${input.message.id}`,
+      createdAt,
+    });
+  }
+
+  return jobs;
+}
+
+async function createRunDailyMemoryJob(
+  db: Db,
+  input: {
+    content: string;
+    createdAt: string;
+    dedupeKey: string;
+    runId: string;
+    tags?: string[];
+    title: string;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      daemonDeviceId: runs.daemonDeviceId,
+      workspacePath: runs.workspacePath,
+    })
+    .from(runs)
+    .where(eq(runs.id, input.runId))
+    .limit(1);
+
+  if (run === undefined) {
+    return [];
+  }
+
+  return [
+    {
+      agentId: run.agentId,
+      daemonDeviceId: run.daemonDeviceId,
+      workspacePath: run.workspacePath,
+      kind: "daily",
+      title: input.title,
+      content: input.content,
+      tags: input.tags,
+      date: input.createdAt.slice(0, 10),
+      dedupeKey: input.dedupeKey,
+      createdAt: input.createdAt,
+    },
+  ];
+}
+
+function describeSendMessageTarget(
+  target: AgentHubSendMessageTarget | undefined,
+): string {
+  if (target === undefined || target.type === "current") {
+    return "current conversation";
+  }
+
+  if (target.type === "user") {
+    return "private conversation with the user";
+  }
+
+  return `group ${target.groupName}`;
+}
+
+export async function createArtifactUploadMemoryAppendJobs(
+  db: Db,
+  input: { artifact: ConversationArtifact },
+): Promise<MemoryAppendQueueJob[]> {
+  return createRunDailyMemoryJob(db, {
+    runId: input.artifact.runId,
+    createdAt: input.artifact.createdAt,
+    title: "Artifact uploaded",
+    tags: ["artifact", "upload"],
+    dedupeKey: `artifact-upload:${input.artifact.id}`,
+    content: [
+      `Uploaded artifact: ${input.artifact.title} (${input.artifact.id})`,
+      `Conversation: ${input.artifact.conversationId}`,
+      input.artifact.goalId === undefined ? undefined : `Goal: ${input.artifact.goalId}`,
+      input.artifact.taskIndex === undefined ? undefined : `Task index: ${input.artifact.taskIndex}`,
+      input.artifact.editorUrl === undefined ? undefined : `Editor: ${input.artifact.editorUrl}`,
+      input.artifact.downloadUrl === undefined ? undefined : `Download: ${input.artifact.downloadUrl}`,
+    ].filter((line): line is string => line !== undefined).join("\n"),
+  });
+}
+
+function normalizeDeploymentFilePath(filePath: string): string {
+  const normalized = filePath.split(/[\\/]+/).filter(Boolean).join("/");
+
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../") ||
+    normalized === ".."
+  ) {
+    throw new Error("Deployment file path is invalid.");
+  }
+
+  return normalized;
+}
+
+export async function persistStaticSiteDeployment(
+  db: Db,
+  input: PersistStaticSiteDeploymentInput,
+): Promise<ConversationDeployment> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      conversationId: runs.conversationId,
+      ownerUserId: runs.ownerUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, input.runId))
+    .limit(1);
+
+  if (run === undefined || run.conversationId === null) {
+    throw new Error("Static site deployment run was not found.");
+  }
+
+  let goalTaskId: string | undefined;
+  if (input.goalId !== undefined) {
+    if (input.taskIndex === undefined) {
+      throw new Error("Deployment task index is required for goal deployments.");
+    }
+
+    const [task] = await db
+      .select({
+        id: conversationGoalTasks.id,
+      })
+      .from(conversationGoalTasks)
+      .innerJoin(conversationGoals, eq(conversationGoalTasks.goalId, conversationGoals.id))
+      .where(
+        and(
+          eq(conversationGoals.id, input.goalId),
+          eq(conversationGoals.conversationId, run.conversationId),
+          eq(conversationGoalTasks.index, input.taskIndex),
+          eq(conversationGoalTasks.assigneeRunId, input.runId),
+          eq(conversationGoalTasks.assigneeAgentId, run.agentId),
+        ),
+      )
+      .limit(1);
+
+    if (task === undefined) {
+      throw new Error("Deployment goal task does not belong to this run.");
+    }
+    goalTaskId = task.id;
+  }
+
+  const normalizedEntrypoint = normalizeDeploymentFilePath(input.entrypoint);
+  const deploymentFiles = input.files.map((file) => ({
+    ...file,
+    path: normalizeDeploymentFilePath(file.path),
+  }));
+  const entrypointFile = deploymentFiles.find(
+    (file) => file.path === normalizedEntrypoint,
+  );
+
+  if (entrypointFile === undefined) {
+    throw new Error("Static site entrypoint was not included in deployment.");
+  }
+
+  const deploymentId = randomUUID();
+  const storagePrefix = conversationDeploymentStoragePrefix({
+    conversationId: run.conversationId,
+    deploymentId,
+  });
+
+  for (const file of deploymentFiles) {
+    const content = Buffer.from(file.contentBase64, "base64");
+    if (content.byteLength !== file.sizeBytes) {
+      throw new Error(`Deployment file size did not match: ${file.path}`);
+    }
+
+    await writeArtifactBuffer({
+      content,
+      storageKey: conversationDeploymentFileStorageKey({
+        storagePrefix,
+        filePath: file.path,
+      }),
+      storageRoot: input.storageRoot,
+    });
+  }
+
+  const now = new Date();
+  const [deployment] = await db
+    .insert(conversationDeployments)
+    .values({
+      id: deploymentId,
+      ownerUserId: run.ownerUserId,
+      conversationId: run.conversationId,
+      goalId: input.goalId,
+      taskIndex: input.taskIndex,
+      runId: input.runId,
+      creatorAgentId: run.agentId,
+      title: input.title.trim(),
+      entrypoint: normalizedEntrypoint,
+      status: "ready",
+      storagePrefix,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (deployment === undefined) {
+    throw new Error("Static site deployment could not be persisted.");
+  }
+
+  void goalTaskId;
+
+  return toConversationDeployment(deployment, {
+    publicApiBaseUrl: input.publicApiBaseUrl,
+  });
+}
+
+export async function getConversationDeploymentFileForUser(
+  db: Db,
+  input: {
+    deploymentId: string;
+    ownerUserId: string;
+    requestedPath?: string;
+    storageRoot: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<
+  | {
+      content: Buffer;
+      deployment: ConversationDeployment;
+      filename: string;
+    }
+  | null
+> {
+  const [row] = await db
+    .select()
+    .from(conversationDeployments)
+    .where(
+      and(
+        eq(conversationDeployments.id, input.deploymentId),
+        eq(conversationDeployments.ownerUserId, input.ownerUserId),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined || row.status !== "ready") {
+    return null;
+  }
+
+  const requestedPath = input.requestedPath?.trim();
+  const filePath =
+    requestedPath === undefined || requestedPath.length === 0
+      ? row.entrypoint
+      : normalizeDeploymentFilePath(requestedPath);
+  const content = await readArtifactContent({
+    storageKey: conversationDeploymentFileStorageKey({
+      storagePrefix: row.storagePrefix,
+      filePath,
+    }),
+    storageRoot: input.storageRoot,
+  });
+
+  return {
+    content,
+    deployment: toConversationDeployment(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    }),
+    filename: filePath,
+  };
+}
+
+export async function createArtifactActionMemoryAppendJobs(
+  db: Db,
+  input: {
+    action: ConversationArtifactAction;
+    createdAt?: string;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  if (input.action.status !== "succeeded") {
+    return [];
+  }
+
+  const [row] = await db
+    .select({
+      artifact: conversationArtifacts,
+      run: runs,
+    })
+    .from(conversationArtifacts)
+    .innerJoin(runs, eq(conversationArtifacts.runId, runs.id))
+    .where(eq(conversationArtifacts.id, input.action.artifactId))
+    .limit(1);
+
+  if (row === undefined) {
+    return [];
+  }
+
+  const createdAt = input.createdAt ?? input.action.updatedAt;
+
+  return [
+    {
+      agentId: row.run.agentId,
+      daemonDeviceId: row.run.daemonDeviceId,
+      workspacePath: row.run.workspacePath,
+      kind: "daily",
+      title: "Artifact action completed",
+      tags: ["artifact", "action", input.action.type],
+      date: createdAt.slice(0, 10),
+      dedupeKey: `artifact-action:${input.action.id}:${input.action.status}`,
+      createdAt,
+      content: [
+        `Completed artifact action: ${input.action.type}`,
+        `Action: ${input.action.id}`,
+        `Artifact: ${row.artifact.title} (${row.artifact.id})`,
+        `Conversation: ${row.artifact.conversationId}`,
+        row.artifact.goalId === null ? undefined : `Goal: ${row.artifact.goalId}`,
+        row.artifact.taskIndex === null ? undefined : `Task index: ${row.artifact.taskIndex}`,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+    },
+  ];
+}
+
 async function resolveConversationAgentReference(
   db: Db,
   input: {
@@ -3033,7 +3574,8 @@ export function buildAssignedTaskPrompt(input: {
     "Create the requested report or result file in your current workspace.",
     "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
     "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
-    "Upload the report with upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
+    "If the result is a report, screenshot, zip, or source package, upload it with upload_artifact. If the result is a runnable static HTML/CSS/JavaScript website, deploy it with deploy_static_site using the exact Goal ID and Task Index above, then include the returned deployment URL in your summary or visible message.",
+    "After uploading/deploying, call complete_task with a concise summary and any uploaded artifact ids.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
@@ -3060,7 +3602,7 @@ function buildAssignedTaskInstructions(input: {
       scenario: "assigned task",
     }),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
-    "Visible task updates must be sent with send_message. Completed work must be reported with upload_artifact and complete_task.",
+    "Visible task updates must be sent with send_message. Completed files must be reported with upload_artifact; runnable static websites should be deployed with deploy_static_site. Always finish assigned work with complete_task.",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
@@ -3098,6 +3640,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
   agentNamesById: Record<string, string>;
   conversationTitle: string;
   currentMessage: string;
+  directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: ConversationMessage[];
   senderAgentName: string;
@@ -3132,6 +3675,8 @@ export function buildMentionedGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     "",
+    input.directMessagesPrompt,
+    input.directMessagesPrompt === undefined ? undefined : "",
     input.activeRunsPrompt,
     input.activeRunsPrompt === undefined ? undefined : "",
     conversationPrompt,
@@ -3306,6 +3851,15 @@ async function createMentionedGroupChatRuns(
         agentNamesById,
         conversationTitle: input.conversation.title,
         currentMessage: input.content,
+        directMessagesPrompt: buildRecentDirectMessagesPrompt({
+          agentName: runAgent.agent.name,
+          agentNamesById,
+          messages: await listRecentDirectConversationMessagesForAgent(db, {
+            agentId: runAgent.agent.id,
+            limit: 20,
+            ownerUserId: input.ownerUserId,
+          }),
+        }),
         isOrchestrator,
         messages: priorMessages,
         senderAgentName,
@@ -3398,6 +3952,7 @@ async function persistVisibleAgentMessageAndDispatchMentions(
   },
 ): Promise<{
   dispatchJobs: RunQueueJob[];
+  memoryAppendJobs: MemoryAppendQueueJob[];
   message: ConversationMessage;
   realtimeEvents: RealtimeEvent[];
 }> {
@@ -3420,10 +3975,15 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     senderAgentId: input.agentId,
     triggerMessageId: message.id,
   });
+  const conversationMessage = toConversationMessage(message, attachments);
+  const memoryAppendJobs = await createConversationTranscriptMemoryJobs(db, {
+    conversation: input.conversation,
+    message: conversationMessage,
+  });
   const realtimeEvents: RealtimeEvent[] = [
     createRealtimeEvent({
       conversationId: input.conversation.id,
-      message: toConversationMessage(message, attachments),
+      message: conversationMessage,
       ownerUserId: input.ownerUserId,
       type: "conversation.message.created",
     }),
@@ -3437,8 +3997,36 @@ async function persistVisibleAgentMessageAndDispatchMentions(
 
   return {
     dispatchJobs: mentionResult.dispatchJobs,
-    message: toConversationMessage(message, attachments),
+    memoryAppendJobs,
+    message: conversationMessage,
     realtimeEvents,
+  };
+}
+
+export function toConversationDeployment(
+  row: ConversationDeploymentRow,
+  input: { publicApiBaseUrl?: string } = {},
+): ConversationDeployment {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    goalId: optionalString(row.goalId),
+    taskIndex: row.taskIndex ?? undefined,
+    runId: row.runId,
+    creatorAgentId: row.creatorAgentId,
+    title: row.title,
+    entrypoint: row.entrypoint,
+    status: row.status as ConversationDeployment["status"],
+    url:
+      input.publicApiBaseUrl === undefined
+        ? undefined
+        : buildDeploymentUrl({
+            deploymentId: row.id,
+            publicApiBaseUrl: input.publicApiBaseUrl,
+          }),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -3930,10 +4518,12 @@ export async function appendRunEventToConversationMessage(
   options: AppendRunEventOptions = {},
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
+  const memoryAppendJobs: MemoryAppendQueueJob[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
   let toolResult: AgentHubMcpToolResult | undefined;
   const result = (): AppendRunEventResult => ({
     dispatchJobs,
+    memoryAppendJobs,
     realtimeEvents,
     toolResult,
   });
@@ -4171,6 +4761,20 @@ export async function appendRunEventToConversationMessage(
           publicWebBaseUrl: options.publicWebBaseUrl,
         }),
       };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Goal created",
+          tags: ["goal", "task"],
+          dedupeKey: `goal-created:${goal.id}`,
+          content: [
+            `Created goal: ${goal.title} (${goal.id})`,
+            goal.description === null ? undefined : `Description: ${goal.description}`,
+            `Conversation: ${context.conversation.title} (${context.conversation.id})`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4462,6 +5066,27 @@ export async function appendRunEventToConversationMessage(
         }
       });
 
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task created",
+          tags: ["goal", "task", shouldDispatch ? "dispatch" : taskStatus],
+          dedupeKey: `task-created:${taskId}`,
+          content: [
+            `Created task: ${input.title}`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task index: ${taskIndex}`,
+            `Assignee: ${assignee.name} (${assigneeAgentId})`,
+            `Status: ${taskStatus}`,
+            blockedReason === undefined ? undefined : `Blocked reason: ${blockedReason}`,
+            (input.dependsOnTaskIndexes ?? []).length === 0
+              ? "Dependencies: none"
+              : `Dependencies: ${(input.dependsOnTaskIndexes ?? []).join(", ")}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
+
       return result();
     }
 
@@ -4556,6 +5181,21 @@ export async function appendRunEventToConversationMessage(
             ownerUserId: goal.ownerUserId,
             taskId: task.id,
             type: "task.updated",
+          }),
+        );
+        memoryAppendJobs.push(
+          ...await createRunDailyMemoryJob(db, {
+            runId: event.runId,
+            createdAt: event.createdAt,
+            title: "Task approval blocked",
+            tags: ["goal", "task", "approve", "blocked"],
+            dedupeKey: `task-approve-blocked:${task.id}:${event.runId}`,
+            content: [
+              `Could not approve task because the assignee is not ready.`,
+              `Goal: ${goal.title} (${goal.id})`,
+              `Task: #${task.index} ${task.title}`,
+              `Assignee: ${task.assigneeAgentId}`,
+            ].join("\n"),
           }),
         );
         toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
@@ -4660,6 +5300,22 @@ export async function appendRunEventToConversationMessage(
         }),
       );
       toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index, runId: job.run.id };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task approved",
+          tags: ["goal", "task", "approve", "dispatch"],
+          dedupeKey: `task-approved:${task.id}:${job.run.id}`,
+          content: [
+            `Approved task for dispatch.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${task.index} ${task.title}`,
+            `Assignee: ${assignee?.name ?? task.assigneeAgentId} (${task.assigneeAgentId})`,
+            `Run: ${job.run.id}`,
+          ].join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4723,6 +5379,21 @@ export async function appendRunEventToConversationMessage(
         realtimeEvents,
       });
       toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task cancelled",
+          tags: ["goal", "task", "cancel"],
+          dedupeKey: `task-cancelled:${task.id}:${event.runId}`,
+          content: [
+            `Cancelled task.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${task.index} ${task.title}`,
+            input.reason === undefined ? undefined : `Reason: ${input.reason}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4787,6 +5458,20 @@ export async function appendRunEventToConversationMessage(
           { publicWebBaseUrl: options.publicWebBaseUrl },
         ),
       };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Goal completed",
+          tags: ["goal", "complete"],
+          dedupeKey: `goal-completed:${goal.id}:${event.runId}`,
+          content: [
+            `Completed goal: ${updatedGoal.title} (${updatedGoal.id})`,
+            input.summary === undefined ? undefined : `Summary: ${input.summary}`,
+            `Tasks: ${goalTasks.length}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4798,6 +5483,20 @@ export async function appendRunEventToConversationMessage(
       }
 
       toolResult = { accepted: true, artifact: {} as ConversationArtifact };
+      return result();
+    }
+
+    if (event.name === "deploy_static_site") {
+      const input = readDeployStaticSiteToolInput(event.input);
+
+      if (input === null) {
+        return result();
+      }
+
+      toolResult = {
+        accepted: true,
+        deployment: {} as ConversationDeployment,
+      };
       return result();
     }
 
@@ -4899,6 +5598,24 @@ export async function appendRunEventToConversationMessage(
         realtimeEvents,
       });
       toolResult = { accepted: true };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task completed",
+          tags: ["goal", "task", "complete"],
+          dedupeKey: `task-completed:${goalTask.id}:${event.runId}`,
+          content: [
+            `Completed assigned task.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${goalTask.index} ${goalTask.title}`,
+            `Summary: ${input.summary}`,
+            artifactIds.length === 0
+              ? "Artifacts: none"
+              : `Artifacts: ${artifactIds.join(", ")}`,
+          ].join("\n"),
+        }),
+      );
 
       return result();
     }
@@ -4952,6 +5669,44 @@ export async function appendRunEventToConversationMessage(
     });
 
     dispatchJobs.push(...persisted.dispatchJobs);
+    memoryAppendJobs.push(...persisted.memoryAppendJobs);
+    if (input.target !== undefined && input.target.type !== "current") {
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Cross-conversation message sent",
+          tags: ["message", "cross-conversation"],
+          dedupeKey: `cross-message:${persisted.message.id}`,
+          content: [
+            `Sent a visible message to ${describeSendMessageTarget(input.target)}.`,
+            `Target conversation: ${persisted.message.conversationId}`,
+            `Message: ${persisted.message.id}`,
+            "",
+            input.content,
+          ].join("\n"),
+        }),
+      );
+    }
+    if (persisted.dispatchJobs.length > 0) {
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Agent mention fan-out",
+          tags: ["message", "mention", "fanout"],
+          dedupeKey: `mention-fanout:${persisted.message.id}`,
+          content: [
+            `A visible message triggered ${persisted.dispatchJobs.length} agent run(s).`,
+            `Conversation: ${persisted.message.conversationId}`,
+            `Message: ${persisted.message.id}`,
+            `Runs: ${persisted.dispatchJobs.map((job) => job.run.id).join(", ")}`,
+            "",
+            input.content,
+          ].join("\n"),
+        }),
+      );
+    }
     realtimeEvents.push(...persisted.realtimeEvents);
     toolResult = {
       accepted: true,
@@ -5001,7 +5756,7 @@ export async function appendRunEventToConversationMessage(
   }
 
   const [conversation] = await db
-    .select({ ownerUserId: conversations.ownerUserId })
+    .select()
     .from(conversations)
     .where(eq(conversations.id, message.conversationId))
     .limit(1);
@@ -5014,6 +5769,15 @@ export async function appendRunEventToConversationMessage(
     })
     .where(eq(conversations.id, message.conversationId));
   if (conversation !== undefined) {
+    const conversationMessage = toConversationMessage(message);
+    if (event.type === "run.completed") {
+      memoryAppendJobs.push(
+        ...await createConversationTranscriptMemoryJobs(db, {
+          conversation,
+          message: conversationMessage,
+        }),
+      );
+    }
     realtimeEvents.push(
       createRealtimeEvent({
         conversationId: message.conversationId,
@@ -5022,7 +5786,7 @@ export async function appendRunEventToConversationMessage(
       }),
       createRealtimeEvent({
         conversationId: message.conversationId,
-        message: toConversationMessage(message),
+        message: conversationMessage,
         ownerUserId: conversation.ownerUserId,
         type: "conversation.message.created",
       }),

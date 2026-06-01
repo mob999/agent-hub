@@ -99,6 +99,13 @@
       "when": 1780041031578,
       "tag": "0013_goal_task_model",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780045000000,
+      "tag": "0014_static_site_deployments",
+      "breakpoints": true
     }
   ]
 }

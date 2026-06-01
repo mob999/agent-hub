@@ -6,24 +6,31 @@ import { createDb } from "@agent-hub/db";
 import {
   ackAgentProvisioningQueueMessage,
   ackArtifactActionQueueMessage,
+  ackMemoryAppendQueueMessage,
   ackRunQueueMessage,
   appendRunEvent,
   completeConversationArtifactAction,
+  createArtifactActionMemoryAppendJobs,
+  createArtifactUploadMemoryAppendJobs,
   createAgentHubRedisClient,
   createLogger,
   createRealtimeEvent,
   enqueueRunJob,
+  enqueueMemoryAppendJob,
   ensureAgentProvisioningQueueGroup,
   ensureArtifactActionQueueGroup,
+  ensureMemoryAppendQueueGroup,
   ensureRunQueueGroup,
   getArtifactActionAssignment,
   markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
   persistConversationArtifactUpload,
+  persistStaticSiteDeployment,
   publishRealtimeEvent,
   readAgentProvisioningQueueMessages,
   readArtifactActionQueueMessages,
+  readMemoryAppendQueueMessages,
   readRunQueueMessages,
   setDaemonRuntimesStatus,
   upsertDaemonRuntime,
@@ -92,6 +99,7 @@ const gateway = new DaemonGateway({
     });
     await publishRealtimeEvents(result.realtimeEvents);
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+    await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
   },
   onAgentHubToolCall: async (message) => {
     const result = await appendRunEvent(db, {
@@ -108,6 +116,7 @@ const gateway = new DaemonGateway({
     });
     await publishRealtimeEvents(result.realtimeEvents);
     await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+    await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
 
     if (result.toolResult !== undefined) {
       return result.toolResult;
@@ -130,6 +139,9 @@ const gateway = new DaemonGateway({
       taskIndex: message.taskIndex,
       title: message.title,
     });
+    const memoryAppendJobs = await createArtifactUploadMemoryAppendJobs(db, {
+      artifact,
+    });
     await publishRealtimeEvents([
       createRealtimeEvent({
         artifact,
@@ -138,8 +150,21 @@ const gateway = new DaemonGateway({
         type: "artifact.created",
       }),
     ]);
+    await Promise.all(memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
 
     return artifact;
+  },
+  onStaticSiteDeploy: async (message) => {
+    return persistStaticSiteDeployment(db, {
+      entrypoint: message.entrypoint,
+      files: message.files,
+      goalId: message.goalId,
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      runId: message.runId,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+      taskIndex: message.taskIndex,
+      title: message.title,
+    });
   },
   onArtifactActionCompleted: async (message) => {
     const result = await completeConversationArtifactAction(db, {
@@ -149,6 +174,9 @@ const gateway = new DaemonGateway({
       status: message.status,
     });
     if (result !== null) {
+      const memoryAppendJobs = await createArtifactActionMemoryAppendJobs(db, {
+        action: result.action,
+      });
       await publishRealtimeEvents([
         createRealtimeEvent({
           action: result.action,
@@ -158,7 +186,20 @@ const gateway = new DaemonGateway({
           type: "artifact.action.updated",
         }),
       ]);
+      await Promise.all(memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
     }
+  },
+  onMemoryAppended: async (message) => {
+    logger.info(
+      { file: message.file, requestId: message.requestId },
+      "Memory append completed",
+    );
+  },
+  onMemoryAppendFailed: async (message) => {
+    logger.warn(
+      { reason: message.reason, requestId: message.requestId },
+      "Memory append rejected by daemon",
+    );
   },
 });
 const server = createServer((request, response) => {
@@ -182,6 +223,7 @@ await redis.connect();
 await ensureRunQueueGroup(redis);
 await ensureAgentProvisioningQueueGroup(redis);
 await ensureArtifactActionQueueGroup(redis);
+await ensureMemoryAppendQueueGroup(redis);
 await new Promise<void>((resolve) => {
   server.listen(env.WORKER_PORT, resolve);
 });
@@ -281,6 +323,7 @@ while (!shuttingDown) {
       );
       await publishRealtimeEvents(result.realtimeEvents);
       await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+      await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
     }
 
     await ackRunQueueMessage(redis, message.id);
@@ -417,6 +460,44 @@ while (!shuttingDown) {
           messageId: message.id,
         },
         "Failed to process artifact action queue message",
+      );
+    }
+  }
+
+  const memoryMessages = await readMemoryAppendQueueMessages(
+    redis,
+    env.AGENTHUB_WORKER_CONSUMER_NAME,
+    {
+      count: 10,
+      blockMs: 500,
+    },
+  );
+
+  for (const message of memoryMessages) {
+    const assigned = gateway.assignMemoryAppend({
+      type: "memory.append",
+      requestId: message.id,
+      workspacePath: message.job.workspacePath,
+      kind: message.job.kind,
+      title: message.job.title,
+      content: message.job.content,
+      tags: message.job.tags,
+      date: message.job.date,
+      dedupeKey: message.job.dedupeKey,
+      sentAt: new Date().toISOString(),
+      daemonDeviceId: message.job.daemonDeviceId,
+    });
+
+    if (assigned) {
+      await ackMemoryAppendQueueMessage(redis, message.id);
+      logger.info(
+        {
+          agentId: message.job.agentId,
+          daemonDeviceId: message.job.daemonDeviceId,
+          kind: message.job.kind,
+          messageId: message.id,
+        },
+        "Dispatched memory append to daemon",
       );
     }
   }

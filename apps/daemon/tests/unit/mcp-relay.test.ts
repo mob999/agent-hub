@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -168,6 +168,59 @@ describe("AgentHubMcpRelay", () => {
         input: { status: "active" },
       }),
     ]);
+  });
+
+  it("handles memory tools locally without depending on server RPC", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-memory-relay-"));
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["append_memory", "read_memory", "search_memory"],
+      onToolCall: () => {
+        throw new Error("server unavailable");
+      },
+    });
+
+    const appendResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/append_memory`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_memory",
+          input: {
+            scope: "daily",
+            title: "Cross-group note",
+            content: "Sent a note to #Design.",
+            tags: ["message"],
+          },
+        }),
+      },
+    );
+    const readResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/read_memory`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: { scope: "daily" },
+        }),
+      },
+    );
+
+    await expect(appendResponse.json()).resolves.toMatchObject({
+      accepted: true,
+      file: expect.stringContaining("memory/"),
+    });
+    await expect(readResponse.json()).resolves.toMatchObject({
+      accepted: true,
+      file: expect.stringContaining("memory/"),
+      content: expect.stringContaining("Sent a note to #Design."),
+    });
+    expect(appendResponse.status).toBe(200);
+    expect(readResponse.status).toBe(200);
+    await rm(workspacePath, { recursive: true, force: true });
   });
 
   it("relays cross-conversation send_message targets to the active run session", async () => {
@@ -360,5 +413,148 @@ describe("AgentHubMcpRelay", () => {
         toolCallId: "tool_3",
       }),
     ]);
+  });
+
+  it("uploads directories as zip artifacts", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-relay-dir-"));
+    await mkdir(path.join(workspacePath, "site", "assets"), { recursive: true });
+    await writeFile(path.join(workspacePath, "site", "index.html"), "<h1>Hello</h1>");
+    await writeFile(path.join(workspacePath, "site", "assets", "app.js"), "console.log('hi')");
+    const uploaded: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["upload_artifact"],
+      onArtifactUpload: (upload) => {
+        uploaded.push(upload);
+        return Promise.resolve({
+          accepted: true,
+          artifact: {
+            id: "artifact_zip",
+            ownerUserId: "user_1",
+            conversationId: "conversation_1",
+            goalId: upload.goalId,
+            taskIndex: upload.taskIndex,
+            runId: "run_1",
+            creatorAgentId: "agent_1",
+            status: "ready",
+            title: upload.title,
+            filename: upload.filename,
+            sizeBytes: upload.sizeBytes,
+            createdAt: "2026-05-26T00:00:00.000Z",
+            updatedAt: "2026-05-26T00:00:00.000Z",
+          },
+        });
+      },
+      onToolCall: () => ({ accepted: true }),
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/upload_artifact`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: {
+            goalId: "goal_1",
+            taskIndex: 0,
+            title: "Site source",
+            localPath: "site",
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(uploaded).toEqual([
+      expect.objectContaining({
+        filename: "site.zip",
+        sourcePath: "site",
+        contentBase64: expect.any(String),
+      }),
+    ]);
+    const zip = Buffer.from((uploaded[0] as { contentBase64: string }).contentBase64, "base64");
+    expect(zip.readUInt32LE(0)).toBe(0x04034b50);
+    await rm(workspacePath, { recursive: true, force: true });
+  });
+
+  it("deploys static sites from inside the run workspace", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-relay-site-"));
+    await mkdir(path.join(workspacePath, "dist"), { recursive: true });
+    await writeFile(path.join(workspacePath, "dist", "index.html"), "<script src=\"app.js\"></script>");
+    await writeFile(path.join(workspacePath, "dist", "app.js"), "console.log('site')");
+    const deployments: unknown[] = [];
+    const calls: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["deploy_static_site"],
+      onStaticSiteDeploy: (deployment) => {
+        deployments.push(deployment);
+        return Promise.resolve({
+          accepted: true,
+          deployment: {
+            id: "deployment_1",
+            ownerUserId: "user_1",
+            conversationId: "conversation_1",
+            goalId: deployment.goalId,
+            taskIndex: deployment.taskIndex,
+            runId: "run_1",
+            creatorAgentId: "agent_1",
+            status: "ready",
+            title: deployment.title,
+            entrypoint: deployment.entrypoint,
+            url: "http://localhost:3000/deployments/deployment_1/",
+            createdAt: "2026-05-26T00:00:00.000Z",
+            updatedAt: "2026-05-26T00:00:00.000Z",
+          },
+        });
+      },
+      onToolCall: (call) => {
+        calls.push(call);
+        return { accepted: true };
+      },
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/deploy_static_site`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_deploy",
+          input: {
+            goalId: "goal_1",
+            taskIndex: 0,
+            title: "Static site",
+            localPath: "dist",
+          },
+        }),
+      },
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      deployment: { id: "deployment_1" },
+    });
+    expect(response.status).toBe(200);
+    expect(deployments).toEqual([
+      expect.objectContaining({
+        entrypoint: "index.html",
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: "index.html" }),
+          expect.objectContaining({ path: "app.js" }),
+        ]),
+      }),
+    ]);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        name: "deploy_static_site",
+        toolCallId: "tool_deploy",
+      }),
+    ]);
+    await rm(workspacePath, { recursive: true, force: true });
   });
 });

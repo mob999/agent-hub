@@ -6,10 +6,15 @@ import type {
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubDeployStaticSiteToolInput,
+  AgentHubDeployStaticSiteToolResult,
+  AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
+  AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -27,6 +32,9 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
       "create_goal",
       "create_task",
       "approve_task",
@@ -38,7 +46,11 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
       "upload_artifact",
+      "deploy_static_site",
       "complete_task",
     ]);
   });
@@ -169,6 +181,31 @@ describe("AgentHub MCP protocol", () => {
     expect(read.goalId).toBe(list.goalId);
   });
 
+  it("expresses memory tools scoped to the current agent workspace", () => {
+    const append: AgentHubAppendMemoryToolInput = {
+      scope: "long_term",
+      title: "User preference",
+      content: "The user prefers concise implementation plans.",
+      tags: ["preference"],
+    };
+    const search: AgentHubSearchMemoryToolInput = {
+      query: "implementation plans",
+      scopes: ["long_term", "daily", "transcript"],
+      fromDate: "2026-06-01",
+      toDate: "2026-06-01",
+      limit: 5,
+    };
+    const read: AgentHubReadMemoryToolInput = {
+      scope: "transcript",
+      date: "2026-06-01",
+      maxBytes: 4096,
+    };
+
+    expect(append.scope).toBe("long_term");
+    expect(search.scopes).toContain("transcript");
+    expect(read.scope).toBe("transcript");
+  });
+
   it("expresses upload_artifact and complete_task tool calls", () => {
     const uploadInput: AgentHubUploadArtifactToolInput = {
       goalId: "00000000-0000-4000-8000-000000000020",
@@ -210,6 +247,37 @@ describe("AgentHub MCP protocol", () => {
     expect(uploadResult.artifact.filename).toBe("report.md");
     expect(uploadResult.artifact.editorUrl).toContain("/editor/");
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
+  });
+
+  it("expresses deploy_static_site tool calls", () => {
+    const input: AgentHubDeployStaticSiteToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 0,
+      title: "Landing page",
+      localPath: "dist",
+      entrypoint: "index.html",
+    };
+    const result: AgentHubDeployStaticSiteToolResult = {
+      accepted: true,
+      deployment: {
+        id: "00000000-0000-4000-8000-000000000030",
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        goalId: input.goalId,
+        taskIndex: input.taskIndex,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        status: "ready",
+        title: input.title,
+        entrypoint: "index.html",
+        url: "http://localhost:3000/deployments/00000000-0000-4000-8000-000000000030/",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    };
+
+    expect(input.localPath).toBe("dist");
+    expect(result.deployment.url).toContain("/deployments/");
   });
 
   it("expresses cross-conversation messages through send_message target", () => {

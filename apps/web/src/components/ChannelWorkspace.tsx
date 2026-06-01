@@ -1,10 +1,10 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
-import { formatMessageTime, formatTime } from '../lib/format'
+import { formatMessageTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
@@ -31,6 +31,7 @@ interface ChannelWorkspaceProps {
   messages: ConversationMessage[]
   goals: ConversationGoal[]
   artifacts: ConversationArtifact[]
+  deployments: ConversationDeployment[]
   agents: AgentDetails[]
   user: User | null
   prompt: string
@@ -49,6 +50,7 @@ interface ChannelWorkspaceProps {
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
   openTasksRoute: () => void
+  openDeploymentsRoute: () => void
   closeConversationRoute: () => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
@@ -57,8 +59,11 @@ interface ChannelWorkspaceProps {
   editorConversationId?: string | null
   onActiveEditorArtifactChange?: (artifactId: string) => void
   refreshArtifacts?: () => void
+  refreshDeployments?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
+  focusedMessageId?: string | null
   taskRouteActive?: boolean
+  deploymentRouteActive?: boolean
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -100,33 +105,6 @@ function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
       return 'gray'
     case 'blocked':
       return 'magenta'
-  }
-}
-
-function artifactLabel(filename: string): string {
-  const extension = filename.split('.').pop()?.toLowerCase()
-
-  switch (extension) {
-    case 'html':
-    case 'htm':
-      return 'HTML'
-    case 'md':
-    case 'markdown':
-    case 'mdx':
-      return 'Markdown'
-    case 'diff':
-    case 'patch':
-      return 'Diff'
-    case 'avif':
-    case 'gif':
-    case 'jpeg':
-    case 'jpg':
-    case 'png':
-    case 'svg':
-    case 'webp':
-      return 'Image'
-    default:
-      return 'File'
   }
 }
 
@@ -177,6 +155,7 @@ export function ChannelWorkspace({
   messages,
   goals,
   artifacts,
+  deployments,
   agents,
   user,
   prompt,
@@ -192,6 +171,7 @@ export function ChannelWorkspace({
   openArtifactEditor,
   openGoalRoute,
   openTasksRoute,
+  openDeploymentsRoute,
   closeConversationRoute,
   openRun,
   openConversationEditor,
@@ -200,11 +180,14 @@ export function ChannelWorkspace({
   editorConversationId = null,
   onActiveEditorArtifactChange,
   refreshArtifacts,
+  refreshDeployments,
   focusedGoalRoute = null,
+  focusedMessageId = null,
   taskRouteActive = false,
+  deploymentRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'deployments' } | null>(null)
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -449,20 +432,19 @@ export function ChannelWorkspace({
     )
   }
 
-  const firstArtifactId = artifacts[0]?.id ?? null
-  const showEditor =
+  const showFiles =
     editorConversationId !== null &&
     editorConversationId === activeConversation?.id &&
     canOpenWorkspacePanel
   const showTasks =
-    !showEditor &&
+    !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'tasks'
-  const showFiles =
-    !showEditor &&
+  const showDeployments =
+    !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
-    workspacePanel?.view === 'files'
-  const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
+    workspacePanel?.view === 'deployments'
+  const showWorkspacePage = (showTasks || showFiles || showDeployments) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -474,7 +456,7 @@ export function ChannelWorkspace({
   }
 
   useEffect(() => {
-    if (showWorkspacePage) {
+    if (showWorkspacePage || focusedMessageId !== null) {
       return
     }
 
@@ -493,6 +475,25 @@ export function ChannelWorkspace({
     lastVisibleMessage?.content,
     lastVisibleMessage?.id,
     lastVisibleMessage?.status,
+    focusedMessageId,
+    showWorkspacePage,
+    visibleMessages.length,
+  ])
+
+  useEffect(() => {
+    if (showWorkspacePage || focusedMessageId === null) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      document
+        .getElementById(`message-${focusedMessageId}`)
+        ?.scrollIntoView({ block: 'center' })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [
+    focusedMessageId,
     showWorkspacePage,
     visibleMessages.length,
   ])
@@ -526,6 +527,19 @@ export function ChannelWorkspace({
 
     return () => window.clearTimeout(timeout)
   }, [activeConversation?.id, taskRouteActive])
+
+  useEffect(() => {
+    if (activeConversation?.id === undefined || !deploymentRouteActive) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWorkspacePanel({ conversationId: activeConversation.id, view: 'deployments' })
+      refreshDeployments?.()
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [activeConversation?.id, deploymentRouteActive, refreshDeployments])
 
   useEffect(() => {
     if (!showTasks || taskAggregationMode !== 'goal' || focusedGoalId === null) {
@@ -829,6 +843,67 @@ export function ChannelWorkspace({
     </div>
   )
 
+  const renderDeploymentListView = () => (
+    <div className="grid w-full content-start gap-3">
+      {deployments.length === 0 ? (
+        <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+          <Launch size={32} />
+          <h2 className="cds--type-heading-compact-02">No deployments yet</h2>
+        </div>
+      ) : (
+        deployments.map((deployment) => (
+          <article
+            key={deployment.id}
+            className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4"
+          >
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Tag size="sm" type={deployment.status === 'ready' ? 'green' : deployment.status === 'failed' ? 'red' : 'gray'}>
+                    {deployment.status.toUpperCase()}
+                  </Tag>
+                  <h3 className="truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]">
+                    {deployment.title}
+                  </h3>
+                </div>
+                <p className="mt-1 text-sm text-[var(--cds-text-secondary)]">
+                  Entry `{deployment.entrypoint}` from run{' '}
+                  <button className={inlineLink} type="button" onClick={() => openRun(deployment.runId)}>
+                    {deployment.runId.slice(0, 8)}
+                  </button>
+                  {deployment.goalId ? (
+                    <>
+                      {' '}for goal{' '}
+                      <button
+                        className={inlineLink}
+                        type="button"
+                        onClick={() => openGoalRoute(deployment.goalId!, deployment.taskIndex ?? null)}
+                      >
+                        {deployment.goalId.slice(0, 8)}
+                        {deployment.taskIndex === undefined ? '' : ` #${deployment.taskIndex}`}
+                      </button>
+                    </>
+                  ) : null}
+                  {' '}at {formatMessageTime(deployment.createdAt)}
+                </p>
+              </div>
+              <a
+                className="inline-flex h-8 shrink-0 items-center gap-2 border border-[var(--cds-border-strong-01)] px-3 text-sm font-semibold text-[var(--cds-text-primary)] no-underline hover:bg-[var(--cds-layer-hover-01)]"
+                href={deployment.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-disabled={!deployment.url || deployment.status !== 'ready'}
+              >
+                Open
+                <Launch size={14} />
+              </a>
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  )
+
   return (
     <section
       id="main-content"
@@ -892,6 +967,7 @@ export function ChannelWorkspace({
                 return
               }
 
+              closeArtifactEditor?.()
               setWorkspacePanel(activeConversation ? { conversationId: activeConversation.id, view: 'tasks' } : null)
               openTasksRoute()
             }}
@@ -906,34 +982,9 @@ export function ChannelWorkspace({
             type="button"
             disabled={!canOpenWorkspacePanel}
             onClick={() => {
-              setWorkspacePanel((panel) =>
-                panel?.conversationId === activeConversation?.id && panel?.view === 'files'
-                  ? null
-                  : activeConversation
-                    ? { conversationId: activeConversation.id, view: 'files' }
-                    : null,
-              )
-              closeConversationRoute()
-            }}
-          >
-            <Folder size={16} />
-          </IconButton>
-          <IconButton
-            kind={showEditor ? 'secondary' : 'ghost'}
-            label="Editor"
-            size="md"
-            align="bottom"
-            type="button"
-            disabled={!canOpenWorkspacePanel}
-            onClick={() => {
-              if (showEditor) {
+              if (showFiles) {
                 closeArtifactEditor?.()
                 setWorkspacePanel(null)
-                return
-              }
-
-              if (firstArtifactId !== null) {
-                openArtifactEditorPanel(firstArtifactId)
                 return
               }
 
@@ -942,7 +993,31 @@ export function ChannelWorkspace({
               }
             }}
           >
-            <Code size={16} />
+            <Folder size={16} />
+          </IconButton>
+          <IconButton
+            kind={showDeployments ? 'secondary' : 'ghost'}
+            label="Deployments"
+            size="md"
+            align="bottom"
+            type="button"
+            disabled={!canOpenWorkspacePanel}
+            onClick={() => {
+              if (showDeployments) {
+                setWorkspacePanel(null)
+                closeConversationRoute()
+                return
+              }
+
+              closeArtifactEditor?.()
+              if (activeConversation !== null) {
+                setWorkspacePanel({ conversationId: activeConversation.id, view: 'deployments' })
+                openDeploymentsRoute()
+                refreshDeployments?.()
+              }
+            }}
+          >
+            <Launch size={16} />
           </IconButton>
           {hasSelectedConversation && (
             <IconButton
@@ -975,7 +1050,7 @@ export function ChannelWorkspace({
       <div
         ref={scrollContainerRef}
         className={`min-h-0 p-2 ${
-          showEditor ? 'overflow-hidden' : 'overflow-y-auto'
+          showFiles ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
         aria-live="polite"
       >
@@ -1021,7 +1096,7 @@ export function ChannelWorkspace({
               taskAggregationMode === 'goal' ? renderGoalListView() : renderStatusBoardView()
             )}
           </div>
-        ) : showWorkspacePage && showEditor ? (
+        ) : showWorkspacePage && showFiles ? (
           <div className="grid h-full min-h-0 w-full">
             <ArtifactWorkspace
               artifacts={artifacts}
@@ -1030,69 +1105,9 @@ export function ChannelWorkspace({
               onRefreshArtifacts={refreshArtifacts}
             />
           </div>
-        ) : showWorkspacePage && showFiles ? (
+        ) : showWorkspacePage && showDeployments ? (
           <div className="grid w-full content-start gap-4">
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
-              <div>
-                <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Files</h2>
-              </div>
-              <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
-                {artifacts.length}
-              </span>
-            </div>
-            {artifacts.length === 0 ? (
-              <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
-                <Folder size={32} />
-                <h2 className="cds--type-heading-compact-02">No files yet</h2>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                {artifacts.map((artifact) => {
-                  const creator = agents.find((agent) => agent.agent.id === artifact.creatorAgentId)
-
-                  return (
-                    <article
-                      key={artifact.id}
-                      className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-sm text-[var(--cds-text-primary)]"
-                    >
-                      <div className="flex min-w-0 items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <button
-                            className="block max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                            type="button"
-                          onClick={() => {
-                            openArtifactEditorPanel(artifact.id)
-                          }}
-                          >
-                            {artifact.title}
-                          </button>
-                          <p className="truncate text-sm text-[var(--cds-text-secondary)]">
-                            {artifact.filename}
-                          </p>
-                        </div>
-                        <span className="shrink-0 border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
-                          {artifactLabel(artifact.filename)}
-                        </span>
-                      </div>
-                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
-                        <div>
-                          <dt className="font-semibold uppercase">Creator</dt>
-                          <dd className="truncate">{creator?.agent.name ?? artifact.creatorAgentId}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Size</dt>
-                          <dd>{Math.max(1, Math.ceil(artifact.sizeBytes / 1024))} KB</dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Created</dt>
-                          <dd>{formatTime(artifact.createdAt)}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  )
-                })}
-              </div>
-            )}
+            {renderDeploymentListView()}
           </div>
         ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
@@ -1133,7 +1148,12 @@ export function ChannelWorkspace({
 
               return (
                 <article
-                  className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1"
+                  id={`message-${message.id}`}
+                  className={`grid min-w-0 scroll-mt-6 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] transition-colors max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1 ${
+                    focusedMessageId === message.id
+                      ? 'bg-[var(--cds-layer-selected-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]'
+                      : ''
+                  }`}
                   key={message.id}
                 >
                   <span

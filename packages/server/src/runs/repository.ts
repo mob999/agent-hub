@@ -145,6 +145,7 @@ export async function appendRunEvent(
 
   return {
     dispatchJobs: conversationResult.dispatchJobs,
+    memoryAppendJobs: conversationResult.memoryAppendJobs,
     toolResult: conversationResult.toolResult,
     realtimeEvents: [
       ...realtimeEvents,

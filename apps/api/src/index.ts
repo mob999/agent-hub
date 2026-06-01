@@ -54,6 +54,7 @@ import {
   getRunnableAgentForUser,
   listConversationMessagesForUser,
   listConversationArtifactsForUser,
+  listConversationDeploymentsForUser,
   listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
@@ -1830,6 +1831,42 @@ app.get("/conversations/:conversationId/artifacts", async (c) => {
   }
 
   return c.json({ artifacts });
+});
+
+app.get("/conversations/:conversationId/deployments", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const deployments = await listConversationDeploymentsForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+  });
+
+  if (deployments === null) {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ deployments });
 });
 
 app.post("/conversations/:conversationId/messages", async (c) => {

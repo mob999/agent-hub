@@ -254,6 +254,22 @@ export interface ConversationArtifactAction {
   updatedAt: string
 }
 
+export interface ConversationDeployment {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  goalId?: string
+  taskIndex?: number
+  runId: string
+  creatorAgentId: string
+  title: string
+  entrypoint: string
+  status: 'ready' | 'failed' | 'deleted'
+  url?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact
   latestRevision?: ConversationArtifactRevision

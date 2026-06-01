@@ -1,5 +1,5 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
@@ -49,6 +49,7 @@ interface ChannelWorkspaceProps {
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
   openTasksRoute: () => void
+  openLatestDeployment: () => void
   closeConversationRoute: () => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
@@ -165,6 +166,7 @@ export function ChannelWorkspace({
   openArtifactEditor,
   openGoalRoute,
   openTasksRoute,
+  openLatestDeployment,
   closeConversationRoute,
   openRun,
   openConversationEditor,
@@ -886,6 +888,17 @@ export function ChannelWorkspace({
             }}
           >
             <Folder size={16} />
+          </IconButton>
+          <IconButton
+            kind="ghost"
+            label="Open deployment"
+            size="md"
+            align="bottom"
+            type="button"
+            disabled={!canOpenWorkspacePanel}
+            onClick={openLatestDeployment}
+          >
+            <Launch size={16} />
           </IconButton>
           {hasSelectedConversation && (
             <IconButton

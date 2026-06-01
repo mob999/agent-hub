@@ -24,6 +24,7 @@ import {
   type AuthResponse,
   type Conversation,
   type ConversationArtifact,
+  type ConversationDeployment,
   type ConversationGoal,
   type ConversationMessage,
   type CreateGroupConversationResponse,
@@ -1248,6 +1249,28 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const openTasksRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
   }
+  const openLatestDeployment = async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
+        `/conversations/${conversationId}/deployments`,
+      )
+      const deployment = response.deployments.find((item) => item.status === 'ready' && item.url)
+
+      if (deployment?.url) {
+        window.open(deployment.url, '_blank', 'noopener,noreferrer')
+        setRunError(null)
+        return
+      }
+
+      setRunError('No ready deployment is available for this conversation.')
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to open deployment.')
+      }
+    }
+  }
   const closeConversationRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
@@ -1818,6 +1841,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               openTasksRoute={() => {
                 if (activeConversation?.id) {
                   openTasksRoute(activeConversation.id)
+                }
+              }}
+              openLatestDeployment={() => {
+                if (activeConversation?.id) {
+                  void openLatestDeployment(activeConversation.id)
                 }
               }}
               closeConversationRoute={() => {

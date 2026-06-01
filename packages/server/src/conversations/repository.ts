@@ -1584,6 +1584,33 @@ export async function listConversationArtifactsForUser(
   );
 }
 
+export async function listConversationDeploymentsForUser(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<ConversationDeployment[] | null> {
+  const conversation = await getConversationForUser(db, input);
+
+  if (conversation === null) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationDeployments)
+    .where(eq(conversationDeployments.conversationId, input.conversationId))
+    .orderBy(desc(conversationDeployments.createdAt));
+
+  return rows.map((row) =>
+    toConversationDeployment(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    }),
+  );
+}
+
 export async function getConversationArtifactForUser(
   db: Db,
   input: {

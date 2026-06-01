@@ -1,15 +1,19 @@
 import {
   Button,
+  IconButton,
   InlineLoading,
   InlineNotification,
   Modal,
   TextArea,
   TextInput,
 } from '@carbon/react'
+import { Document, Folder, Renew } from '@carbon/react/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse, type AgentMemoryScope } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
+
+type AgentSettingsSection = 'profile' | 'memory' | 'danger'
 
 interface AgentEditModalProps {
   agent: AgentDetails
@@ -38,11 +42,14 @@ export function AgentEditModal({
   const [memoryLoading, setMemoryLoading] = useState(false)
   const [memoryWorkspaceReady, setMemoryWorkspaceReady] = useState(true)
   const [selectedMemoryScope, setSelectedMemoryScope] = useState<AgentMemoryScope>('long_term')
+  const [selectedSection, setSelectedSection] = useState<AgentSettingsSection>('profile')
   const canSave = name.trim().length > 0 && !isSaving
   const selectedMemoryFile = useMemo(
     () => memoryFiles.find((file) => file.scope === selectedMemoryScope) ?? memoryFiles[0] ?? null,
     [memoryFiles, selectedMemoryScope],
   )
+  const longTermMemory = memoryFiles.find((file) => file.scope === 'long_term') ?? null
+  const dailyMemory = memoryFiles.find((file) => file.scope === 'daily') ?? null
 
   const loadMemoryFiles = async () => {
     setMemoryLoading(true)
@@ -76,8 +83,23 @@ export function AgentEditModal({
     setName(agent.agent.name)
     setDescription(agent.agent.description ?? '')
     setAvatar(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
+    setSelectedSection('profile')
     void loadMemoryFiles()
   }, [agent.agent.avatar, agent.agent.description, agent.agent.id, agent.agent.name, open])
+
+  const sectionButtonClass = (section: AgentSettingsSection) =>
+    `w-full cursor-pointer border-0 px-3 py-2 text-left text-sm font-semibold ${
+      selectedSection === section
+        ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
+        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+    }`
+
+  const memoryTreeButtonClass = (scope: AgentMemoryScope) =>
+    `flex w-full cursor-pointer items-center gap-2 border-0 px-2 py-1.5 text-left text-sm ${
+      selectedMemoryScope === scope
+        ? 'bg-[var(--cds-layer-selected-01)] font-semibold text-[var(--cds-text-primary)]'
+        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+    }`
 
   return (
     <Modal
@@ -100,9 +122,10 @@ export function AgentEditModal({
         })
       }}
     >
-      <div className="grid gap-4">
+      <div className="grid gap-4 md:grid-cols-[10rem_minmax(0,1fr)]">
         {error && (
           <InlineNotification
+            className="md:col-span-2"
             kind="error"
             title="Agent was not updated"
             subtitle={error}
@@ -110,115 +133,146 @@ export function AgentEditModal({
             hideCloseButton
           />
         )}
-        <TextInput
-          id="edit-agent-name"
-          labelText="Name"
-          value={name}
-          disabled={isSaving}
-          maxLength={120}
-          onChange={(event) => setName(event.target.value)}
-        />
-        <TextArea
-          id="edit-agent-description"
-          labelText="Description"
-          rows={3}
-          value={description}
-          disabled={isSaving}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-        <AvatarPicker
-          label="Avatar"
-          value={avatar}
-          disabled={isSaving}
-          onChange={setAvatar}
-        />
-        <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold uppercase text-[var(--cds-text-secondary)]">
-              Memory files
-            </h3>
-            <Button
-              kind="ghost"
-              size="sm"
-              type="button"
-              disabled={memoryLoading}
-              onClick={() => {
-                void loadMemoryFiles()
-              }}
-            >
-              Refresh
-            </Button>
-          </div>
-          {memoryLoading && <InlineLoading description="Loading memory files..." />}
-          {memoryError && (
-            <InlineNotification
-              kind="error"
-              title="Memory was not loaded"
-              subtitle={memoryError}
-              lowContrast
-              hideCloseButton
-            />
+        <nav className="grid content-start gap-1 border-r border-[var(--cds-border-subtle-01)] pr-3" aria-label="Agent settings">
+          <button className={sectionButtonClass('profile')} type="button" onClick={() => setSelectedSection('profile')}>
+            Profile
+          </button>
+          <button className={sectionButtonClass('memory')} type="button" onClick={() => setSelectedSection('memory')}>
+            Memory
+          </button>
+          <button className={sectionButtonClass('danger')} type="button" onClick={() => setSelectedSection('danger')}>
+            Danger
+          </button>
+        </nav>
+        <div className="min-h-[34rem] min-w-0">
+          {selectedSection === 'profile' && (
+            <div className="grid gap-4">
+              <TextInput
+                id="edit-agent-name"
+                labelText="Name"
+                value={name}
+                disabled={isSaving}
+                maxLength={120}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <TextArea
+                id="edit-agent-description"
+                labelText="Description"
+                rows={3}
+                value={description}
+                disabled={isSaving}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+              <AvatarPicker
+                label="Avatar"
+                value={avatar}
+                disabled={isSaving}
+                onChange={setAvatar}
+              />
+            </div>
           )}
-          {!memoryWorkspaceReady && (
-            <InlineNotification
-              kind="warning"
-              title="Workspace is not ready"
-              subtitle="Memory files will appear after the agent workspace is provisioned."
-              lowContrast
-              hideCloseButton
-            />
-          )}
-          {memoryFiles.length > 0 && (
-            <div className="grid gap-2">
-              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Agent memory files">
-                {memoryFiles.map((file) => (
-                  <button
-                    key={file.scope}
-                    className={`border px-3 py-1 text-sm font-semibold ${
-                      selectedMemoryScope === file.scope
-                        ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-                        : 'border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
-                    }`}
-                    type="button"
-                    role="tab"
-                    aria-selected={selectedMemoryScope === file.scope}
-                    onClick={() => setSelectedMemoryScope(file.scope)}
-                  >
-                    {file.label}
-                  </button>
-                ))}
+          {selectedSection === 'memory' && (
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold uppercase text-[var(--cds-text-secondary)]">
+                  Memory
+                </h3>
+                <IconButton
+                  kind="ghost"
+                  size="sm"
+                  label="Refresh memory"
+                  align="left"
+                  type="button"
+                  disabled={memoryLoading}
+                  onClick={() => {
+                    void loadMemoryFiles()
+                  }}
+                >
+                  <Renew size={16} />
+                </IconButton>
               </div>
-              {selectedMemoryFile && (
-                <div className="grid gap-2">
-                  <p className="text-xs text-[var(--cds-text-secondary)]">
-                    {selectedMemoryFile.file}
-                  </p>
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-xs leading-5 text-[var(--cds-text-primary)]">
-                    {selectedMemoryFile.exists
-                      ? selectedMemoryFile.content
-                      : 'This memory file has not been created yet.'}
-                  </pre>
+              {memoryLoading && <InlineLoading description="Loading memory files..." />}
+              {memoryError && (
+                <InlineNotification
+                  kind="error"
+                  title="Memory was not loaded"
+                  subtitle={memoryError}
+                  lowContrast
+                  hideCloseButton
+                />
+              )}
+              {!memoryWorkspaceReady && (
+                <InlineNotification
+                  kind="warning"
+                  title="Workspace is not ready"
+                  subtitle="Memory files will appear after the agent workspace is provisioned."
+                  lowContrast
+                  hideCloseButton
+                />
+              )}
+              {memoryFiles.length > 0 && (
+                <div className="grid min-h-80 gap-3 md:grid-cols-[14rem_minmax(0,1fr)]">
+                  <div className="grid content-start gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2">
+                    {longTermMemory && (
+                      <button className={memoryTreeButtonClass('long_term')} type="button" onClick={() => setSelectedMemoryScope('long_term')}>
+                        <Document size={16} />
+                        MEMORY.md
+                      </button>
+                    )}
+                    <div className="grid gap-1">
+                      <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-semibold text-[var(--cds-text-primary)]">
+                        <Folder size={16} />
+                        memory/
+                      </div>
+                      <div className="grid gap-1 pl-5">
+                        {dailyMemory && (
+                          <button className={memoryTreeButtonClass('daily')} type="button" onClick={() => setSelectedMemoryScope('daily')}>
+                            <Document size={16} />
+                            {dailyMemory.label}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {selectedMemoryFile && (
+                    <div className="grid min-w-0 gap-2">
+                      <pre className="h-[28rem] overflow-auto whitespace-pre-wrap border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-xs leading-5 text-[var(--cds-text-primary)]">
+                        {selectedMemoryFile.exists
+                          ? selectedMemoryFile.content
+                          : 'This memory file has not been created yet.'}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
-        <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
-          <Button
-            kind="danger--tertiary"
-            size="sm"
-            type="button"
-            disabled={isSaving}
-            onClick={() => {
-              if (isSaving) {
-                return
-              }
+          {selectedSection === 'danger' && (
+            <div className="grid gap-3">
+              <InlineNotification
+                kind="warning"
+                title="Archive agent"
+                subtitle="Archived agents are hidden from active lists and can be restored later."
+                lowContrast
+                hideCloseButton
+              />
+              <Button
+                kind="danger--tertiary"
+                size="sm"
+                type="button"
+                disabled={isSaving}
+                onClick={() => {
+                  if (isSaving) {
+                    return
+                  }
 
-              onArchive()
-            }}
-          >
-            Archive agent
-          </Button>
+                  onArchive()
+                }}
+              >
+                Archive agent
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </Modal>

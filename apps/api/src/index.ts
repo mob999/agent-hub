@@ -67,6 +67,7 @@ import {
   readArtifactContent,
   restoreAgentForUser,
   restoreGroupConversationForUser,
+  searchConversationsForUser,
   resolveTextMentionedAgentIds,
   subscribeRealtimeEvents,
   toAgentRun,
@@ -259,6 +260,38 @@ function parseRecordStatusFilter(
   }
 
   return value === "active" || value === "archived" || value === "all"
+    ? value
+    : null;
+}
+
+function parseSearchSort(value: unknown): "relevant" | "recent" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "relevant" || value === "recent" ? value : null;
+}
+
+function parseSearchTimeFilter(
+  value: unknown,
+): "any" | "24h" | "7d" | "30d" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "any" || value === "24h" || value === "7d" || value === "30d"
+    ? value
+    : null;
+}
+
+function parseSenderType(
+  value: unknown,
+): "user" | "agent" | "system" | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "user" || value === "agent" || value === "system"
     ? value
     : null;
 }
@@ -986,6 +1019,67 @@ app.patch("/agents/:agentId/restore", async (c) => {
   }
 
   return c.json({ agent: result.agent });
+});
+
+app.use("/search", requireAuth);
+app.get("/search", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const query = c.req.query("query")?.trim() ?? "";
+  const channelId = c.req.query("channelId");
+  const senderAgentId = c.req.query("senderAgentId");
+  const senderType = parseSenderType(c.req.query("senderType"));
+  const sort = parseSearchSort(c.req.query("sort"));
+  const timeFilter = parseSearchTimeFilter(c.req.query("timeFilter"));
+  const limitRaw = c.req.query("limit");
+  const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
+
+  if (
+    query.length === 0 ||
+    query.length > 200 ||
+    (channelId !== undefined && !uuidPattern.test(channelId)) ||
+    (senderAgentId !== undefined && !uuidPattern.test(senderAgentId)) ||
+    senderType === null ||
+    sort === null ||
+    timeFilter === null ||
+    (limit !== undefined && (!Number.isFinite(limit) || limit <= 0))
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_SEARCH_REQUEST",
+          message:
+            "query (1-200) is required; optional channelId/senderAgentId must be UUID; senderType/sort/timeFilter must be valid.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json(
+    await searchConversationsForUser(db, {
+      ownerUserId: user.id,
+      query,
+      channelId,
+      senderAgentId,
+      senderType: senderType ?? undefined,
+      sort: sort ?? undefined,
+      timeFilter: timeFilter ?? undefined,
+      limit,
+    }),
+  );
 });
 
 app.use("/conversations", requireAuth);

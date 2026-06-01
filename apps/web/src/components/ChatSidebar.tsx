@@ -14,6 +14,7 @@ interface ChatSidebarProps {
   savedOpen: boolean
   onCreateAgent: () => void
   onCreateGroup: () => void
+  onOpenSearch: () => void
   onOpenActivity: () => void
   onRestoreAgent: (agentId: string) => void
   onRestoreGroup: (conversationId: string) => void
@@ -58,6 +59,7 @@ export function ChatSidebar({
   savedOpen,
   onCreateAgent,
   onCreateGroup,
+  onOpenSearch,
   onOpenActivity,
   onRestoreAgent,
   onRestoreGroup,
@@ -99,7 +101,11 @@ export function ChatSidebar({
       </header>
 
       <section className="grid gap-0.5 p-3" aria-label="Quick actions">
-        <button className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`} type="button">
+        <button
+          className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          type="button"
+          onClick={onOpenSearch}
+        >
           <Search size={16} />
           <span>Search</span>
           <kbd className="text-[var(--cds-text-secondary)]">Ctrl K</kbd>

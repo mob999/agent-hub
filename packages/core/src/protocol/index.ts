@@ -5,4 +5,5 @@ export * from "./daemon.js";
 export * from "./mcp.js";
 export * from "./realtime.js";
 export * from "./run.js";
+export * from "./search.js";
 export * from "../avatar.js";

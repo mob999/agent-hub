@@ -20,6 +20,10 @@ function chatStateFromPath(path: string): { conversationId: string | null; goalR
     return { conversationId: null, goalRoute: null }
   }
 
+  if (segments[1] === 'search') {
+    return { conversationId: null, goalRoute: null }
+  }
+
   const conversationId = segments[1] === undefined ? null : decodeURIComponent(segments[1])
 
   if (conversationId === null) {
@@ -75,6 +79,7 @@ function getRoutePath(): RoutePath {
     path === '/login' ||
     path === '/register' ||
     path === '/chat' ||
+    path === '/chat/search' ||
     chatStateFromPath(path).conversationId !== null ||
     path === '/runs' ||
     path === '/daemon'

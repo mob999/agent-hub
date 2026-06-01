@@ -138,6 +138,7 @@ export const daemonEnvSchema = z.object({
     .positive()
     .default(60000),
   CODEX_EXECUTABLE_PATH: z.string().min(1).optional(),
+  CLAUDE_CODE_EXECUTABLE_PATH: z.string().min(1).optional(),
 });
 
 export type DaemonEnv = z.infer<typeof daemonEnvSchema>;

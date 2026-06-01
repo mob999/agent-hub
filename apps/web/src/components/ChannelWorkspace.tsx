@@ -1,10 +1,10 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, Code, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, Folder, Image as ImageIcon, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
-import { formatMessageTime, formatTime } from '../lib/format'
+import { formatMessageTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
@@ -103,33 +103,6 @@ function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
   }
 }
 
-function artifactLabel(filename: string): string {
-  const extension = filename.split('.').pop()?.toLowerCase()
-
-  switch (extension) {
-    case 'html':
-    case 'htm':
-      return 'HTML'
-    case 'md':
-    case 'markdown':
-    case 'mdx':
-      return 'Markdown'
-    case 'diff':
-    case 'patch':
-      return 'Diff'
-    case 'avif':
-    case 'gif':
-    case 'jpeg':
-    case 'jpg':
-    case 'png':
-    case 'svg':
-    case 'webp':
-      return 'Image'
-    default:
-      return 'File'
-  }
-}
-
 function mentionSearchTerm(value: string): string | null {
   const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(value)
 
@@ -204,7 +177,7 @@ export function ChannelWorkspace({
   taskRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'files' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' } | null>(null)
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -449,20 +422,15 @@ export function ChannelWorkspace({
     )
   }
 
-  const firstArtifactId = artifacts[0]?.id ?? null
-  const showEditor =
+  const showFiles =
     editorConversationId !== null &&
     editorConversationId === activeConversation?.id &&
     canOpenWorkspacePanel
   const showTasks =
-    !showEditor &&
+    !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'tasks'
-  const showFiles =
-    !showEditor &&
-    workspacePanel?.conversationId === activeConversation?.id &&
-    workspacePanel?.view === 'files'
-  const showWorkspacePage = (showTasks || showFiles || showEditor) && canOpenWorkspacePanel
+  const showWorkspacePage = (showTasks || showFiles) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -906,34 +874,9 @@ export function ChannelWorkspace({
             type="button"
             disabled={!canOpenWorkspacePanel}
             onClick={() => {
-              setWorkspacePanel((panel) =>
-                panel?.conversationId === activeConversation?.id && panel?.view === 'files'
-                  ? null
-                  : activeConversation
-                    ? { conversationId: activeConversation.id, view: 'files' }
-                    : null,
-              )
-              closeConversationRoute()
-            }}
-          >
-            <Folder size={16} />
-          </IconButton>
-          <IconButton
-            kind={showEditor ? 'secondary' : 'ghost'}
-            label="Editor"
-            size="md"
-            align="bottom"
-            type="button"
-            disabled={!canOpenWorkspacePanel}
-            onClick={() => {
-              if (showEditor) {
+              if (showFiles) {
                 closeArtifactEditor?.()
                 setWorkspacePanel(null)
-                return
-              }
-
-              if (firstArtifactId !== null) {
-                openArtifactEditorPanel(firstArtifactId)
                 return
               }
 
@@ -942,7 +885,7 @@ export function ChannelWorkspace({
               }
             }}
           >
-            <Code size={16} />
+            <Folder size={16} />
           </IconButton>
           {hasSelectedConversation && (
             <IconButton
@@ -975,7 +918,7 @@ export function ChannelWorkspace({
       <div
         ref={scrollContainerRef}
         className={`min-h-0 p-2 ${
-          showEditor ? 'overflow-hidden' : 'overflow-y-auto'
+          showFiles ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
         aria-live="polite"
       >
@@ -1021,7 +964,7 @@ export function ChannelWorkspace({
               taskAggregationMode === 'goal' ? renderGoalListView() : renderStatusBoardView()
             )}
           </div>
-        ) : showWorkspacePage && showEditor ? (
+        ) : showWorkspacePage && showFiles ? (
           <div className="grid h-full min-h-0 w-full">
             <ArtifactWorkspace
               artifacts={artifacts}
@@ -1029,70 +972,6 @@ export function ChannelWorkspace({
               onActiveArtifactChange={onActiveEditorArtifactChange}
               onRefreshArtifacts={refreshArtifacts}
             />
-          </div>
-        ) : showWorkspacePage && showFiles ? (
-          <div className="grid w-full content-start gap-4">
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] pb-3">
-              <div>
-                <h2 className="text-base font-semibold text-[var(--cds-text-primary)]">Files</h2>
-              </div>
-              <span className="text-sm font-semibold text-[var(--cds-text-secondary)]">
-                {artifacts.length}
-              </span>
-            </div>
-            {artifacts.length === 0 ? (
-              <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
-                <Folder size={32} />
-                <h2 className="cds--type-heading-compact-02">No files yet</h2>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                {artifacts.map((artifact) => {
-                  const creator = agents.find((agent) => agent.agent.id === artifact.creatorAgentId)
-
-                  return (
-                    <article
-                      key={artifact.id}
-                      className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-sm text-[var(--cds-text-primary)]"
-                    >
-                      <div className="flex min-w-0 items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <button
-                            className="block max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-base font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                            type="button"
-                          onClick={() => {
-                            openArtifactEditorPanel(artifact.id)
-                          }}
-                          >
-                            {artifact.title}
-                          </button>
-                          <p className="truncate text-sm text-[var(--cds-text-secondary)]">
-                            {artifact.filename}
-                          </p>
-                        </div>
-                        <span className="shrink-0 border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
-                          {artifactLabel(artifact.filename)}
-                        </span>
-                      </div>
-                      <dl className="grid gap-2 text-xs text-[var(--cds-text-secondary)] sm:grid-cols-3">
-                        <div>
-                          <dt className="font-semibold uppercase">Creator</dt>
-                          <dd className="truncate">{creator?.agent.name ?? artifact.creatorAgentId}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Size</dt>
-                          <dd>{Math.max(1, Math.ceil(artifact.sizeBytes / 1024))} KB</dd>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase">Created</dt>
-                          <dd>{formatTime(artifact.createdAt)}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  )
-                })}
-              </div>
-            )}
           </div>
         ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">

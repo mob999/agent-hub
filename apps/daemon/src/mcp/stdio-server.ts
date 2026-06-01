@@ -20,14 +20,20 @@ import type {
   AgentHubCreateGoalToolResult,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubAppendMemoryToolInput,
+  AgentHubAppendMemoryToolResult,
   AgentHubListArtifactsToolInput,
   AgentHubListArtifactsToolResult,
   AgentHubListGoalsToolInput,
   AgentHubListGoalsToolResult,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
+  AgentHubReadMemoryToolInput,
+  AgentHubReadMemoryToolResult,
   AgentHubReadArtifactToolInput,
   AgentHubReadArtifactToolResult,
+  AgentHubSearchMemoryToolInput,
+  AgentHubSearchMemoryToolResult,
   AgentHubSendMessageToolInput,
   AgentHubSendMessageToolResult,
   AgentHubUploadArtifactToolInput,
@@ -38,6 +44,9 @@ const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
 const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
+const appendMemoryToolName = "append_memory" satisfies AgentHubMcpToolName;
+const searchMemoryToolName = "search_memory" satisfies AgentHubMcpToolName;
+const readMemoryToolName = "read_memory" satisfies AgentHubMcpToolName;
 const createGoalToolName = "create_goal" satisfies AgentHubMcpToolName;
 const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const approveTaskToolName = "approve_task" satisfies AgentHubMcpToolName;
@@ -50,6 +59,9 @@ const agentHubMcpToolNames = [
   listGoalsToolName,
   listArtifactsToolName,
   readArtifactToolName,
+  appendMemoryToolName,
+  searchMemoryToolName,
+  readMemoryToolName,
   createGoalToolName,
   createTaskToolName,
   approveTaskToolName,
@@ -214,6 +226,86 @@ export async function startAgentHubMcpStdioServer(
                   artifactId: { type: "string", minLength: 1 },
                 },
                 required: ["goalId", "artifactId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(appendMemoryToolName)
+        ? [
+            {
+              name: appendMemoryToolName,
+              description:
+                "Append a memory entry for this AgentHub agent. Use long_term for stable preferences/facts that should persist across days, and daily for notable events today.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  scope: {
+                    type: "string",
+                    enum: ["long_term", "daily"],
+                    description: "Defaults to long_term.",
+                  },
+                  title: { type: "string", maxLength: 120 },
+                  content: { type: "string", minLength: 1 },
+                  tags: {
+                    type: "array",
+                    items: { type: "string" },
+                    maxItems: 12,
+                  },
+                },
+                required: ["content"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(searchMemoryToolName)
+        ? [
+            {
+              name: searchMemoryToolName,
+              description:
+                "Search this agent's long-term memory, daily memory, and local conversation transcripts.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  query: { type: "string", minLength: 1 },
+                  scopes: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                      enum: ["long_term", "daily", "transcript"],
+                    },
+                  },
+                  fromDate: { type: "string" },
+                  toDate: { type: "string" },
+                  limit: { type: "number", minimum: 1, maximum: 50 },
+                },
+                required: ["query"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(readMemoryToolName)
+        ? [
+            {
+              name: readMemoryToolName,
+              description:
+                "Read this agent's memory file. Use scope transcript with a date to inspect that day's full local conversation transcript.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  scope: {
+                    type: "string",
+                    enum: ["long_term", "daily", "transcript"],
+                  },
+                  date: {
+                    type: "string",
+                    description: "Required for historical daily or transcript files. Defaults to today.",
+                  },
+                  maxBytes: { type: "number", minimum: 1, maximum: 65536 },
+                },
+                required: ["scope"],
               },
             },
           ]
@@ -401,21 +493,27 @@ export async function startAgentHubMcpStdioServer(
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
               ? readReadArtifactInput(request.params.arguments)
-              : toolName === createGoalToolName
-                ? readCreateGoalInput(request.params.arguments)
-                : toolName === createTaskToolName
-                  ? readCreateTaskInput(request.params.arguments)
-                  : toolName === approveTaskToolName
-                    ? readApproveTaskInput(request.params.arguments)
-                    : toolName === cancelTaskToolName
-                      ? readCancelTaskInput(request.params.arguments)
-                      : toolName === uploadArtifactToolName
-                        ? readUploadArtifactInput(request.params.arguments)
-                        : toolName === completeTaskToolName
-                          ? readCompleteTaskInput(request.params.arguments)
-                          : toolName === completeGoalToolName
-                            ? readCompleteGoalInput(request.params.arguments)
-                            : undefined;
+              : toolName === appendMemoryToolName
+                ? readAppendMemoryInput(request.params.arguments)
+                : toolName === searchMemoryToolName
+                  ? readSearchMemoryInput(request.params.arguments)
+                  : toolName === readMemoryToolName
+                    ? readReadMemoryInput(request.params.arguments)
+                    : toolName === createGoalToolName
+                      ? readCreateGoalInput(request.params.arguments)
+                      : toolName === createTaskToolName
+                        ? readCreateTaskInput(request.params.arguments)
+                        : toolName === approveTaskToolName
+                          ? readApproveTaskInput(request.params.arguments)
+                          : toolName === cancelTaskToolName
+                            ? readCancelTaskInput(request.params.arguments)
+                            : toolName === uploadArtifactToolName
+                              ? readUploadArtifactInput(request.params.arguments)
+                              : toolName === completeTaskToolName
+                                ? readCompleteTaskInput(request.params.arguments)
+                                : toolName === completeGoalToolName
+                                  ? readCompleteGoalInput(request.params.arguments)
+                                  : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -594,6 +692,102 @@ function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
   }
 
   return { goalId, artifactId };
+}
+
+function readAppendMemoryInput(value: unknown): AgentHubAppendMemoryToolInput {
+  const input = readObjectArguments(value, "append_memory");
+  const scope = input.scope;
+  const title = input.title;
+  const content = input.content;
+  const tags = input.tags;
+
+  if (scope !== undefined && scope !== "long_term" && scope !== "daily") {
+    throw new Error("append_memory.scope must be long_term or daily.");
+  }
+
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("append_memory.content is required.");
+  }
+
+  if (Buffer.byteLength(content.trim(), "utf8") > 8 * 1024) {
+    throw new Error("append_memory.content is too large.");
+  }
+
+  return {
+    scope,
+    title:
+      typeof title === "string" && title.trim().length > 0
+        ? title.trim().slice(0, 120)
+        : undefined,
+    content: content.trim(),
+    tags: Array.isArray(tags)
+      ? tags
+          .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+          .map((tag) => tag.trim())
+          .slice(0, 12)
+      : undefined,
+  };
+}
+
+function readMemoryScopes(value: unknown): ("long_term" | "daily" | "transcript")[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const scopes = value.filter((scope): scope is "long_term" | "daily" | "transcript" =>
+    scope === "long_term" || scope === "daily" || scope === "transcript",
+  );
+
+  return scopes.length > 0 ? [...new Set(scopes)] : undefined;
+}
+
+function readSearchMemoryInput(value: unknown): AgentHubSearchMemoryToolInput {
+  const input = readObjectArguments(value, "search_memory");
+  const query = input.query;
+  const limit = input.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    throw new Error("search_memory.query is required.");
+  }
+
+  return {
+    query: query.trim(),
+    scopes: readMemoryScopes(input.scopes),
+    fromDate:
+      typeof input.fromDate === "string" && input.fromDate.length > 0
+        ? input.fromDate
+        : undefined,
+    toDate:
+      typeof input.toDate === "string" && input.toDate.length > 0
+        ? input.toDate
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
+function readReadMemoryInput(value: unknown): AgentHubReadMemoryToolInput {
+  const input = readObjectArguments(value, "read_memory");
+  const scope = input.scope;
+  const maxBytes = input.maxBytes;
+
+  if (scope !== "long_term" && scope !== "daily" && scope !== "transcript") {
+    throw new Error("read_memory.scope must be long_term, daily, or transcript.");
+  }
+
+  return {
+    scope,
+    date:
+      typeof input.date === "string" && input.date.length > 0
+        ? input.date
+        : undefined,
+    maxBytes:
+      typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+        ? Math.min(Math.floor(maxBytes), 64 * 1024)
+        : undefined,
+  };
 }
 
 function readCreateGoalInput(value: unknown): AgentHubCreateGoalToolInput {
@@ -803,9 +997,12 @@ async function callRelayTool(input: {
     | AgentHubCompleteTaskToolInput
     | AgentHubCreateGoalToolInput
     | AgentHubCreateTaskToolInput
+    | AgentHubAppendMemoryToolInput
     | AgentHubListArtifactsToolInput
     | AgentHubListGoalsToolInput
+    | AgentHubReadMemoryToolInput
     | AgentHubReadArtifactToolInput
+    | AgentHubSearchMemoryToolInput
     | AgentHubSendMessageToolInput
     | AgentHubUploadArtifactToolInput;
   relayUrl: string;
@@ -838,9 +1035,12 @@ async function callRelayTool(input: {
     | AgentHubCompleteTaskToolResult
     | AgentHubCreateGoalToolResult
     | AgentHubCreateTaskToolResult
+    | AgentHubAppendMemoryToolResult
     | AgentHubListArtifactsToolResult
     | AgentHubListGoalsToolResult
+    | AgentHubReadMemoryToolResult
     | AgentHubReadArtifactToolResult
+    | AgentHubSearchMemoryToolResult
     | AgentHubSendMessageToolResult
     | AgentHubUploadArtifactToolResult;
 }

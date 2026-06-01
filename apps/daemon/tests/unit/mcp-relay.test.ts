@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -168,6 +168,59 @@ describe("AgentHubMcpRelay", () => {
         input: { status: "active" },
       }),
     ]);
+  });
+
+  it("handles memory tools locally without depending on server RPC", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-memory-relay-"));
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["append_memory", "read_memory", "search_memory"],
+      onToolCall: () => {
+        throw new Error("server unavailable");
+      },
+    });
+
+    const appendResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/append_memory`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_memory",
+          input: {
+            scope: "daily",
+            title: "Cross-group note",
+            content: "Sent a note to #Design.",
+            tags: ["message"],
+          },
+        }),
+      },
+    );
+    const readResponse = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/read_memory`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: { scope: "daily" },
+        }),
+      },
+    );
+
+    await expect(appendResponse.json()).resolves.toMatchObject({
+      accepted: true,
+      file: expect.stringContaining("memory/"),
+    });
+    await expect(readResponse.json()).resolves.toMatchObject({
+      accepted: true,
+      file: expect.stringContaining("memory/"),
+      content: expect.stringContaining("Sent a note to #Design."),
+    });
+    expect(appendResponse.status).toBe(200);
+    expect(readResponse.status).toBe(200);
+    await rm(workspacePath, { recursive: true, force: true });
   });
 
   it("relays cross-conversation send_message targets to the active run session", async () => {

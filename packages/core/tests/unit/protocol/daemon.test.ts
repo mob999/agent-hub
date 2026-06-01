@@ -55,6 +55,11 @@ describe("daemon protocol", () => {
       daemonDeviceId: "local-dev",
       prompt: "hello",
       agentInstructions: "Use this agent profile.",
+      contextCompression: {
+        compressibleText: "older conversation",
+        promptTemplate: "summary:\n{{compressed_context}}\nlatest:\nhello",
+        thresholdChars: 1000,
+      },
       workspacePath: "/workspace",
       run: {
         id: "00000000-0000-4000-8000-000000000002",
@@ -72,5 +77,29 @@ describe("daemon protocol", () => {
     };
 
     expect(message.agentInstructions).toBe("Use this agent profile.");
+    expect(message.contextCompression?.thresholdChars).toBe(1000);
+  });
+
+  it("expresses daemon memory append messages", () => {
+    const request: DaemonServerMessage = {
+      type: "memory.append",
+      requestId: "memory_1",
+      workspacePath: "/workspace",
+      kind: "transcript",
+      content: "User: hello",
+      date: "2026-06-01",
+      dedupeKey: "message_1",
+      sentAt: "2026-06-01T00:00:00.000Z",
+    };
+    const response: DaemonClientMessage = {
+      type: "memory.appended",
+      requestId: request.requestId,
+      entryId: "entry_1",
+      file: "memory/transcripts/2026-06-01.md",
+      sentAt: "2026-06-01T00:00:01.000Z",
+    };
+
+    expect(request.kind).toBe("transcript");
+    expect(response.file).toContain("transcripts");
   });
 });

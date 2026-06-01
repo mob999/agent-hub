@@ -51,6 +51,7 @@ describe("agent workspace", () => {
 
       await expectDirectory(paths.metadata);
       await expectDirectory(paths.memory);
+      await expectDirectory(path.join(paths.memory, "transcripts"));
       await expectDirectory(paths.skills);
       await expectDirectory(paths.files);
       await expectDirectory(paths.runs);
@@ -69,6 +70,13 @@ describe("agent workspace", () => {
         runtimeVersion: "1.0.0",
         executablePath: "/usr/local/bin/codex",
       });
+      expect(await readFile(path.join(paths.root, "MEMORY.md"), "utf8"))
+        .toContain("AgentHub Long-Term Memory");
+      expect(await readFile(path.join(paths.memory, "2026-05-21.md"), "utf8"))
+        .toContain("[Full conversation transcript](./transcripts/2026-05-21.md)");
+      expect(
+        await readFile(path.join(paths.memory, "transcripts", "2026-05-21.md"), "utf8"),
+      ).toContain("AgentHub Conversation Transcript");
       expect(initialized.workspace).toMatchObject({
         agentId: "agent_1",
         daemonDeviceId: "device_1",

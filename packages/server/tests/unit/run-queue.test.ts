@@ -3,14 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentHubRedisClient, RunQueueJob } from "../../src";
 import {
   ackArtifactActionQueueMessage,
+  ackMemoryAppendQueueMessage,
   ackRunQueueMessage,
   artifactActionQueueGroup,
   artifactActionQueueStream,
   enqueueArtifactActionJob,
+  enqueueMemoryAppendJob,
   enqueueRunJob,
   ensureRunQueueGroup,
   readArtifactActionQueueMessages,
+  readMemoryAppendQueueMessages,
   readRunQueueMessages,
+  memoryAppendQueueGroup,
+  memoryAppendQueueStream,
   runQueueGroup,
   runQueueStream,
 } from "../../src";
@@ -159,6 +164,61 @@ describe("run queue", () => {
       artifactActionQueueStream,
       artifactActionQueueGroup,
       "2-0",
+    );
+  });
+
+  it("enqueues and reads memory append jobs", async () => {
+    const job = {
+      agentId: "00000000-0000-4000-8000-000000000020",
+      daemonDeviceId: "local-dev",
+      workspacePath: "/workspace/agent",
+      kind: "daily" as const,
+      title: "Cross-conversation message",
+      content: "Sent a message to #Design.",
+      tags: ["message"],
+      date: "2026-06-01",
+      dedupeKey: "message:1",
+      createdAt: "2026-06-01T00:00:00.000Z",
+    };
+    const redis = {
+      xAdd: vi.fn().mockResolvedValue("3-0"),
+      xReadGroup: vi.fn().mockResolvedValue([
+        {
+          name: memoryAppendQueueStream,
+          messages: [
+            {
+              id: "3-0",
+              message: {
+                payload: JSON.stringify(job),
+              },
+            },
+          ],
+        },
+      ]),
+      xAck: vi.fn().mockResolvedValue(1),
+    };
+
+    await expect(
+      enqueueMemoryAppendJob(redis as unknown as AgentHubRedisClient, job),
+    ).resolves.toBe("3-0");
+    await expect(
+      readMemoryAppendQueueMessages(
+        redis as unknown as AgentHubRedisClient,
+        "worker-a",
+      ),
+    ).resolves.toEqual([{ id: "3-0", job }]);
+    await ackMemoryAppendQueueMessage(
+      redis as unknown as AgentHubRedisClient,
+      "3-0",
+    );
+
+    expect(redis.xAdd).toHaveBeenCalledWith(memoryAppendQueueStream, "*", {
+      payload: JSON.stringify(job),
+    });
+    expect(redis.xAck).toHaveBeenCalledWith(
+      memoryAppendQueueStream,
+      memoryAppendQueueGroup,
+      "3-0",
     );
   });
 });

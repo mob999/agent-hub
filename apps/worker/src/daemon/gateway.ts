@@ -37,6 +37,12 @@ export interface DaemonGatewayOptions {
   onArtifactActionCompleted?(
     message: Extract<DaemonClientMessage, { type: "artifact.action.completed" }>,
   ): void | Promise<void>;
+  onMemoryAppendFailed?(
+    message: Extract<DaemonClientMessage, { type: "memory.append_failed" }>,
+  ): void | Promise<void>;
+  onMemoryAppended?(
+    message: Extract<DaemonClientMessage, { type: "memory.appended" }>,
+  ): void | Promise<void>;
 }
 
 interface DaemonConnection {
@@ -279,6 +285,31 @@ export class DaemonGateway {
               "Failed to persist artifact action result",
             );
           });
+          return;
+        }
+
+        if (message.type === "memory.appended") {
+          void Promise.resolve(this.#options.onMemoryAppended?.(message)).catch(
+            (error) => {
+              this.#options.logger?.error(
+                { err: toError(error), requestId: message.requestId },
+                "Failed to handle memory append ack",
+              );
+            },
+          );
+          return;
+        }
+
+        if (message.type === "memory.append_failed") {
+          void Promise.resolve(this.#options.onMemoryAppendFailed?.(message)).catch(
+            (error) => {
+              this.#options.logger?.error(
+                { err: toError(error), requestId: message.requestId },
+                "Failed to handle memory append rejection",
+              );
+            },
+          );
+          return;
         }
       });
 
@@ -417,6 +448,7 @@ export class DaemonGateway {
       run: job.run,
       prompt: job.prompt,
       agentInstructions: job.agentInstructions,
+      contextCompression: job.contextCompression,
       workspacePath: job.workspacePath,
       runtime: job.runtime,
       agentHubMcpTools: job.agentHubMcpTools,
@@ -450,6 +482,36 @@ export class DaemonGateway {
         daemonDeviceId: message.daemonDeviceId,
       },
       "Assigned artifact action to daemon",
+    );
+    return true;
+  }
+
+  assignMemoryAppend(
+    message: Extract<DaemonServerMessage, { type: "memory.append" }> & {
+      daemonDeviceId: DaemonDeviceId;
+    },
+  ): boolean {
+    const connection = this.#connections.get(message.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          daemonDeviceId: message.daemonDeviceId,
+          requestId: message.requestId,
+        },
+        "Cannot assign memory append because daemon is not connected",
+      );
+      return false;
+    }
+
+    const { daemonDeviceId: _daemonDeviceId, ...serverMessage } = message;
+    send(connection.ws, serverMessage);
+    this.#options.logger?.info(
+      {
+        daemonDeviceId: message.daemonDeviceId,
+        requestId: message.requestId,
+      },
+      "Assigned memory append to daemon",
     );
     return true;
   }

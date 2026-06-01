@@ -62,7 +62,11 @@ import {
   writeArtifactTextContent,
   readArtifactContent,
 } from "../artifacts/index.js";
-import type { ArtifactActionQueueJob, RunQueueJob } from "../queue/index.js";
+import type {
+  ArtifactActionQueueJob,
+  MemoryAppendQueueJob,
+  RunQueueJob,
+} from "../queue/index.js";
 import { createRealtimeEvent } from "../realtime/index.js";
 
 export const defaultGroupConversationKey = "all";
@@ -126,6 +130,7 @@ export type RestoreGroupConversationResult =
 
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
+  memoryAppendJobs: MemoryAppendQueueJob[];
   toolResult?: AgentHubMcpToolResult;
   realtimeEvents: RealtimeEvent[];
 }
@@ -2089,6 +2094,7 @@ export async function createUserMessageAndRun(
   },
 ): Promise<{
   conversation: Conversation;
+  memoryAppendJobs: MemoryAppendQueueJob[];
   messages: {
     user: ConversationMessage;
     assistant: ConversationMessage;
@@ -2182,6 +2188,10 @@ export async function createUserMessageAndRun(
 
     return {
       conversation: toConversation(conversationRow, agentIds),
+      memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
+        conversation: conversationRow,
+        message: toConversationMessage(userMessage),
+      }),
       messages: {
         user: toConversationMessage(userMessage),
         assistant: toConversationMessage(assistantMessage),
@@ -2200,6 +2210,7 @@ export async function createUserMessageAndRuns(
   },
 ): Promise<{
   conversation: Conversation;
+  memoryAppendJobs: MemoryAppendQueueJob[];
   messages: {
     user: ConversationMessage;
     assistants: ConversationMessage[];
@@ -2286,6 +2297,10 @@ export async function createUserMessageAndRuns(
 
     return {
       conversation: toConversation(conversationRow, agentIds),
+      memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
+        conversation: conversationRow,
+        message: toConversationMessage(userMessage),
+      }),
       messages: {
         user: toConversationMessage(userMessage),
         assistants: [],
@@ -2976,6 +2991,199 @@ async function listConversationAgentRefs(
     .orderBy(asc(conversationAgentMembers.position));
 }
 
+async function createConversationTranscriptMemoryJobs(
+  db: Db,
+  input: {
+    conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "title" | "type" | "directAgentId">;
+    message: ConversationMessage;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  const agentIds = input.conversation.type === "direct"
+    ? [input.conversation.directAgentId].filter((id): id is string => id !== null && id !== undefined)
+    : (await listConversationAgentRefs(db, input.conversation)).map((agent) => agent.id);
+  const uniqueAgentIds = [...new Set(agentIds)];
+  const createdAt = input.message.createdAt;
+  const date = createdAt.slice(0, 10);
+  const sender = input.message.senderType === "agent"
+    ? `agent:${input.message.senderAgentId ?? "unknown"}`
+    : input.message.senderType;
+  const content = [
+    `Conversation: #${input.conversation.title} (${input.conversation.id})`,
+    `Message: ${input.message.id}`,
+    `Sender: ${sender}`,
+    input.message.runId === undefined ? undefined : `Run: ${input.message.runId}`,
+    `Created at: ${createdAt}`,
+    "",
+    input.message.content.trim() || "(empty message)",
+    ...((input.message.attachments ?? []).length === 0
+      ? []
+      : [
+          "",
+          "Attachments:",
+          ...(input.message.attachments ?? []).map((attachment) => {
+            const artifact = attachment.artifact;
+            const link = artifact.editorUrl ?? artifact.downloadUrl;
+
+            return link === undefined
+              ? `- ${artifact.title} (${artifact.id})`
+              : `- [${artifact.title}](${link}) (${artifact.id})`;
+          }),
+        ]),
+  ].filter((line): line is string => line !== undefined).join("\n");
+  const jobs: MemoryAppendQueueJob[] = [];
+
+  for (const agentId of uniqueAgentIds) {
+    const runAgent = await getRunnableAgentForUser(db, {
+      agentId,
+      ownerUserId: input.conversation.ownerUserId,
+    });
+
+    if (runAgent === null) {
+      continue;
+    }
+
+    jobs.push({
+      agentId,
+      daemonDeviceId: runAgent.daemonDeviceId,
+      workspacePath: runAgent.workspacePath,
+      kind: "transcript",
+      title: input.conversation.title,
+      content,
+      date,
+      dedupeKey: `message:${input.message.id}`,
+      createdAt,
+    });
+  }
+
+  return jobs;
+}
+
+async function createRunDailyMemoryJob(
+  db: Db,
+  input: {
+    content: string;
+    createdAt: string;
+    dedupeKey: string;
+    runId: string;
+    tags?: string[];
+    title: string;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      daemonDeviceId: runs.daemonDeviceId,
+      workspacePath: runs.workspacePath,
+    })
+    .from(runs)
+    .where(eq(runs.id, input.runId))
+    .limit(1);
+
+  if (run === undefined) {
+    return [];
+  }
+
+  return [
+    {
+      agentId: run.agentId,
+      daemonDeviceId: run.daemonDeviceId,
+      workspacePath: run.workspacePath,
+      kind: "daily",
+      title: input.title,
+      content: input.content,
+      tags: input.tags,
+      date: input.createdAt.slice(0, 10),
+      dedupeKey: input.dedupeKey,
+      createdAt: input.createdAt,
+    },
+  ];
+}
+
+function describeSendMessageTarget(
+  target: AgentHubSendMessageTarget | undefined,
+): string {
+  if (target === undefined || target.type === "current") {
+    return "current conversation";
+  }
+
+  if (target.type === "user") {
+    return "private conversation with the user";
+  }
+
+  return `group ${target.groupName}`;
+}
+
+export async function createArtifactUploadMemoryAppendJobs(
+  db: Db,
+  input: { artifact: ConversationArtifact },
+): Promise<MemoryAppendQueueJob[]> {
+  return createRunDailyMemoryJob(db, {
+    runId: input.artifact.runId,
+    createdAt: input.artifact.createdAt,
+    title: "Artifact uploaded",
+    tags: ["artifact", "upload"],
+    dedupeKey: `artifact-upload:${input.artifact.id}`,
+    content: [
+      `Uploaded artifact: ${input.artifact.title} (${input.artifact.id})`,
+      `Conversation: ${input.artifact.conversationId}`,
+      input.artifact.goalId === undefined ? undefined : `Goal: ${input.artifact.goalId}`,
+      input.artifact.taskIndex === undefined ? undefined : `Task index: ${input.artifact.taskIndex}`,
+      input.artifact.editorUrl === undefined ? undefined : `Editor: ${input.artifact.editorUrl}`,
+      input.artifact.downloadUrl === undefined ? undefined : `Download: ${input.artifact.downloadUrl}`,
+    ].filter((line): line is string => line !== undefined).join("\n"),
+  });
+}
+
+export async function createArtifactActionMemoryAppendJobs(
+  db: Db,
+  input: {
+    action: ConversationArtifactAction;
+    createdAt?: string;
+  },
+): Promise<MemoryAppendQueueJob[]> {
+  if (input.action.status !== "succeeded") {
+    return [];
+  }
+
+  const [row] = await db
+    .select({
+      artifact: conversationArtifacts,
+      run: runs,
+    })
+    .from(conversationArtifacts)
+    .innerJoin(runs, eq(conversationArtifacts.runId, runs.id))
+    .where(eq(conversationArtifacts.id, input.action.artifactId))
+    .limit(1);
+
+  if (row === undefined) {
+    return [];
+  }
+
+  const createdAt = input.createdAt ?? input.action.updatedAt;
+
+  return [
+    {
+      agentId: row.run.agentId,
+      daemonDeviceId: row.run.daemonDeviceId,
+      workspacePath: row.run.workspacePath,
+      kind: "daily",
+      title: "Artifact action completed",
+      tags: ["artifact", "action", input.action.type],
+      date: createdAt.slice(0, 10),
+      dedupeKey: `artifact-action:${input.action.id}:${input.action.status}`,
+      createdAt,
+      content: [
+        `Completed artifact action: ${input.action.type}`,
+        `Action: ${input.action.id}`,
+        `Artifact: ${row.artifact.title} (${row.artifact.id})`,
+        `Conversation: ${row.artifact.conversationId}`,
+        row.artifact.goalId === null ? undefined : `Goal: ${row.artifact.goalId}`,
+        row.artifact.taskIndex === null ? undefined : `Task index: ${row.artifact.taskIndex}`,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+    },
+  ];
+}
+
 async function resolveConversationAgentReference(
   db: Db,
   input: {
@@ -3398,6 +3606,7 @@ async function persistVisibleAgentMessageAndDispatchMentions(
   },
 ): Promise<{
   dispatchJobs: RunQueueJob[];
+  memoryAppendJobs: MemoryAppendQueueJob[];
   message: ConversationMessage;
   realtimeEvents: RealtimeEvent[];
 }> {
@@ -3420,10 +3629,15 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     senderAgentId: input.agentId,
     triggerMessageId: message.id,
   });
+  const conversationMessage = toConversationMessage(message, attachments);
+  const memoryAppendJobs = await createConversationTranscriptMemoryJobs(db, {
+    conversation: input.conversation,
+    message: conversationMessage,
+  });
   const realtimeEvents: RealtimeEvent[] = [
     createRealtimeEvent({
       conversationId: input.conversation.id,
-      message: toConversationMessage(message, attachments),
+      message: conversationMessage,
       ownerUserId: input.ownerUserId,
       type: "conversation.message.created",
     }),
@@ -3437,7 +3651,8 @@ async function persistVisibleAgentMessageAndDispatchMentions(
 
   return {
     dispatchJobs: mentionResult.dispatchJobs,
-    message: toConversationMessage(message, attachments),
+    memoryAppendJobs,
+    message: conversationMessage,
     realtimeEvents,
   };
 }
@@ -3930,10 +4145,12 @@ export async function appendRunEventToConversationMessage(
   options: AppendRunEventOptions = {},
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
+  const memoryAppendJobs: MemoryAppendQueueJob[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
   let toolResult: AgentHubMcpToolResult | undefined;
   const result = (): AppendRunEventResult => ({
     dispatchJobs,
+    memoryAppendJobs,
     realtimeEvents,
     toolResult,
   });
@@ -4171,6 +4388,20 @@ export async function appendRunEventToConversationMessage(
           publicWebBaseUrl: options.publicWebBaseUrl,
         }),
       };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Goal created",
+          tags: ["goal", "task"],
+          dedupeKey: `goal-created:${goal.id}`,
+          content: [
+            `Created goal: ${goal.title} (${goal.id})`,
+            goal.description === null ? undefined : `Description: ${goal.description}`,
+            `Conversation: ${context.conversation.title} (${context.conversation.id})`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4462,6 +4693,27 @@ export async function appendRunEventToConversationMessage(
         }
       });
 
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task created",
+          tags: ["goal", "task", shouldDispatch ? "dispatch" : taskStatus],
+          dedupeKey: `task-created:${taskId}`,
+          content: [
+            `Created task: ${input.title}`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task index: ${taskIndex}`,
+            `Assignee: ${assignee.name} (${assigneeAgentId})`,
+            `Status: ${taskStatus}`,
+            blockedReason === undefined ? undefined : `Blocked reason: ${blockedReason}`,
+            (input.dependsOnTaskIndexes ?? []).length === 0
+              ? "Dependencies: none"
+              : `Dependencies: ${(input.dependsOnTaskIndexes ?? []).join(", ")}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
+
       return result();
     }
 
@@ -4556,6 +4808,21 @@ export async function appendRunEventToConversationMessage(
             ownerUserId: goal.ownerUserId,
             taskId: task.id,
             type: "task.updated",
+          }),
+        );
+        memoryAppendJobs.push(
+          ...await createRunDailyMemoryJob(db, {
+            runId: event.runId,
+            createdAt: event.createdAt,
+            title: "Task approval blocked",
+            tags: ["goal", "task", "approve", "blocked"],
+            dedupeKey: `task-approve-blocked:${task.id}:${event.runId}`,
+            content: [
+              `Could not approve task because the assignee is not ready.`,
+              `Goal: ${goal.title} (${goal.id})`,
+              `Task: #${task.index} ${task.title}`,
+              `Assignee: ${task.assigneeAgentId}`,
+            ].join("\n"),
           }),
         );
         toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
@@ -4660,6 +4927,22 @@ export async function appendRunEventToConversationMessage(
         }),
       );
       toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index, runId: job.run.id };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task approved",
+          tags: ["goal", "task", "approve", "dispatch"],
+          dedupeKey: `task-approved:${task.id}:${job.run.id}`,
+          content: [
+            `Approved task for dispatch.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${task.index} ${task.title}`,
+            `Assignee: ${assignee?.name ?? task.assigneeAgentId} (${task.assigneeAgentId})`,
+            `Run: ${job.run.id}`,
+          ].join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4723,6 +5006,21 @@ export async function appendRunEventToConversationMessage(
         realtimeEvents,
       });
       toolResult = { accepted: true, goalId: goal.id, taskIndex: task.index };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task cancelled",
+          tags: ["goal", "task", "cancel"],
+          dedupeKey: `task-cancelled:${task.id}:${event.runId}`,
+          content: [
+            `Cancelled task.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${task.index} ${task.title}`,
+            input.reason === undefined ? undefined : `Reason: ${input.reason}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4787,6 +5085,20 @@ export async function appendRunEventToConversationMessage(
           { publicWebBaseUrl: options.publicWebBaseUrl },
         ),
       };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Goal completed",
+          tags: ["goal", "complete"],
+          dedupeKey: `goal-completed:${goal.id}:${event.runId}`,
+          content: [
+            `Completed goal: ${updatedGoal.title} (${updatedGoal.id})`,
+            input.summary === undefined ? undefined : `Summary: ${input.summary}`,
+            `Tasks: ${goalTasks.length}`,
+          ].filter((line): line is string => line !== undefined).join("\n"),
+        }),
+      );
       return result();
     }
 
@@ -4899,6 +5211,24 @@ export async function appendRunEventToConversationMessage(
         realtimeEvents,
       });
       toolResult = { accepted: true };
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Task completed",
+          tags: ["goal", "task", "complete"],
+          dedupeKey: `task-completed:${goalTask.id}:${event.runId}`,
+          content: [
+            `Completed assigned task.`,
+            `Goal: ${goal.title} (${goal.id})`,
+            `Task: #${goalTask.index} ${goalTask.title}`,
+            `Summary: ${input.summary}`,
+            artifactIds.length === 0
+              ? "Artifacts: none"
+              : `Artifacts: ${artifactIds.join(", ")}`,
+          ].join("\n"),
+        }),
+      );
 
       return result();
     }
@@ -4952,6 +5282,44 @@ export async function appendRunEventToConversationMessage(
     });
 
     dispatchJobs.push(...persisted.dispatchJobs);
+    memoryAppendJobs.push(...persisted.memoryAppendJobs);
+    if (input.target !== undefined && input.target.type !== "current") {
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Cross-conversation message sent",
+          tags: ["message", "cross-conversation"],
+          dedupeKey: `cross-message:${persisted.message.id}`,
+          content: [
+            `Sent a visible message to ${describeSendMessageTarget(input.target)}.`,
+            `Target conversation: ${persisted.message.conversationId}`,
+            `Message: ${persisted.message.id}`,
+            "",
+            input.content,
+          ].join("\n"),
+        }),
+      );
+    }
+    if (persisted.dispatchJobs.length > 0) {
+      memoryAppendJobs.push(
+        ...await createRunDailyMemoryJob(db, {
+          runId: event.runId,
+          createdAt: event.createdAt,
+          title: "Agent mention fan-out",
+          tags: ["message", "mention", "fanout"],
+          dedupeKey: `mention-fanout:${persisted.message.id}`,
+          content: [
+            `A visible message triggered ${persisted.dispatchJobs.length} agent run(s).`,
+            `Conversation: ${persisted.message.conversationId}`,
+            `Message: ${persisted.message.id}`,
+            `Runs: ${persisted.dispatchJobs.map((job) => job.run.id).join(", ")}`,
+            "",
+            input.content,
+          ].join("\n"),
+        }),
+      );
+    }
     realtimeEvents.push(...persisted.realtimeEvents);
     toolResult = {
       accepted: true,
@@ -5001,7 +5369,7 @@ export async function appendRunEventToConversationMessage(
   }
 
   const [conversation] = await db
-    .select({ ownerUserId: conversations.ownerUserId })
+    .select()
     .from(conversations)
     .where(eq(conversations.id, message.conversationId))
     .limit(1);
@@ -5014,6 +5382,15 @@ export async function appendRunEventToConversationMessage(
     })
     .where(eq(conversations.id, message.conversationId));
   if (conversation !== undefined) {
+    const conversationMessage = toConversationMessage(message);
+    if (event.type === "run.completed") {
+      memoryAppendJobs.push(
+        ...await createConversationTranscriptMemoryJobs(db, {
+          conversation,
+          message: conversationMessage,
+        }),
+      );
+    }
     realtimeEvents.push(
       createRealtimeEvent({
         conversationId: message.conversationId,
@@ -5022,7 +5399,7 @@ export async function appendRunEventToConversationMessage(
       }),
       createRealtimeEvent({
         conversationId: message.conversationId,
-        message: toConversationMessage(message),
+        message: conversationMessage,
         ownerUserId: conversation.ownerUserId,
         type: "conversation.message.created",
       }),

@@ -10,13 +10,16 @@ import type {
   AgentHubCompleteTaskToolInput,
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
+  AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolInput,
   AgentHubMcpToolName,
   AgentHubMcpToolResult,
+  AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -25,6 +28,11 @@ import type {
 } from "@agent-hub/core";
 
 import { isPathInsideWorkspace } from "../workspace";
+import {
+  appendMemoryTool,
+  readMemoryTool,
+  searchMemoryTool,
+} from "../memory";
 
 const maxArtifactUploadBytes = 5 * 1024 * 1024;
 const fetchBlockedPorts = new Set([
@@ -276,6 +284,66 @@ export class AgentHubMcpRelay {
         }
       }
 
+      if (toolName === "append_memory") {
+        const result = await appendMemoryTool(
+          session.workspacePath,
+          input as AgentHubAppendMemoryToolInput,
+        );
+        void Promise.resolve()
+          .then(() =>
+            session.onToolCall({
+              runId: session.runId,
+              toolCallId,
+              name: toolName,
+              input,
+              createdAt: new Date().toISOString(),
+            })
+          )
+          .catch(() => undefined);
+        writeJson(response, 200, result);
+        return;
+      }
+
+      if (toolName === "search_memory") {
+        const result = await searchMemoryTool(
+          session.workspacePath,
+          input as AgentHubSearchMemoryToolInput,
+        );
+        void Promise.resolve()
+          .then(() =>
+            session.onToolCall({
+              runId: session.runId,
+              toolCallId,
+              name: toolName,
+              input,
+              createdAt: new Date().toISOString(),
+            })
+          )
+          .catch(() => undefined);
+        writeJson(response, 200, result);
+        return;
+      }
+
+      if (toolName === "read_memory") {
+        const result = await readMemoryTool(
+          session.workspacePath,
+          input as AgentHubReadMemoryToolInput,
+        );
+        void Promise.resolve()
+          .then(() =>
+            session.onToolCall({
+              runId: session.runId,
+              toolCallId,
+              name: toolName,
+              input,
+              createdAt: new Date().toISOString(),
+            })
+          )
+          .catch(() => undefined);
+        writeJson(response, 200, result);
+        return;
+      }
+
       const result = await session.onToolCall({
         runId: session.runId,
         toolCallId,
@@ -335,6 +403,18 @@ function readToolInput(
     return readReadArtifactInput(input);
   }
 
+  if (toolName === "append_memory") {
+    return readAppendMemoryInput(input);
+  }
+
+  if (toolName === "search_memory") {
+    return readSearchMemoryInput(input);
+  }
+
+  if (toolName === "read_memory") {
+    return readReadMemoryInput(input);
+  }
+
   if (toolName === "create_goal") {
     return readCreateGoalInput(input);
   }
@@ -364,6 +444,111 @@ function readToolInput(
   }
 
   return null;
+}
+
+function readMemoryScopes(value: unknown): ("long_term" | "daily" | "transcript")[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const scopes = value.filter((scope): scope is "long_term" | "daily" | "transcript" =>
+    scope === "long_term" || scope === "daily" || scope === "transcript",
+  );
+
+  return scopes.length > 0 ? [...new Set(scopes)] : undefined;
+}
+
+function readAppendMemoryInput(input: unknown): AgentHubAppendMemoryToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const scope = record.scope;
+  const title = record.title;
+  const content = record.content;
+  const tags = Array.isArray(record.tags)
+    ? record.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+    : undefined;
+
+  if (
+    scope !== undefined &&
+    scope !== "long_term" &&
+    scope !== "daily"
+  ) {
+    return null;
+  }
+
+  if (typeof content !== "string" || content.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    scope,
+    title:
+      typeof title === "string" && title.trim().length > 0
+        ? title.trim()
+        : undefined,
+    content: content.trim(),
+    tags: tags && tags.length > 0 ? tags.map((tag) => tag.trim()) : undefined,
+  };
+}
+
+function readSearchMemoryInput(input: unknown): AgentHubSearchMemoryToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const query = record.query;
+  const limit = record.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    query: query.trim(),
+    scopes: readMemoryScopes(record.scopes),
+    fromDate:
+      typeof record.fromDate === "string" && record.fromDate.length > 0
+        ? record.fromDate
+        : undefined,
+    toDate:
+      typeof record.toDate === "string" && record.toDate.length > 0
+        ? record.toDate
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
+function readReadMemoryInput(input: unknown): AgentHubReadMemoryToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const scope = record.scope;
+  const maxBytes = record.maxBytes;
+
+  if (scope !== "long_term" && scope !== "daily" && scope !== "transcript") {
+    return null;
+  }
+
+  return {
+    scope,
+    date:
+      typeof record.date === "string" && record.date.length > 0
+        ? record.date
+        : undefined,
+    maxBytes:
+      typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+        ? Math.min(Math.floor(maxBytes), 64 * 1024)
+        : undefined,
+  };
 }
 
 function readListGoalsInput(input: unknown): AgentHubListGoalsToolInput | null {

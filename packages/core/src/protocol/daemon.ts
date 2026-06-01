@@ -26,6 +26,11 @@ import type { AgentRun, RunEvent, RunId } from "./run.js";
 export interface DaemonRunAssignment {
   run: AgentRun;
   prompt: string;
+  contextCompression?: {
+    compressibleText: string;
+    promptTemplate: string;
+    thresholdChars: number;
+  };
   agentInstructions?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
@@ -100,6 +105,19 @@ export type DaemonClientMessage =
       sentAt: IsoDateTime;
     }
   | {
+      type: "memory.appended";
+      requestId: string;
+      entryId: string;
+      file: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "memory.append_failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
       type: "artifact.action.completed";
       actionId: ConversationArtifactActionId;
       status: "succeeded" | "failed" | "cancelled";
@@ -152,6 +170,18 @@ export type DaemonServerMessage =
       type: "artifact.upload.rejected";
       uploadId: string;
       reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "memory.append";
+      requestId: string;
+      workspacePath: string;
+      kind: "daily" | "transcript";
+      title?: string;
+      content: string;
+      tags?: string[];
+      date?: string;
+      dedupeKey?: string;
       sentAt: IsoDateTime;
     }
   | {

@@ -89,6 +89,11 @@ export const apiEnvSchema = z.object({
   AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
+  AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60000),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

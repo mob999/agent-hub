@@ -6,10 +6,13 @@ import type {
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
+  AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
@@ -27,6 +30,9 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
       "create_goal",
       "create_task",
       "approve_task",
@@ -38,6 +44,9 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "append_memory",
+      "search_memory",
+      "read_memory",
       "upload_artifact",
       "complete_task",
     ]);
@@ -167,6 +176,31 @@ describe("AgentHub MCP protocol", () => {
 
     expect(list.limit).toBe(10);
     expect(read.goalId).toBe(list.goalId);
+  });
+
+  it("expresses memory tools scoped to the current agent workspace", () => {
+    const append: AgentHubAppendMemoryToolInput = {
+      scope: "long_term",
+      title: "User preference",
+      content: "The user prefers concise implementation plans.",
+      tags: ["preference"],
+    };
+    const search: AgentHubSearchMemoryToolInput = {
+      query: "implementation plans",
+      scopes: ["long_term", "daily", "transcript"],
+      fromDate: "2026-06-01",
+      toDate: "2026-06-01",
+      limit: 5,
+    };
+    const read: AgentHubReadMemoryToolInput = {
+      scope: "transcript",
+      date: "2026-06-01",
+      maxBytes: 4096,
+    };
+
+    expect(append.scope).toBe("long_term");
+    expect(search.scopes).toContain("transcript");
+    expect(read.scope).toBe("transcript");
   });
 
   it("expresses upload_artifact and complete_task tool calls", () => {

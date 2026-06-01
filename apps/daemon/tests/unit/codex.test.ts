@@ -144,7 +144,8 @@ describe("CodexAdapter", () => {
     calls[0].process.close(0);
     await eventsPromise;
 
-    expect(calls[0].process.stdinText).toBe("use this context");
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nuse this context$/);
   });
 
   it("passes agent instructions as Codex developer instructions", async () => {
@@ -168,7 +169,8 @@ describe("CodexAdapter", () => {
     expect(calls[0].args).toContain(
       `developer_instructions=${JSON.stringify(agentInstructions)}`,
     );
-    expect(calls[0].process.stdinText).toBe("ship the page");
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nship the page$/);
   });
 
   it("injects a per-run AgentHub MCP stdio server and emits MCP tool events", async () => {

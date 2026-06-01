@@ -290,6 +290,72 @@ describe("DaemonGateway", () => {
     });
   });
 
+  it("assigns memory append requests to connected daemons", async () => {
+    const appended: string[] = [];
+    const gateway = new DaemonGateway({
+      daemonToken: token,
+      onRunEvent: () => undefined,
+      onMemoryAppended: (message) => {
+        appended.push(message.requestId);
+      },
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+
+    expect(
+      gateway.assignMemoryAppend({
+        type: "memory.append",
+        requestId: "memory_1",
+        daemonDeviceId: "local-dev",
+        workspacePath: "/workspace",
+        kind: "daily",
+        title: "Note",
+        content: "Remember this.",
+        sentAt: "2026-06-01T00:00:00.000Z",
+      }),
+    ).toBe(false);
+
+    ws = new WebSocket(listening.url);
+    await waitForOpen(ws);
+    sendHello(ws);
+    await waitForJsonMessage(ws);
+
+    const assignedMessage = waitForJsonMessage<{
+      type: string;
+      requestId: string;
+      kind: string;
+    }>(ws);
+    expect(
+      gateway.assignMemoryAppend({
+        type: "memory.append",
+        requestId: "memory_1",
+        daemonDeviceId: "local-dev",
+        workspacePath: "/workspace",
+        kind: "daily",
+        title: "Note",
+        content: "Remember this.",
+        sentAt: "2026-06-01T00:00:00.000Z",
+      }),
+    ).toBe(true);
+
+    await expect(assignedMessage).resolves.toMatchObject({
+      type: "memory.append",
+      requestId: "memory_1",
+      kind: "daily",
+    });
+
+    ws.send(
+      JSON.stringify({
+        type: "memory.appended",
+        requestId: "memory_1",
+        file: "/workspace/memory/2026-06-01.md",
+        sentAt: "2026-06-01T00:00:01.000Z",
+      }),
+    );
+
+    await expect.poll(() => appended).toEqual(["memory_1"]);
+  });
+
   it("provisions agents through a connected daemon", async () => {
     const gateway = new DaemonGateway({
       daemonToken: token,

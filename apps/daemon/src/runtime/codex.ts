@@ -23,6 +23,7 @@ import type {
 } from "@agent-hub/core/protocol";
 
 import type { AgentHubMcpSessionHandle } from "../mcp/relay";
+import { appendMemory, buildMemoryPrompt } from "../memory";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 type SpawnedProcess = Pick<
@@ -395,6 +396,83 @@ function createAgentHubMcpConfigArgs(input: {
   ];
 }
 
+async function runHiddenCodexPrompt(input: {
+  agentInstructions?: string;
+  executablePath: string;
+  prompt: string;
+  spawnProcess: SpawnCodexProcess;
+  workspacePath: string;
+}): Promise<string> {
+  const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
+    input.agentInstructions,
+  );
+  const process = input.spawnProcess(input.executablePath, [
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--cd",
+    input.workspacePath,
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+    ...(developerInstructionsConfig === undefined
+      ? []
+      : ["-c", developerInstructionsConfig]),
+    "-",
+  ], {
+    ...createCodexSpawnOptions({
+      cwd: input.workspacePath,
+      stdio: "pipe",
+    }),
+  });
+  const stdout = new LineDecoder();
+  const stderr = new LineDecoder();
+  const output: string[] = [];
+  const errors: string[] = [];
+
+  process.stdout.on("data", (chunk) => {
+    for (const line of stdout.push(chunk)) {
+      const parsed = parseJsonLine(line);
+
+      if (!parsed.ok) {
+        output.push(parsed.line);
+        continue;
+      }
+
+      for (const event of mapCodexJsonEvents(parsed.value, "memory_compaction")) {
+        if (event.type === "message.delta") {
+          output.push(event.content);
+        }
+      }
+    }
+  });
+  process.stderr.on("data", (chunk) => errors.push(...stderr.push(chunk)));
+
+  process.stdin.write(input.prompt);
+  process.stdin.end();
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    process.once("error", reject);
+    process.once("close", resolve);
+  });
+
+  const lastStdout = stdout.flush();
+  const lastStderr = stderr.flush();
+
+  if (lastStdout !== undefined) {
+    output.push(lastStdout);
+  }
+
+  if (lastStderr !== undefined) {
+    errors.push(lastStderr);
+  }
+
+  if (exitCode !== 0) {
+    throw new Error(errors.join("\n") || `Codex compaction exited with code ${exitCode}`);
+  }
+
+  return output.join("\n").trim();
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
@@ -537,6 +615,8 @@ export class CodexAdapter implements AgentAdapter {
     const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
+    let stdinInitialized = false;
+    let pendingCloseExitCode: number | null | undefined;
 
     const complete = (
       status: Extract<RunEvent, { type: "run.completed" }>["status"],
@@ -556,6 +636,23 @@ export class CodexAdapter implements AgentAdapter {
         createdAt: nowIsoDateTime(),
       });
       queue.end();
+    };
+    const completeFromExitCode = (exitCode: number | null): void => {
+      if (!stdinInitialized) {
+        pendingCloseExitCode = exitCode;
+        return;
+      }
+
+      complete(
+        exitCode === 0 ? "succeeded" : "failed",
+        exitCode === 0 ? undefined : `Codex exited with code ${exitCode}`,
+      );
+    };
+    const markStdinInitialized = (): void => {
+      stdinInitialized = true;
+      if (pendingCloseExitCode !== undefined) {
+        completeFromExitCode(pendingCloseExitCode);
+      }
     };
 
     const handleStdoutLine = (line: string) => {
@@ -606,10 +703,7 @@ export class CodexAdapter implements AgentAdapter {
         return;
       }
 
-      complete(
-        exitCode === 0 ? "succeeded" : "failed",
-        exitCode === 0 ? undefined : `Codex exited with code ${exitCode}`,
-      );
+      completeFromExitCode(exitCode);
     });
 
     input.abortSignal?.addEventListener(
@@ -627,8 +721,73 @@ export class CodexAdapter implements AgentAdapter {
       workspacePath: input.workspacePath,
       createdAt: nowIsoDateTime(),
     });
-    process.stdin.write(input.prompt);
-    process.stdin.end();
+    void (async () => {
+      try {
+        const memoryPrompt = await buildMemoryPrompt({
+          workspacePath: input.workspacePath,
+        });
+        let runPrompt = input.prompt;
+
+        if (
+          input.contextCompression !== undefined &&
+          input.contextCompression.compressibleText.length >=
+            input.contextCompression.thresholdChars
+        ) {
+          const compressedContext = await runHiddenCodexPrompt({
+            agentInstructions: [
+              input.agentInstructions,
+              "You are compacting older AgentHub conversation context. Return a concise factual Markdown summary. Do not include visible chat replies.",
+            ].filter((line): line is string => line !== undefined).join("\n\n"),
+            executablePath: this.#executablePath,
+            prompt: input.contextCompression.compressibleText,
+            spawnProcess: this.#spawnProcess,
+            workspacePath: input.workspacePath,
+          });
+          await appendMemory({
+            workspacePath: input.workspacePath,
+            kind: "daily",
+            title: "Context compression",
+            content: compressedContext,
+            tags: ["context-compression"],
+            dedupeKey: `context-compression:${input.run.id}`,
+          });
+          queue.push({
+            type: "runtime.event",
+            runId: input.run.id,
+            raw: {
+              runtimeKind: "codex",
+              nativeType: "memory.compacted",
+              payload: {
+                compressedChars: compressedContext.length,
+                sourceChars: input.contextCompression.compressibleText.length,
+              },
+            },
+            createdAt: nowIsoDateTime(),
+          });
+          runPrompt = input.contextCompression.promptTemplate.replace(
+            "{{compressed_context}}",
+            compressedContext,
+          );
+        }
+
+        process.stdin.write([memoryPrompt, runPrompt].join("\n\n"));
+        process.stdin.end();
+        markStdinInitialized();
+      } catch (error) {
+        process.stdin.write(input.prompt);
+        process.stdin.end();
+        markStdinInitialized();
+        queue.push(
+          createLogLineEvent(
+            input.run.id,
+            "stderr",
+            `Memory prompt/compaction failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        );
+      }
+    })();
 
     return queue;
   }

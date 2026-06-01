@@ -17,6 +17,7 @@ import type {
 import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
+import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
 import { CodexAdapter } from "./runtime/codex";
 import {
@@ -220,6 +221,45 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
+    if (message.type === "memory.append") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(
+            env.AGENTHUB_WORKSPACE_ROOT,
+            message.workspacePath,
+          );
+          const result = await appendMemory({
+            workspacePath: message.workspacePath,
+            kind: message.kind,
+            title: message.title,
+            content: message.content,
+            tags: message.tags,
+            date: message.date,
+            dedupeKey: message.dedupeKey,
+          });
+          send(ws, {
+            type: "memory.appended",
+            requestId: message.requestId,
+            entryId: result.entryId,
+            file: result.file,
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "memory.append_failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Memory append failed",
+          );
+        }
+      })();
+      return;
+    }
+
     if (message.type === "agent.create") {
       void (async () => {
         try {
@@ -374,6 +414,7 @@ export async function startDaemon(): Promise<void> {
         for await (const event of adapter.run({
           run: message.run,
           prompt: message.prompt,
+          contextCompression: message.contextCompression,
           agentInstructions: message.agentInstructions,
           workspacePath: message.workspacePath,
           runtime: message.runtime,

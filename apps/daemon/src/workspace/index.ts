@@ -14,6 +14,8 @@ import {
   type RunId,
 } from "@agent-hub/core";
 
+import { initializeAgentMemory } from "../memory";
+
 export interface AgentWorkspaceLocator {
   agentId: AgentId;
   daemonDeviceId: DaemonDeviceId;
@@ -148,6 +150,7 @@ export async function initializeAgentWorkspace(
 
   await writeFile(paths.manifest, formatJson(manifest), "utf8");
   await writeFile(paths.runtime, formatJson(runtime), "utf8");
+  await initializeAgentMemory(paths.root, input.createdAt);
 
   return {
     workspace: {

@@ -97,7 +97,7 @@ export function SearchWorkspace({
   )
   const senderOptions = useMemo(
     () => [
-      { value: '', label: 'Any sender' },
+      { value: '', label: 'ANY SENDER' },
       { value: 'user', label: 'User' },
       ...agents.map((agent) => ({
         value: agent.agent.id,
@@ -151,7 +151,7 @@ export function SearchWorkspace({
           value={selectedChannelId ?? ''}
           onChange={(event) => onChannelChange(event.target.value || undefined)}
         >
-          <option value="">Any channel</option>
+          <option value="">ANY GROUP</option>
           {channelOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
@@ -163,7 +163,7 @@ export function SearchWorkspace({
           value={time}
           onChange={(event) => onTimeChange(event.target.value as SearchTimeFilter)}
         >
-          <option value="any">Any time</option>
+          <option value="any">ANY TIME</option>
           <option value="24h">Last 24 hours</option>
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>

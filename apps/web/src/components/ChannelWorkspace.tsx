@@ -61,6 +61,7 @@ interface ChannelWorkspaceProps {
   refreshArtifacts?: () => void
   refreshDeployments?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
+  focusedMessageId?: string | null
   taskRouteActive?: boolean
   deploymentRouteActive?: boolean
 }
@@ -181,6 +182,7 @@ export function ChannelWorkspace({
   refreshArtifacts,
   refreshDeployments,
   focusedGoalRoute = null,
+  focusedMessageId = null,
   taskRouteActive = false,
   deploymentRouteActive = false,
 }: ChannelWorkspaceProps) {
@@ -454,7 +456,7 @@ export function ChannelWorkspace({
   }
 
   useEffect(() => {
-    if (showWorkspacePage) {
+    if (showWorkspacePage || focusedMessageId !== null) {
       return
     }
 
@@ -473,6 +475,25 @@ export function ChannelWorkspace({
     lastVisibleMessage?.content,
     lastVisibleMessage?.id,
     lastVisibleMessage?.status,
+    focusedMessageId,
+    showWorkspacePage,
+    visibleMessages.length,
+  ])
+
+  useEffect(() => {
+    if (showWorkspacePage || focusedMessageId === null) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      document
+        .getElementById(`message-${focusedMessageId}`)
+        ?.scrollIntoView({ block: 'center' })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [
+    focusedMessageId,
     showWorkspacePage,
     visibleMessages.length,
   ])
@@ -1127,7 +1148,12 @@ export function ChannelWorkspace({
 
               return (
                 <article
-                  className="grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1"
+                  id={`message-${message.id}`}
+                  className={`grid min-w-0 scroll-mt-6 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] transition-colors max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1 ${
+                    focusedMessageId === message.id
+                      ? 'bg-[var(--cds-layer-selected-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]'
+                      : ''
+                  }`}
                   key={message.id}
                 >
                   <span

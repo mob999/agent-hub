@@ -187,6 +187,7 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 interface WorkspacePageProps {
   chatConversationId?: string | null
   chatPanelRoute?: ChatPanelRoute
+  focusedMessageId?: string | null
   goalRoute?: GoalRouteState | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
@@ -197,6 +198,7 @@ export function WorkspacePage({
   route,
   chatConversationId = null,
   chatPanelRoute = null,
+  focusedMessageId = null,
   goalRoute = null,
   editorRoute = null,
   navigate,
@@ -1281,6 +1283,9 @@ export function WorkspacePage({
   const openDeploymentsRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}/deployments` as RoutePath)
   }
+  const openMessageRoute = (conversationId: string, messageId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}` as RoutePath)
+  }
   const closeConversationRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
@@ -1811,8 +1816,8 @@ export function WorkspacePage({
               onOpenConversation={(conversationId) => {
                 selectConversation(conversationId)
               }}
-              onOpenMessage={(conversationId) => {
-                selectConversation(conversationId)
+              onOpenMessage={(conversationId, messageId) => {
+                openMessageRoute(conversationId, messageId)
               }}
               onQueryChange={(value) => updateSearchFilters({ query: value })}
               onSenderChange={(value) => updateSearchFilters({ sender: value })}
@@ -1843,6 +1848,7 @@ export function WorkspacePage({
               openArtifactEditor={openArtifactEditor}
               openRun={openRun}
               focusedGoalRoute={focusedGoalRoute}
+              focusedMessageId={focusedMessageId}
               taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
               deploymentRouteActive={chatPanelRoute === 'deployments'}
               openGoalRoute={(goalId, taskIndex) => {

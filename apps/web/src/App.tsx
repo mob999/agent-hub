@@ -18,34 +18,44 @@ export interface GoalRouteState {
 function chatStateFromPath(path: string): {
   conversationId: string | null
   goalRoute: GoalRouteState | null
+  messageId: string | null
   panelRoute: ChatPanelRoute
 } {
   const segments = path.split('/').filter(Boolean)
 
   if (segments[0] !== 'chat') {
-    return { conversationId: null, goalRoute: null, panelRoute: null }
+    return { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   if (segments[1] === 'search') {
-    return { conversationId: null, goalRoute: null, panelRoute: null }
+    return { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   const conversationId = segments[1] === undefined ? null : decodeURIComponent(segments[1])
 
   if (conversationId === null) {
-    return { conversationId: null, goalRoute: null, panelRoute: null }
+    return { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   if (segments.length === 2) {
-    return { conversationId, goalRoute: null, panelRoute: null }
+    return { conversationId, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   if (segments.length === 3 && (segments[2] === 'tasks' || segments[2] === 'deployments')) {
-    return { conversationId, goalRoute: null, panelRoute: segments[2] }
+    return { conversationId, goalRoute: null, messageId: null, panelRoute: segments[2] }
+  }
+
+  if (segments.length === 4 && segments[2] === 'messages') {
+    return {
+      conversationId,
+      goalRoute: null,
+      messageId: decodeURIComponent(segments[3]),
+      panelRoute: null,
+    }
   }
 
   if (segments[2] !== 'goals' || segments[3] === undefined) {
-    return { conversationId: null, goalRoute: null, panelRoute: null }
+    return { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   const taskIndexSegment = segments.length === 6 && segments[4] === 'tasks'
@@ -57,17 +67,18 @@ function chatStateFromPath(path: string): {
       : null
 
   if (segments.length !== 4 && (segments.length !== 6 || taskIndex === null)) {
-    return { conversationId: null, goalRoute: null, panelRoute: null }
+    return { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
   }
 
   return {
     conversationId,
-    panelRoute: null,
     goalRoute: {
       conversationId,
       goalId: decodeURIComponent(segments[3]),
       taskIndex,
     },
+    messageId: null,
+    panelRoute: null,
   }
 }
 
@@ -113,7 +124,7 @@ function App() {
   const [route, setRoute] = useState<RoutePath>(() => getRoutePath())
   const chatState = route.startsWith('/chat/')
     ? chatStateFromPath(route)
-    : { conversationId: null, goalRoute: null, panelRoute: null }
+    : { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
 
   const navigate = useCallback((path: RoutePath) => {
     if (window.location.pathname !== path) {
@@ -141,6 +152,7 @@ function App() {
       route={isWorkspaceRoute(route) ? route : '/chat'}
       chatConversationId={chatState.conversationId}
       goalRoute={chatState.goalRoute}
+      focusedMessageId={chatState.messageId}
       chatPanelRoute={chatState.panelRoute}
       editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
       navigate={navigate}

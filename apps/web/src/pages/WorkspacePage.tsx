@@ -220,6 +220,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
+  const [deploymentsByConversation, setDeploymentsByConversation] = useState<Record<string, ConversationDeployment[]>>({})
   const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
   const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
@@ -295,6 +296,10 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const activeConversationArtifacts = useMemo(
     () => (activeConversationId === null ? [] : artifactsByConversation[activeConversationId] ?? []),
     [activeConversationId, artifactsByConversation],
+  )
+  const activeConversationDeployments = useMemo(
+    () => (activeConversationId === null ? [] : deploymentsByConversation[activeConversationId] ?? []),
+    [activeConversationId, deploymentsByConversation],
   )
 
   const clearConversationUnread = useCallback((conversationId: string) => {
@@ -498,6 +503,22 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
       setArtifactsByConversation((current) => ({
         ...current,
         [conversationId]: response.artifacts,
+      }))
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status !== 404) {
+        setRunError(error.message)
+      }
+    }
+  }, [])
+
+  const loadDeployments = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
+        `/conversations/${conversationId}/deployments`,
+      )
+      setDeploymentsByConversation((current) => ({
+        ...current,
+        [conversationId]: response.deployments,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
@@ -1249,28 +1270,6 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const openTasksRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
   }
-  const openLatestDeployment = async (conversationId: string) => {
-    try {
-      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
-        `/conversations/${conversationId}/deployments`,
-      )
-      const deployment = response.deployments.find((item) => item.status === 'ready' && item.url)
-
-      if (deployment?.url) {
-        window.open(deployment.url, '_blank', 'noopener,noreferrer')
-        setRunError(null)
-        return
-      }
-
-      setRunError('No ready deployment is available for this conversation.')
-    } catch (error) {
-      if (error instanceof ApiRequestError) {
-        setRunError(error.message)
-      } else {
-        setRunError('Unable to open deployment.')
-      }
-    }
-  }
   const closeConversationRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
@@ -1815,6 +1814,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               messages={activeConversationMessages}
               goals={activeConversationGoals}
               artifacts={activeConversationArtifacts}
+              deployments={activeConversationDeployments}
               agents={agents}
               user={user}
               prompt={prompt}
@@ -1843,11 +1843,6 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
                   openTasksRoute(activeConversation.id)
                 }
               }}
-              openLatestDeployment={() => {
-                if (activeConversation?.id) {
-                  void openLatestDeployment(activeConversation.id)
-                }
-              }}
               closeConversationRoute={() => {
                 if (activeConversation?.id) {
                   closeConversationRoute(activeConversation.id)
@@ -1861,6 +1856,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               refreshArtifacts={() => {
                 if (activeConversation?.id) {
                   void loadArtifacts(activeConversation.id)
+                }
+              }}
+              refreshDeployments={() => {
+                if (activeConversation?.id) {
+                  void loadDeployments(activeConversation.id)
                 }
               }}
             />

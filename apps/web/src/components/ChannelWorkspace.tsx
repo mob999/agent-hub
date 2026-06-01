@@ -2,7 +2,7 @@ import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbo
 import { Attachment, ChatBot, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
@@ -31,6 +31,7 @@ interface ChannelWorkspaceProps {
   messages: ConversationMessage[]
   goals: ConversationGoal[]
   artifacts: ConversationArtifact[]
+  deployments: ConversationDeployment[]
   agents: AgentDetails[]
   user: User | null
   prompt: string
@@ -49,7 +50,6 @@ interface ChannelWorkspaceProps {
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
   openTasksRoute: () => void
-  openLatestDeployment: () => void
   closeConversationRoute: () => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
@@ -58,6 +58,7 @@ interface ChannelWorkspaceProps {
   editorConversationId?: string | null
   onActiveEditorArtifactChange?: (artifactId: string) => void
   refreshArtifacts?: () => void
+  refreshDeployments?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
   taskRouteActive?: boolean
 }
@@ -151,6 +152,7 @@ export function ChannelWorkspace({
   messages,
   goals,
   artifacts,
+  deployments,
   agents,
   user,
   prompt,
@@ -166,7 +168,6 @@ export function ChannelWorkspace({
   openArtifactEditor,
   openGoalRoute,
   openTasksRoute,
-  openLatestDeployment,
   closeConversationRoute,
   openRun,
   openConversationEditor,
@@ -175,11 +176,12 @@ export function ChannelWorkspace({
   editorConversationId = null,
   onActiveEditorArtifactChange,
   refreshArtifacts,
+  refreshDeployments,
   focusedGoalRoute = null,
   taskRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'deployments' } | null>(null)
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -432,7 +434,11 @@ export function ChannelWorkspace({
     !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'tasks'
-  const showWorkspacePage = (showTasks || showFiles) && canOpenWorkspacePanel
+  const showDeployments =
+    !showFiles &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'deployments'
+  const showWorkspacePage = (showTasks || showFiles || showDeployments) && canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -799,6 +805,67 @@ export function ChannelWorkspace({
     </div>
   )
 
+  const renderDeploymentListView = () => (
+    <div className="grid w-full content-start gap-3">
+      {deployments.length === 0 ? (
+        <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+          <Launch size={32} />
+          <h2 className="cds--type-heading-compact-02">No deployments yet</h2>
+        </div>
+      ) : (
+        deployments.map((deployment) => (
+          <article
+            key={deployment.id}
+            className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4"
+          >
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Tag size="sm" type={deployment.status === 'ready' ? 'green' : deployment.status === 'failed' ? 'red' : 'gray'}>
+                    {deployment.status.toUpperCase()}
+                  </Tag>
+                  <h3 className="truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]">
+                    {deployment.title}
+                  </h3>
+                </div>
+                <p className="mt-1 text-sm text-[var(--cds-text-secondary)]">
+                  Entry `{deployment.entrypoint}` from run{' '}
+                  <button className={inlineLink} type="button" onClick={() => openRun(deployment.runId)}>
+                    {deployment.runId.slice(0, 8)}
+                  </button>
+                  {deployment.goalId ? (
+                    <>
+                      {' '}for goal{' '}
+                      <button
+                        className={inlineLink}
+                        type="button"
+                        onClick={() => openGoalRoute(deployment.goalId!, deployment.taskIndex ?? null)}
+                      >
+                        {deployment.goalId.slice(0, 8)}
+                        {deployment.taskIndex === undefined ? '' : ` #${deployment.taskIndex}`}
+                      </button>
+                    </>
+                  ) : null}
+                  {' '}at {formatMessageTime(deployment.createdAt)}
+                </p>
+              </div>
+              <a
+                className="inline-flex h-8 shrink-0 items-center gap-2 border border-[var(--cds-border-strong-01)] px-3 text-sm font-semibold text-[var(--cds-text-primary)] no-underline hover:bg-[var(--cds-layer-hover-01)]"
+                href={deployment.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-disabled={!deployment.url || deployment.status !== 'ready'}
+              >
+                Open
+                <Launch size={14} />
+              </a>
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  )
+
   return (
     <section
       id="main-content"
@@ -862,6 +929,7 @@ export function ChannelWorkspace({
                 return
               }
 
+              closeArtifactEditor?.()
               setWorkspacePanel(activeConversation ? { conversationId: activeConversation.id, view: 'tasks' } : null)
               openTasksRoute()
             }}
@@ -890,13 +958,25 @@ export function ChannelWorkspace({
             <Folder size={16} />
           </IconButton>
           <IconButton
-            kind="ghost"
-            label="Open deployment"
+            kind={showDeployments ? 'secondary' : 'ghost'}
+            label="Deployments"
             size="md"
             align="bottom"
             type="button"
             disabled={!canOpenWorkspacePanel}
-            onClick={openLatestDeployment}
+            onClick={() => {
+              if (showDeployments) {
+                setWorkspacePanel(null)
+                closeConversationRoute()
+                return
+              }
+
+              closeArtifactEditor?.()
+              if (activeConversation !== null) {
+                setWorkspacePanel({ conversationId: activeConversation.id, view: 'deployments' })
+                refreshDeployments?.()
+              }
+            }}
           >
             <Launch size={16} />
           </IconButton>
@@ -985,6 +1065,10 @@ export function ChannelWorkspace({
               onActiveArtifactChange={onActiveEditorArtifactChange}
               onRefreshArtifacts={refreshArtifacts}
             />
+          </div>
+        ) : showWorkspacePage && showDeployments ? (
+          <div className="grid w-full content-start gap-4">
+            {renderDeploymentListView()}
           </div>
         ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">

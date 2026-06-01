@@ -95,6 +95,22 @@ export interface AgentDetails {
   workspace: AgentWorkspace
 }
 
+export type AgentMemoryScope = 'long_term' | 'daily' | 'transcript'
+
+export interface AgentMemoryFile {
+  content: string
+  exists: boolean
+  file: string
+  label: string
+  scope: AgentMemoryScope
+}
+
+export interface AgentMemoryResponse {
+  date: string
+  files: AgentMemoryFile[]
+  workspaceReady: boolean
+}
+
 export interface UpdateAgentRequest {
   name: string
   description?: string

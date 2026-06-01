@@ -1483,6 +1483,70 @@ export async function listConversationMessagesForUser(
   );
 }
 
+export async function listRecentDirectConversationMessagesForAgent(
+  db: Db,
+  input: {
+    agentId: string;
+    limit?: number;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
+): Promise<ConversationMessage[]> {
+  const [conversation] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.type, "direct"),
+        eq(conversations.directAgentId, input.agentId),
+      ),
+    )
+    .limit(1);
+
+  if (conversation === undefined) {
+    return [];
+  }
+
+  return (
+    await listConversationMessagesForUser(db, {
+      conversationId: conversation.id,
+      ownerUserId: input.ownerUserId,
+      limit: input.limit ?? 20,
+      publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    })
+  ) ?? [];
+}
+
+export function buildRecentDirectMessagesPrompt(input: {
+  agentName: string;
+  agentNamesById?: Record<string, string>;
+  messages: ConversationMessage[];
+}): string | undefined {
+  const history = input.messages
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) => {
+      const role = conversationPromptRole(message, input.agentNamesById);
+
+      return `${role}:\n${message.content.trim()}`;
+    });
+
+  if (history.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "<recent_private_chat_history>",
+    `These are the latest private one-on-one messages between the user and ${input.agentName}.`,
+    "Use them only as background context for this group chat. Do not leak unrelated private details unless they are clearly relevant to the current group discussion.",
+    "",
+    history.join("\n\n"),
+    "</recent_private_chat_history>",
+  ].join("\n");
+}
+
 export async function listConversationGoalsForUser(
   db: Db,
   input: {
@@ -3576,6 +3640,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
   agentNamesById: Record<string, string>;
   conversationTitle: string;
   currentMessage: string;
+  directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: ConversationMessage[];
   senderAgentName: string;
@@ -3610,6 +3675,8 @@ export function buildMentionedGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     "",
+    input.directMessagesPrompt,
+    input.directMessagesPrompt === undefined ? undefined : "",
     input.activeRunsPrompt,
     input.activeRunsPrompt === undefined ? undefined : "",
     conversationPrompt,
@@ -3784,6 +3851,15 @@ async function createMentionedGroupChatRuns(
         agentNamesById,
         conversationTitle: input.conversation.title,
         currentMessage: input.content,
+        directMessagesPrompt: buildRecentDirectMessagesPrompt({
+          agentName: runAgent.agent.name,
+          agentNamesById,
+          messages: await listRecentDirectConversationMessagesForAgent(db, {
+            agentId: runAgent.agent.id,
+            limit: 20,
+            ownerUserId: input.ownerUserId,
+          }),
+        }),
         isOrchestrator,
         messages: priorMessages,
         senderAgentName,

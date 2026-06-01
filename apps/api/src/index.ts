@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -30,6 +32,7 @@ import {
   createLogger,
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildRecentDirectMessagesPrompt,
   createRunRecord,
   buildConversationRunPrompt,
   createConversationArtifactAction,
@@ -62,6 +65,7 @@ import {
   listAgentsForUser,
   listActiveAgentGroupContexts,
   listDaemonDevicesWithRuntimes,
+  listRecentDirectConversationMessagesForAgent,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
   groupConversationKeyFromTitle,
@@ -297,6 +301,54 @@ function parseSenderType(
   return value === "user" || value === "agent" || value === "system"
     ? value
     : null;
+}
+
+const memoryDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function todayUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function readAgentMemoryFile(input: {
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+  workspacePath: string;
+}): Promise<{
+  content: string;
+  exists: boolean;
+  file: string;
+  label: string;
+  scope: "long_term" | "daily" | "transcript";
+}> {
+  const fullPath = path.join(input.workspacePath, input.file);
+
+  try {
+    return {
+      content: await readFile(fullPath, "utf8"),
+      exists: true,
+      file: input.file.replace(/\\/g, "/"),
+      label: input.label,
+      scope: input.scope,
+    };
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return {
+        content: "",
+        exists: false,
+        file: input.file.replace(/\\/g, "/"),
+        label: input.label,
+        scope: input.scope,
+      };
+    }
+
+    throw error;
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -539,6 +591,7 @@ function buildGroupChatRunPrompt(input: {
   agentName: string;
   conversationTitle: string;
   currentUserMessage: string;
+  directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
@@ -567,6 +620,8 @@ function buildGroupChatRunPrompt(input: {
     "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
+    input.directMessagesPrompt,
+    input.directMessagesPrompt === undefined ? undefined : "",
     conversationPrompt,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -983,6 +1038,88 @@ app.get("/agents/:agentId", async (c) => {
   }
 
   return c.json({ agent });
+});
+
+app.get("/agents/:agentId/memory", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const date = c.req.query("date") ?? todayUtcDate();
+  if (!memoryDatePattern.test(date)) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_MEMORY_DATE",
+          message: "date must use yyyy-mm-dd format.",
+        },
+      },
+      400,
+    );
+  }
+
+  const agent = await getAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (agent === null) {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const workspacePath = agent.workspace.workspacePath;
+  if (workspacePath === undefined) {
+    return c.json({
+      date,
+      files: [],
+      workspaceReady: false,
+    });
+  }
+
+  const files = await Promise.all([
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "long_term",
+      label: "MEMORY.md",
+      file: "MEMORY.md",
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "daily",
+      label: `${date}.md`,
+      file: path.join("memory", `${date}.md`),
+    }),
+    readAgentMemoryFile({
+      workspacePath,
+      scope: "transcript",
+      label: `transcripts/${date}.md`,
+      file: path.join("memory", "transcripts", `${date}.md`),
+    }),
+  ]);
+
+  return c.json({
+    date,
+    files,
+    workspaceReady: true,
+  });
 });
 
 app.patch("/agents/:agentId", async (c) => {
@@ -2320,6 +2457,17 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           agentName: runAgent.agent.name,
           conversationTitle: conversation.title,
           currentUserMessage: content,
+          directMessagesPrompt: buildRecentDirectMessagesPrompt({
+            agentName: runAgent.agent.name,
+            agentNamesById,
+            messages: await listRecentDirectConversationMessagesForAgent(db, {
+              agentId: runAgent.agent.id,
+              limit: 20,
+              ownerUserId: user.id,
+              publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+              publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+            }),
+          }),
           isOrchestrator,
           messages: priorMessages,
         }),

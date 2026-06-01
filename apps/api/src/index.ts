@@ -49,6 +49,7 @@ import {
   getConversationArtifactForUser,
   getConversationArtifactContentForUser,
   getConversationArtifactDetailsForUser,
+  getConversationDeploymentFileForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
@@ -2548,6 +2549,114 @@ app.get("/artifacts/:artifactId/preview/*", async (c) => {
       "content-type": fileInfo.mimeType,
     },
     status: 200,
+  });
+});
+
+async function deploymentResponse(input: {
+  deploymentId: string;
+  ownerUserId: string;
+  requestedPath?: string;
+}) {
+  const record = await getConversationDeploymentFileForUser(db, {
+    deploymentId: input.deploymentId,
+    ownerUserId: input.ownerUserId,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    requestedPath: input.requestedPath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (record === null) {
+    return previewUnavailableResponse({
+      message: "Deployment file was not found.",
+      status: 404,
+    });
+  }
+
+  const fileInfo = inferArtifactFileInfo({
+    filename: record.filename,
+  });
+  const body = record.content;
+  const arrayBuffer = body.buffer.slice(
+    body.byteOffset,
+    body.byteOffset + body.byteLength,
+  ) as ArrayBuffer;
+
+  return new Response(arrayBuffer, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": fileInfo.mimeType,
+    },
+    status: 200,
+  });
+}
+
+function getDeploymentRequestedPath(input: {
+  deploymentId: string;
+  requestUrl: string;
+}): string | undefined {
+  const pathname = new URL(input.requestUrl).pathname;
+  const prefix = `/deployments/${input.deploymentId}/`;
+
+  if (!pathname.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const requestedPath = pathname.slice(prefix.length);
+  return requestedPath.length === 0
+    ? undefined
+    : decodeURIComponent(requestedPath);
+}
+
+app.get("/deployments/:deploymentId", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const redirectUrl = new URL(c.req.url);
+  redirectUrl.pathname = `/deployments/${deploymentId}/`;
+  return c.redirect(redirectUrl.toString(), 302);
+});
+
+app.get("/deployments/:deploymentId/*", async (c) => {
+  const user = c.get("user");
+  const deploymentId = c.req.param("deploymentId");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  return deploymentResponse({
+    deploymentId,
+    ownerUserId: user.id,
+    requestedPath: getDeploymentRequestedPath({
+      deploymentId,
+      requestUrl: c.req.url,
+    }),
   });
 });
 

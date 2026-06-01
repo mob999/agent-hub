@@ -8,6 +8,7 @@ import type {
   DaemonServerMessage,
   DaemonRuntime,
   ConversationArtifact,
+  ConversationDeployment,
   AgentHubMcpToolResult,
   RunEvent,
   RunId,
@@ -31,6 +32,9 @@ export interface DaemonGatewayOptions {
   onArtifactUpload?(
     message: Extract<DaemonClientMessage, { type: "artifact.upload" }>,
   ): ConversationArtifact | Promise<ConversationArtifact>;
+  onStaticSiteDeploy?(
+    message: Extract<DaemonClientMessage, { type: "static_site.deploy" }>,
+  ): ConversationDeployment | Promise<ConversationDeployment>;
   onAgentHubToolCall?(
     message: Extract<DaemonClientMessage, { type: "agenthub.tool.call" }>,
   ): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
@@ -285,6 +289,36 @@ export class DaemonGateway {
               "Failed to persist artifact action result",
             );
           });
+          return;
+        }
+
+        if (message.type === "static_site.deploy") {
+          void Promise.resolve(this.#options.onStaticSiteDeploy?.(message))
+            .then((deployment) => {
+              if (deployment === undefined) {
+                throw new Error("Static site deployment handler is not configured.");
+              }
+
+              send(ws, {
+                type: "static_site.deploy.ack",
+                deploymentId: message.deploymentId,
+                deployment,
+                sentAt: nowIsoDateTime(),
+              });
+            })
+            .catch((error) => {
+              const err = toError(error);
+              send(ws, {
+                type: "static_site.deploy.rejected",
+                deploymentId: message.deploymentId,
+                reason: err.message,
+                sentAt: nowIsoDateTime(),
+              });
+              this.#options.logger?.error(
+                { err, runId: message.runId, deploymentId: message.deploymentId },
+                "Failed to persist static site deployment",
+              );
+            });
           return;
         }
 

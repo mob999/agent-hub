@@ -26,6 +26,7 @@ import {
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
   persistConversationArtifactUpload,
+  persistStaticSiteDeployment,
   publishRealtimeEvent,
   readAgentProvisioningQueueMessages,
   readArtifactActionQueueMessages,
@@ -152,6 +153,18 @@ const gateway = new DaemonGateway({
     await Promise.all(memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
 
     return artifact;
+  },
+  onStaticSiteDeploy: async (message) => {
+    return persistStaticSiteDeployment(db, {
+      entrypoint: message.entrypoint,
+      files: message.files,
+      goalId: message.goalId,
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      runId: message.runId,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+      taskIndex: message.taskIndex,
+      title: message.title,
+    });
   },
   onArtifactActionCompleted: async (message) => {
     const result = await completeConversationArtifactAction(db, {

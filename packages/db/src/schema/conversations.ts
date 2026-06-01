@@ -317,3 +317,44 @@ export const conversationArtifactActions = pgTable(
     ).on(table.status),
   }),
 );
+
+export const conversationDeployments = pgTable(
+  "conversation_deployments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id").references(() => conversationGoals.id, {
+      onDelete: "set null",
+    }),
+    taskIndex: integer("task_index"),
+    runId: uuid("run_id").notNull(),
+    creatorAgentId: uuid("creator_agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    entrypoint: text("entrypoint").notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("ready"),
+    storagePrefix: text("storage_prefix").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationDeploymentsConversationCreatedAtIdx: index(
+      "conversation_deployments_conversation_created_at_idx",
+    ).on(table.conversationId, table.createdAt),
+    conversationDeploymentsGoalIdIdx: index(
+      "conversation_deployments_goal_id_idx",
+    ).on(table.goalId),
+    conversationDeploymentsRunIdIdx: index(
+      "conversation_deployments_run_id_idx",
+    ).on(table.runId),
+    conversationDeploymentsCreatorAgentIdIdx: index(
+      "conversation_deployments_creator_agent_id_idx",
+    ).on(table.creatorAgentId),
+  }),
+);

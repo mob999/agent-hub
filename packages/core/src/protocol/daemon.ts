@@ -19,6 +19,7 @@ import type {
   ConversationArtifactActionId,
   ConversationArtifactActionType,
   ConversationArtifactId,
+  ConversationDeployment,
   ConversationGoalId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
@@ -105,6 +106,21 @@ export type DaemonClientMessage =
       sentAt: IsoDateTime;
     }
   | {
+      type: "static_site.deploy";
+      deploymentId: string;
+      runId: RunId;
+      goalId?: ConversationGoalId;
+      taskIndex?: number;
+      title: string;
+      entrypoint: string;
+      files: Array<{
+        path: string;
+        sizeBytes: number;
+        contentBase64: string;
+      }>;
+      sentAt: IsoDateTime;
+    }
+  | {
       type: "memory.appended";
       requestId: string;
       entryId: string;
@@ -169,6 +185,18 @@ export type DaemonServerMessage =
   | {
       type: "artifact.upload.rejected";
       uploadId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "static_site.deploy.ack";
+      deploymentId: string;
+      deployment: ConversationDeployment;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "static_site.deploy.rejected";
+      deploymentId: string;
       reason: string;
       sentAt: IsoDateTime;
     }

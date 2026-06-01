@@ -10,8 +10,10 @@ import type {
   DaemonServerMessage,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
+  AgentRunStaticSiteDeploy,
   RunId,
 } from "@agent-hub/core";
 import { createLogger } from "@agent-hub/server";
@@ -43,6 +45,12 @@ function send(ws: WebSocket, message: DaemonClientMessage): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(message));
   }
+}
+
+interface PendingDaemonRequest<T> {
+  resolve(result: T): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function parseServerMessage(data: WebSocket.RawData): DaemonServerMessage | undefined {
@@ -110,11 +118,11 @@ export async function startDaemon(): Promise<void> {
   const abortControllers = new Map<RunId, AbortController>();
   const pendingArtifactUploads = new Map<
     string,
-    {
-      resolve(result: AgentHubUploadArtifactToolResult): void;
-      reject(error: Error): void;
-      timer: ReturnType<typeof setTimeout>;
-    }
+    PendingDaemonRequest<AgentHubUploadArtifactToolResult>
+  >();
+  const pendingStaticSiteDeployments = new Map<
+    string,
+    PendingDaemonRequest<AgentHubDeployStaticSiteToolResult>
   >();
   const pendingMcpToolCalls = new Map<
     string,
@@ -162,6 +170,25 @@ export async function startDaemon(): Promise<void> {
           accepted: true,
           artifact: message.artifact,
         });
+      } else {
+        pending.reject(new Error(message.reason));
+      }
+      return;
+    }
+
+    if (
+      message.type === "static_site.deploy.ack" ||
+      message.type === "static_site.deploy.rejected"
+    ) {
+      const pending = pendingStaticSiteDeployments.get(message.deploymentId);
+      if (pending === undefined) {
+        return;
+      }
+
+      clearTimeout(pending.timer);
+      pendingStaticSiteDeployments.delete(message.deploymentId);
+      if (message.type === "static_site.deploy.ack") {
+        pending.resolve({ accepted: true, deployment: message.deployment });
       } else {
         pending.reject(new Error(message.reason));
       }
@@ -409,6 +436,36 @@ export async function startDaemon(): Promise<void> {
       });
     };
 
+    const deployStaticSite = (
+      deployment: AgentRunStaticSiteDeploy,
+    ): Promise<AgentHubDeployStaticSiteToolResult> => {
+      const deploymentId = randomUUID();
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingStaticSiteDeployments.delete(deploymentId);
+          reject(new Error("Static site deployment timed out."));
+        }, artifactUploadTimeoutMs);
+
+        pendingStaticSiteDeployments.set(deploymentId, {
+          resolve,
+          reject,
+          timer,
+        });
+        send(ws, {
+          type: "static_site.deploy",
+          deploymentId,
+          runId: message.run.id,
+          goalId: deployment.goalId,
+          taskIndex: deployment.taskIndex,
+          title: deployment.title,
+          entrypoint: deployment.entrypoint,
+          files: deployment.files,
+          sentAt: nowIsoDateTime(),
+        });
+      });
+    };
+
     void (async () => {
       try {
         for await (const event of adapter.run({
@@ -421,6 +478,7 @@ export async function startDaemon(): Promise<void> {
           agentHubMcpTools: message.agentHubMcpTools,
           agentHubMcpGoals: message.agentHubMcpGoals,
           uploadArtifact,
+          deployStaticSite,
           callAgentHubMcpTool,
           abortSignal: abortController.signal,
         })) {
@@ -506,6 +564,11 @@ export async function startDaemon(): Promise<void> {
         clearTimeout(pending.timer);
         pendingArtifactUploads.delete(uploadId);
         pending.reject(new Error("Daemon websocket closed during artifact upload."));
+      }
+      for (const [deploymentId, pending] of pendingStaticSiteDeployments) {
+        clearTimeout(pending.timer);
+        pendingStaticSiteDeployments.delete(deploymentId);
+        pending.reject(new Error("Daemon websocket closed during static site deployment."));
       }
       for (const [requestId, pending] of pendingMcpToolCalls) {
         clearTimeout(pending.timer);

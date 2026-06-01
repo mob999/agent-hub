@@ -7,6 +7,7 @@ import type {
   AgentHubCancelTaskToolInput,
   AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubDeployStaticSiteToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubReadArtifactToolInput,
   AgentHubMcpToolCall,
@@ -24,6 +25,7 @@ import type {
   ConversationMessageAttachment,
   ConversationArtifactDetails,
   ConversationArtifactRevision,
+  ConversationDeployment,
   ConversationGoal,
   ConversationGoalTask,
   RealtimeEvent,
@@ -40,6 +42,7 @@ import {
   conversationArtifactActions,
   conversationArtifacts,
   conversationArtifactRevisions,
+  conversationDeployments,
   conversationMessageArtifacts,
   conversationMessages,
   conversationGoals,
@@ -55,10 +58,14 @@ import { getRunnableAgentForUser } from "../agents/repository.js";
 import {
   buildArtifactDownloadUrl,
   buildArtifactEditorUrl,
+  buildDeploymentUrl,
+  conversationDeploymentFileStorageKey,
+  conversationDeploymentStoragePrefix,
   conversationArtifactRevisionStorageKey,
   conversationArtifactStorageKey,
   sanitizeArtifactFilename,
   writeArtifactContent,
+  writeArtifactBuffer,
   writeArtifactTextContent,
   readArtifactContent,
 } from "../artifacts/index.js";
@@ -82,6 +89,7 @@ type ConversationMessageArtifactRow =
 type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
+type ConversationDeploymentRow = typeof conversationDeployments.$inferSelect;
 
 export interface ActiveRunContext {
   createdAt: string;
@@ -152,6 +160,21 @@ export interface PersistConversationArtifactUploadInput {
   sourcePath?: string;
   storageRoot: string;
   goalId?: string;
+  taskIndex?: number;
+  title: string;
+}
+
+export interface PersistStaticSiteDeploymentInput {
+  entrypoint: string;
+  files: Array<{
+    path: string;
+    contentBase64: string;
+    sizeBytes: number;
+  }>;
+  goalId?: string;
+  publicApiBaseUrl?: string;
+  runId: string;
+  storageRoot: string;
   taskIndex?: number;
   title: string;
 }
@@ -2625,6 +2648,43 @@ function readUploadArtifactToolInput(
     : null;
 }
 
+function readDeployStaticSiteToolInput(
+  input: unknown,
+): AgentHubDeployStaticSiteToolInput | null {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !("title" in input) ||
+    !("localPath" in input)
+  ) {
+    return null;
+  }
+
+  const deploymentInput = input as AgentHubDeployStaticSiteToolInput;
+  const title = deploymentInput.title.trim();
+  const localPath = deploymentInput.localPath.trim();
+  const entrypoint = deploymentInput.entrypoint?.trim();
+
+  return title.length > 0 &&
+    title.length <= 160 &&
+    localPath.length > 0 &&
+    (deploymentInput.goalId === undefined ||
+      typeof deploymentInput.goalId === "string") &&
+    (deploymentInput.taskIndex === undefined ||
+      (typeof deploymentInput.taskIndex === "number" &&
+        Number.isInteger(deploymentInput.taskIndex) &&
+        deploymentInput.taskIndex >= 0))
+    ? {
+        goalId: deploymentInput.goalId,
+        taskIndex: deploymentInput.taskIndex,
+        title,
+        localPath,
+        entrypoint: entrypoint && entrypoint.length > 0 ? entrypoint : undefined,
+      }
+    : null;
+}
+
 function readCompleteTaskToolInput(
   input: unknown,
 ): AgentHubCompleteTaskToolInput | null {
@@ -3134,6 +3194,188 @@ export async function createArtifactUploadMemoryAppendJobs(
   });
 }
 
+function normalizeDeploymentFilePath(filePath: string): string {
+  const normalized = filePath.split(/[\\/]+/).filter(Boolean).join("/");
+
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../") ||
+    normalized === ".."
+  ) {
+    throw new Error("Deployment file path is invalid.");
+  }
+
+  return normalized;
+}
+
+export async function persistStaticSiteDeployment(
+  db: Db,
+  input: PersistStaticSiteDeploymentInput,
+): Promise<ConversationDeployment> {
+  const [run] = await db
+    .select({
+      agentId: runs.agentId,
+      conversationId: runs.conversationId,
+      ownerUserId: runs.ownerUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, input.runId))
+    .limit(1);
+
+  if (run === undefined || run.conversationId === null) {
+    throw new Error("Static site deployment run was not found.");
+  }
+
+  let goalTaskId: string | undefined;
+  if (input.goalId !== undefined) {
+    if (input.taskIndex === undefined) {
+      throw new Error("Deployment task index is required for goal deployments.");
+    }
+
+    const [task] = await db
+      .select({
+        id: conversationGoalTasks.id,
+      })
+      .from(conversationGoalTasks)
+      .innerJoin(conversationGoals, eq(conversationGoalTasks.goalId, conversationGoals.id))
+      .where(
+        and(
+          eq(conversationGoals.id, input.goalId),
+          eq(conversationGoals.conversationId, run.conversationId),
+          eq(conversationGoalTasks.index, input.taskIndex),
+          eq(conversationGoalTasks.assigneeRunId, input.runId),
+          eq(conversationGoalTasks.assigneeAgentId, run.agentId),
+        ),
+      )
+      .limit(1);
+
+    if (task === undefined) {
+      throw new Error("Deployment goal task does not belong to this run.");
+    }
+    goalTaskId = task.id;
+  }
+
+  const normalizedEntrypoint = normalizeDeploymentFilePath(input.entrypoint);
+  const deploymentFiles = input.files.map((file) => ({
+    ...file,
+    path: normalizeDeploymentFilePath(file.path),
+  }));
+  const entrypointFile = deploymentFiles.find(
+    (file) => file.path === normalizedEntrypoint,
+  );
+
+  if (entrypointFile === undefined) {
+    throw new Error("Static site entrypoint was not included in deployment.");
+  }
+
+  const deploymentId = randomUUID();
+  const storagePrefix = conversationDeploymentStoragePrefix({
+    conversationId: run.conversationId,
+    deploymentId,
+  });
+
+  for (const file of deploymentFiles) {
+    const content = Buffer.from(file.contentBase64, "base64");
+    if (content.byteLength !== file.sizeBytes) {
+      throw new Error(`Deployment file size did not match: ${file.path}`);
+    }
+
+    await writeArtifactBuffer({
+      content,
+      storageKey: conversationDeploymentFileStorageKey({
+        storagePrefix,
+        filePath: file.path,
+      }),
+      storageRoot: input.storageRoot,
+    });
+  }
+
+  const now = new Date();
+  const [deployment] = await db
+    .insert(conversationDeployments)
+    .values({
+      id: deploymentId,
+      ownerUserId: run.ownerUserId,
+      conversationId: run.conversationId,
+      goalId: input.goalId,
+      taskIndex: input.taskIndex,
+      runId: input.runId,
+      creatorAgentId: run.agentId,
+      title: input.title.trim(),
+      entrypoint: normalizedEntrypoint,
+      status: "ready",
+      storagePrefix,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (deployment === undefined) {
+    throw new Error("Static site deployment could not be persisted.");
+  }
+
+  void goalTaskId;
+
+  return toConversationDeployment(deployment, {
+    publicApiBaseUrl: input.publicApiBaseUrl,
+  });
+}
+
+export async function getConversationDeploymentFileForUser(
+  db: Db,
+  input: {
+    deploymentId: string;
+    ownerUserId: string;
+    requestedPath?: string;
+    storageRoot: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<
+  | {
+      content: Buffer;
+      deployment: ConversationDeployment;
+      filename: string;
+    }
+  | null
+> {
+  const [row] = await db
+    .select()
+    .from(conversationDeployments)
+    .where(
+      and(
+        eq(conversationDeployments.id, input.deploymentId),
+        eq(conversationDeployments.ownerUserId, input.ownerUserId),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined || row.status !== "ready") {
+    return null;
+  }
+
+  const requestedPath = input.requestedPath?.trim();
+  const filePath =
+    requestedPath === undefined || requestedPath.length === 0
+      ? row.entrypoint
+      : normalizeDeploymentFilePath(requestedPath);
+  const content = await readArtifactContent({
+    storageKey: conversationDeploymentFileStorageKey({
+      storagePrefix: row.storagePrefix,
+      filePath,
+    }),
+    storageRoot: input.storageRoot,
+  });
+
+  return {
+    content,
+    deployment: toConversationDeployment(row, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    }),
+    filename: filePath,
+  };
+}
+
 export async function createArtifactActionMemoryAppendJobs(
   db: Db,
   input: {
@@ -3241,7 +3483,8 @@ export function buildAssignedTaskPrompt(input: {
     "Create the requested report or result file in your current workspace.",
     "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
     "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
-    "Upload the report with upload_artifact, then call complete_task with a concise summary and the uploaded artifact id.",
+    "If the result is a report, screenshot, zip, or source package, upload it with upload_artifact. If the result is a runnable static HTML/CSS/JavaScript website, deploy it with deploy_static_site using the exact Goal ID and Task Index above, then include the returned deployment URL in your summary or visible message.",
+    "After uploading/deploying, call complete_task with a concise summary and any uploaded artifact ids.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
@@ -3268,7 +3511,7 @@ function buildAssignedTaskInstructions(input: {
       scenario: "assigned task",
     }),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
-    "Visible task updates must be sent with send_message. Completed work must be reported with upload_artifact and complete_task.",
+    "Visible task updates must be sent with send_message. Completed files must be reported with upload_artifact; runnable static websites should be deployed with deploy_static_site. Always finish assigned work with complete_task.",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
@@ -3654,6 +3897,33 @@ async function persistVisibleAgentMessageAndDispatchMentions(
     memoryAppendJobs,
     message: conversationMessage,
     realtimeEvents,
+  };
+}
+
+export function toConversationDeployment(
+  row: ConversationDeploymentRow,
+  input: { publicApiBaseUrl?: string } = {},
+): ConversationDeployment {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    goalId: optionalString(row.goalId),
+    taskIndex: row.taskIndex ?? undefined,
+    runId: row.runId,
+    creatorAgentId: row.creatorAgentId,
+    title: row.title,
+    entrypoint: row.entrypoint,
+    status: row.status as ConversationDeployment["status"],
+    url:
+      input.publicApiBaseUrl === undefined
+        ? undefined
+        : buildDeploymentUrl({
+            deploymentId: row.id,
+            publicApiBaseUrl: input.publicApiBaseUrl,
+          }),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -5110,6 +5380,20 @@ export async function appendRunEventToConversationMessage(
       }
 
       toolResult = { accepted: true, artifact: {} as ConversationArtifact };
+      return result();
+    }
+
+    if (event.name === "deploy_static_site") {
+      const input = readDeployStaticSiteToolInput(event.input);
+
+      if (input === null) {
+        return result();
+      }
+
+      toolResult = {
+        accepted: true,
+        deployment: {} as ConversationDeployment,
+      };
       return result();
     }
 

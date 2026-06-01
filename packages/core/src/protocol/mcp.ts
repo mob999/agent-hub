@@ -2,6 +2,7 @@ import type { AgentId, IsoDateTime } from "./agent.js";
 import type {
   ConversationArtifact,
   ConversationArtifactId,
+  ConversationDeployment,
   ConversationGoal,
   ConversationGoalId,
   ConversationGoalStatus,
@@ -24,6 +25,7 @@ export type AgentHubMcpToolName =
   | "approve_task"
   | "cancel_task"
   | "upload_artifact"
+  | "deploy_static_site"
   | "complete_task"
   | "complete_goal";
 
@@ -51,6 +53,7 @@ export const agentHubNonOrchestratorMcpTools = [
   "search_memory",
   "read_memory",
   "upload_artifact",
+  "deploy_static_site",
   "complete_task",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
@@ -233,6 +236,19 @@ export interface AgentHubUploadArtifactToolResult {
   artifact: ConversationArtifact;
 }
 
+export interface AgentHubDeployStaticSiteToolInput {
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  title: string;
+  localPath: string;
+  entrypoint?: string;
+}
+
+export interface AgentHubDeployStaticSiteToolResult {
+  accepted: true;
+  deployment: ConversationDeployment;
+}
+
 export interface AgentHubCompleteTaskToolInput {
   goalId: ConversationGoalId;
   taskIndex: number;
@@ -257,6 +273,7 @@ export type AgentHubMcpToolInput =
   | AgentHubApproveTaskToolInput
   | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
+  | AgentHubDeployStaticSiteToolInput
   | AgentHubCompleteTaskToolInput
   | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
@@ -272,6 +289,7 @@ export type AgentHubMcpToolResult =
   | AgentHubApproveTaskToolResult
   | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
+  | AgentHubDeployStaticSiteToolResult
   | AgentHubCompleteTaskToolResult
   | AgentHubCompleteGoalToolResult;
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 
@@ -8,6 +8,8 @@ import type {
   AgentHubCancelTaskToolInput,
   AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
+  AgentHubDeployStaticSiteToolInput,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubAppendMemoryToolInput,
@@ -24,6 +26,7 @@ import type {
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
+  AgentRunStaticSiteDeploy,
   RunId,
 } from "@agent-hub/core";
 
@@ -35,6 +38,9 @@ import {
 } from "../memory";
 
 const maxArtifactUploadBytes = 5 * 1024 * 1024;
+const maxDirectoryArtifactUploadBytes = 25 * 1024 * 1024;
+const maxStaticSiteDeployBytes = 25 * 1024 * 1024;
+const maxDirectoryFileCount = 500;
 const fetchBlockedPorts = new Set([
   1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77,
   79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123,
@@ -53,6 +59,9 @@ interface AgentHubMcpSession {
   onArtifactUpload?(
     upload: AgentRunArtifactUpload,
   ): Promise<AgentHubUploadArtifactToolResult>;
+  onStaticSiteDeploy?(
+    deployment: AgentRunStaticSiteDeploy,
+  ): Promise<AgentHubDeployStaticSiteToolResult>;
   onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
   runId: RunId;
   workspacePath: string;
@@ -145,6 +154,9 @@ export class AgentHubMcpRelay {
     onArtifactUpload?(
       upload: AgentRunArtifactUpload,
     ): Promise<AgentHubUploadArtifactToolResult>;
+    onStaticSiteDeploy?(
+      deployment: AgentRunStaticSiteDeploy,
+    ): Promise<AgentHubDeployStaticSiteToolResult>;
     onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
     runId: RunId;
     workspacePath: string;
@@ -155,6 +167,7 @@ export class AgentHubMcpRelay {
     this.#sessions.set(token, {
       enabledTools: new Set(enabledTools),
       onArtifactUpload: input.onArtifactUpload,
+      onStaticSiteDeploy: input.onStaticSiteDeploy,
       onToolCall: input.onToolCall,
       runId: input.runId,
       workspacePath: input.workspacePath,
@@ -304,6 +317,29 @@ export class AgentHubMcpRelay {
         return;
       }
 
+      if (toolName === "deploy_static_site") {
+        if (session.onStaticSiteDeploy === undefined) {
+          writeJson(response, 404, { error: "Static site deployment is not available." });
+          return;
+        }
+
+        const deployment = await readStaticSiteDeployment({
+          input: input as AgentHubDeployStaticSiteToolInput,
+          runId: session.runId,
+          workspacePath: session.workspacePath,
+        });
+        const result = await session.onStaticSiteDeploy(deployment);
+        await session.onToolCall({
+          runId: session.runId,
+          toolCallId,
+          name: toolName,
+          input,
+          createdAt: new Date().toISOString(),
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
       if (toolName === "search_memory") {
         const result = await searchMemoryTool(
           session.workspacePath,
@@ -433,6 +469,10 @@ function readToolInput(
 
   if (toolName === "upload_artifact") {
     return readUploadArtifactInput(input);
+  }
+
+  if (toolName === "deploy_static_site") {
+    return readDeployStaticSiteInput(input);
   }
 
   if (toolName === "complete_task") {
@@ -574,10 +614,42 @@ async function readArtifactUpload(input: {
     throw new Error("upload_artifact.localPath must stay inside this run workspace.");
   }
 
+  const linkInfo = await lstat(resolvedPath);
+  if (linkInfo.isSymbolicLink()) {
+    throw new Error("upload_artifact.localPath cannot be a symlink.");
+  }
   const info = await stat(resolvedPath);
 
+  if (info.isDirectory()) {
+    const files = await readWorkspaceDirectoryFiles({
+      directoryPath: resolvedPath,
+      maxBytes: maxDirectoryArtifactUploadBytes,
+      maxFiles: maxDirectoryFileCount,
+      workspacePath: input.workspacePath,
+    });
+    const zip = createStoredZip(files);
+    const sourcePath = path
+      .relative(input.workspacePath, resolvedPath)
+      .split(path.sep)
+      .join("/");
+    const directoryName = path.basename(resolvedPath);
+    const filename = input.input.filename ?? `${directoryName}.zip`;
+
+    if (zip.byteLength > maxDirectoryArtifactUploadBytes) {
+      throw new Error("upload_artifact directory is too large.");
+    }
+
+    return {
+      ...input.input,
+      filename,
+      sourcePath,
+      sizeBytes: zip.byteLength,
+      contentBase64: zip.toString("base64"),
+    };
+  }
+
   if (!info.isFile()) {
-    throw new Error("upload_artifact.localPath must point to a file.");
+    throw new Error("upload_artifact.localPath must point to a file or directory.");
   }
 
   if (info.size > maxArtifactUploadBytes) {
@@ -597,6 +669,199 @@ async function readArtifactUpload(input: {
     sizeBytes: content.byteLength,
     contentBase64: content.toString("base64"),
   };
+}
+
+async function readStaticSiteDeployment(input: {
+  input: AgentHubDeployStaticSiteToolInput;
+  runId: RunId;
+  workspacePath: string;
+}): Promise<AgentRunStaticSiteDeploy> {
+  const resolvedPath = path.resolve(input.workspacePath, input.input.localPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, resolvedPath)) {
+    throw new Error("deploy_static_site.localPath must stay inside this run workspace.");
+  }
+
+  const linkInfo = await lstat(resolvedPath);
+  if (linkInfo.isSymbolicLink()) {
+    throw new Error("deploy_static_site.localPath cannot be a symlink.");
+  }
+  const info = await stat(resolvedPath);
+  if (!info.isDirectory()) {
+    throw new Error("deploy_static_site.localPath must point to a directory.");
+  }
+
+  const entrypoint = normalizeRelativeFilePath(input.input.entrypoint ?? "index.html");
+  const files = await readWorkspaceDirectoryFiles({
+    directoryPath: resolvedPath,
+    maxBytes: maxStaticSiteDeployBytes,
+    maxFiles: maxDirectoryFileCount,
+    workspacePath: input.workspacePath,
+  });
+
+  if (!files.some((file) => file.path === entrypoint)) {
+    throw new Error("deploy_static_site.entrypoint was not found in the directory.");
+  }
+
+  return {
+    ...input.input,
+    entrypoint,
+    files: files.map((file) => ({
+      path: file.path,
+      sizeBytes: file.content.byteLength,
+      contentBase64: file.content.toString("base64"),
+    })),
+  };
+}
+
+interface DirectoryFile {
+  content: Buffer;
+  path: string;
+}
+
+async function readWorkspaceDirectoryFiles(input: {
+  directoryPath: string;
+  maxBytes: number;
+  maxFiles: number;
+  workspacePath: string;
+}): Promise<DirectoryFile[]> {
+  const files: DirectoryFile[] = [];
+  let totalBytes = 0;
+
+  async function visit(directoryPath: string): Promise<void> {
+    const entries = await readdir(directoryPath, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name);
+      const entryInfo = await lstat(entryPath);
+
+      if (entryInfo.isSymbolicLink()) {
+        throw new Error("Directory uploads cannot include symlinks.");
+      }
+
+      if (!isPathInsideWorkspace(input.workspacePath, entryPath)) {
+        throw new Error("Directory upload path escapes the run workspace.");
+      }
+
+      if (entryInfo.isDirectory()) {
+        await visit(entryPath);
+        continue;
+      }
+
+      if (!entryInfo.isFile()) {
+        continue;
+      }
+
+      if (files.length >= input.maxFiles) {
+        throw new Error("Directory upload includes too many files.");
+      }
+
+      totalBytes += entryInfo.size;
+      if (totalBytes > input.maxBytes) {
+        throw new Error("Directory upload is too large.");
+      }
+
+      const relativePath = normalizeRelativeFilePath(
+        path.relative(input.directoryPath, entryPath).split(path.sep).join("/"),
+      );
+      files.push({
+        content: await readFile(entryPath),
+        path: relativePath,
+      });
+    }
+  }
+
+  await visit(input.directoryPath);
+  return files;
+}
+
+function normalizeRelativeFilePath(filePath: string): string {
+  const normalized = filePath.split(/[\\/]+/).filter(Boolean).join("/");
+
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../")
+  ) {
+    throw new Error("Relative file path is invalid.");
+  }
+
+  return normalized;
+}
+
+function createStoredZip(files: DirectoryFile[]): Buffer {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const filename = Buffer.from(file.path, "utf8");
+    const crc = crc32(file.content);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(file.content.byteLength, 18);
+    localHeader.writeUInt32LE(file.content.byteLength, 22);
+    localHeader.writeUInt16LE(filename.byteLength, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, filename, file.content);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(file.content.byteLength, 20);
+    centralHeader.writeUInt32LE(file.content.byteLength, 24);
+    centralHeader.writeUInt16LE(filename.byteLength, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, filename);
+
+    offset += localHeader.byteLength + filename.byteLength + file.content.byteLength;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralDirectory.byteLength, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function readListArtifactsInput(
@@ -659,6 +924,10 @@ async function readMessageAttachmentUpload(input: {
     throw new Error("send_message attachment localPath must stay inside this run workspace.");
   }
 
+  const linkInfo = await lstat(resolvedPath);
+  if (linkInfo.isSymbolicLink()) {
+    throw new Error("send_message attachment localPath cannot be a symlink.");
+  }
   const info = await stat(resolvedPath);
 
   if (!info.isFile()) {
@@ -728,6 +997,50 @@ function readUploadArtifactInput(
     filename:
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
+        : undefined,
+  };
+}
+
+function readDeployStaticSiteInput(
+  input: unknown,
+): AgentHubDeployStaticSiteToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const title = record.title;
+  const localPath = record.localPath;
+  const entrypoint = record.entrypoint;
+  const goalId = record.goalId;
+  const taskIndex = readTaskIndex(record.taskIndex);
+
+  if (
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    title.trim().length > 160 ||
+    typeof localPath !== "string" ||
+    localPath.trim().length === 0
+  ) {
+    return null;
+  }
+
+  if (goalId !== undefined && typeof goalId !== "string") {
+    return null;
+  }
+
+  if (record.taskIndex !== undefined && taskIndex === null) {
+    return null;
+  }
+
+  return {
+    goalId,
+    taskIndex: taskIndex ?? undefined,
+    title: title.trim(),
+    localPath: localPath.trim(),
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
         : undefined,
   };
 }

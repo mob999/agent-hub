@@ -1,5 +1,7 @@
 import type {
   AgentHubSendMessageTarget,
+  AgentHubDeployStaticSiteToolInput,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubUploadArtifactToolInput,
   AgentHubUploadArtifactToolResult,
   AgentRuntimeConfig,
@@ -23,6 +25,18 @@ export interface AgentRunArtifactUpload
   contentBase64: string;
 }
 
+export interface AgentRunStaticSiteDeploy
+  extends Omit<AgentHubDeployStaticSiteToolInput, "goalId" | "taskIndex"> {
+  goalId?: AgentHubDeployStaticSiteToolInput["goalId"];
+  taskIndex?: AgentHubDeployStaticSiteToolInput["taskIndex"];
+  entrypoint: string;
+  files: Array<{
+    path: string;
+    sizeBytes: number;
+    contentBase64: string;
+  }>;
+}
+
 export interface AgentRunInput {
   run: AgentRun;
   prompt: string;
@@ -35,6 +49,9 @@ export interface AgentRunInput {
   uploadArtifact?(
     upload: AgentRunArtifactUpload,
   ): Promise<AgentHubUploadArtifactToolResult>;
+  deployStaticSite?(
+    deployment: AgentRunStaticSiteDeploy,
+  ): Promise<AgentHubDeployStaticSiteToolResult>;
   callAgentHubMcpTool?(
     call: AgentHubMcpToolCall,
   ): Promise<AgentHubMcpToolResult>;

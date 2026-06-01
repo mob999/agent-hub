@@ -6,6 +6,8 @@ import type {
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubDeployStaticSiteToolInput,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
@@ -48,6 +50,7 @@ describe("AgentHub MCP protocol", () => {
       "search_memory",
       "read_memory",
       "upload_artifact",
+      "deploy_static_site",
       "complete_task",
     ]);
   });
@@ -244,6 +247,37 @@ describe("AgentHub MCP protocol", () => {
     expect(uploadResult.artifact.filename).toBe("report.md");
     expect(uploadResult.artifact.editorUrl).toContain("/editor/");
     expect(completeInput.artifactIds).toEqual([uploadResult.artifact.id]);
+  });
+
+  it("expresses deploy_static_site tool calls", () => {
+    const input: AgentHubDeployStaticSiteToolInput = {
+      goalId: "00000000-0000-4000-8000-000000000020",
+      taskIndex: 0,
+      title: "Landing page",
+      localPath: "dist",
+      entrypoint: "index.html",
+    };
+    const result: AgentHubDeployStaticSiteToolResult = {
+      accepted: true,
+      deployment: {
+        id: "00000000-0000-4000-8000-000000000030",
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        goalId: input.goalId,
+        taskIndex: input.taskIndex,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        status: "ready",
+        title: input.title,
+        entrypoint: "index.html",
+        url: "http://localhost:3000/deployments/00000000-0000-4000-8000-000000000030/",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    };
+
+    expect(input.localPath).toBe("dist");
+    expect(result.deployment.url).toContain("/deployments/");
   });
 
   it("expresses cross-conversation messages through send_message target", () => {

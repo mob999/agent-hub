@@ -103,6 +103,7 @@ export interface ConversationMessageAttachment {
 
 export type ConversationArtifactRevisionId = string;
 export type ConversationArtifactActionId = string;
+export type ConversationDeploymentId = string;
 
 export interface ConversationArtifactRevision {
   id: ConversationArtifactRevisionId;
@@ -134,6 +135,22 @@ export interface ConversationArtifactDetails {
   latestRevision?: ConversationArtifactRevision;
   actions: ConversationArtifactAction[];
   availableActions: ConversationArtifactActionType[];
+}
+
+export interface ConversationDeployment {
+  id: ConversationDeploymentId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  runId: RunId;
+  creatorAgentId: AgentId;
+  title: string;
+  entrypoint: string;
+  status: "ready" | "failed" | "deleted";
+  url?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
 }
 
 export interface ConversationGoalTask {

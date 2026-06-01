@@ -8,12 +8,14 @@ import type {
   AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
+  AgentRunStaticSiteDeploy,
 } from "@agent-hub/core/runtime";
 import type {
   AgentHubMcpToolInput,
   AgentHubMcpToolResult,
   AgentHubListGoalsToolResult,
   AgentHubUploadArtifactToolResult,
+  AgentHubDeployStaticSiteToolResult,
   AgentHubMcpToolName,
   AgentRuntimeConfig,
   DaemonRuntime,
@@ -56,6 +58,9 @@ export interface AgentHubMcpRelayLike {
     onArtifactUpload?(
       upload: AgentRunArtifactUpload,
     ): Promise<AgentHubUploadArtifactToolResult>;
+    onStaticSiteDeploy?(
+      deployment: AgentRunStaticSiteDeploy,
+    ): Promise<AgentHubDeployStaticSiteToolResult>;
     onToolCall(call: {
       createdAt: string;
       input: AgentHubMcpToolInput;
@@ -553,6 +558,7 @@ export class CodexAdapter implements AgentAdapter {
       runId: input.run.id,
       workspacePath: input.workspacePath,
       onArtifactUpload: input.uploadArtifact,
+      onStaticSiteDeploy: input.deployStaticSite,
       onToolCall: async (call) => {
         if (input.callAgentHubMcpTool !== undefined) {
           return input.callAgentHubMcpTool(call);

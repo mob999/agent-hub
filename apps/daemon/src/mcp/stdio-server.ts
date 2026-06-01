@@ -16,6 +16,7 @@ import type {
   AgentHubCompleteGoalToolResult,
   AgentHubCompleteTaskToolInput,
   AgentHubCompleteTaskToolResult,
+  AgentHubDeployStaticSiteToolInput,
   AgentHubCreateGoalToolInput,
   AgentHubCreateGoalToolResult,
   AgentHubCreateTaskToolInput,
@@ -52,6 +53,7 @@ const createTaskToolName = "create_task" satisfies AgentHubMcpToolName;
 const approveTaskToolName = "approve_task" satisfies AgentHubMcpToolName;
 const cancelTaskToolName = "cancel_task" satisfies AgentHubMcpToolName;
 const uploadArtifactToolName = "upload_artifact" satisfies AgentHubMcpToolName;
+const deployStaticSiteToolName = "deploy_static_site" satisfies AgentHubMcpToolName;
 const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const completeGoalToolName = "complete_goal" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
@@ -67,6 +69,7 @@ const agentHubMcpToolNames = [
   approveTaskToolName,
   cancelTaskToolName,
   uploadArtifactToolName,
+  deployStaticSiteToolName,
   completeTaskToolName,
   completeGoalToolName,
 ] as const;
@@ -412,7 +415,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: uploadArtifactToolName,
               description:
-                "Upload a report or result file from the current run workspace to the current Goal and task.",
+                "Upload a report, result file, screenshot, zip, or source directory from the current run workspace to the current Goal and task. If localPath is a directory, AgentHub uploads it as a zip artifact for download.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -424,11 +427,51 @@ export async function startAgentHubMcpStdioServer(
                     type: "string",
                     minLength: 1,
                     description:
-                      "Path to a file inside the current run workspace.",
+                      "Path to a file or directory inside the current run workspace.",
                   },
                   filename: { type: "string" },
                 },
                 required: ["goalId", "taskIndex", "title", "localPath"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(deployStaticSiteToolName)
+        ? [
+            {
+              name: deployStaticSiteToolName,
+              description:
+                "Deploy a static website directory from the current run workspace. Use this for runnable HTML/CSS/JavaScript websites. Return the deployment URL to the user as a Markdown link. Use upload_artifact separately if you also need to deliver a source zip or report.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  goalId: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Optional Goal ID when deploying as part of an assigned task.",
+                  },
+                  taskIndex: {
+                    type: "number",
+                    minimum: 0,
+                    description:
+                      "Optional Goal task index when deploying as part of an assigned task.",
+                  },
+                  title: { type: "string", minLength: 1, maxLength: 160 },
+                  localPath: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Path to a static site directory inside the current run workspace.",
+                  },
+                  entrypoint: {
+                    type: "string",
+                    minLength: 1,
+                    description: "Entrypoint file inside localPath. Defaults to index.html.",
+                  },
+                },
+                required: ["title", "localPath"],
               },
             },
           ]
@@ -509,11 +552,13 @@ export async function startAgentHubMcpStdioServer(
                             ? readCancelTaskInput(request.params.arguments)
                             : toolName === uploadArtifactToolName
                               ? readUploadArtifactInput(request.params.arguments)
-                              : toolName === completeTaskToolName
-                                ? readCompleteTaskInput(request.params.arguments)
-                                : toolName === completeGoalToolName
-                                  ? readCompleteGoalInput(request.params.arguments)
-                                  : undefined;
+                              : toolName === deployStaticSiteToolName
+                                ? readDeployStaticSiteInput(request.params.arguments)
+                                : toolName === completeTaskToolName
+                                  ? readCompleteTaskInput(request.params.arguments)
+                                  : toolName === completeGoalToolName
+                                    ? readCompleteGoalInput(request.params.arguments)
+                                    : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -928,6 +973,42 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
   };
 }
 
+function readDeployStaticSiteInput(value: unknown): AgentHubDeployStaticSiteToolInput {
+  const input = readObjectArguments(value, "deploy_static_site");
+  const goalId = input.goalId;
+  const taskIndex = readTaskIndex(input.taskIndex);
+  const title = input.title;
+  const localPath = input.localPath;
+  const entrypoint = input.entrypoint;
+
+  if (goalId !== undefined && typeof goalId !== "string") {
+    throw new Error("deploy_static_site.goalId must be a string.");
+  }
+
+  if (input.taskIndex !== undefined && taskIndex === null) {
+    throw new Error("deploy_static_site.taskIndex must be a non-negative integer.");
+  }
+
+  if (typeof title !== "string" || title.trim().length === 0) {
+    throw new Error("deploy_static_site.title is required.");
+  }
+
+  if (typeof localPath !== "string" || localPath.trim().length === 0) {
+    throw new Error("deploy_static_site.localPath is required.");
+  }
+
+  return {
+    goalId,
+    taskIndex: taskIndex ?? undefined,
+    title: title.trim(),
+    localPath: localPath.trim(),
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
+        : undefined,
+  };
+}
+
 function readCompleteTaskInput(value: unknown): AgentHubCompleteTaskToolInput {
   const input = readObjectArguments(value, "complete_task");
   const goalId = input.goalId;
@@ -995,6 +1076,7 @@ async function callRelayTool(input: {
     | AgentHubCancelTaskToolInput
     | AgentHubCompleteGoalToolInput
     | AgentHubCompleteTaskToolInput
+    | AgentHubDeployStaticSiteToolInput
     | AgentHubCreateGoalToolInput
     | AgentHubCreateTaskToolInput
     | AgentHubAppendMemoryToolInput
@@ -1025,7 +1107,22 @@ async function callRelayTool(input: {
   );
 
   if (!response.ok) {
-    throw new Error(`AgentHub MCP relay rejected ${input.toolName}.`);
+    const errorText = await response.text().catch(() => "");
+    let reason = errorText.trim();
+    try {
+      const parsed = JSON.parse(errorText) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error.length > 0) {
+        reason = parsed.error;
+      }
+    } catch {
+      // Keep the raw relay response when it is not JSON.
+    }
+
+    throw new Error(
+      reason.length > 0
+        ? `AgentHub MCP relay rejected ${input.toolName}: ${reason}`
+        : `AgentHub MCP relay rejected ${input.toolName}.`,
+    );
   }
 
   return (await response.json()) as

@@ -106,6 +106,10 @@ export async function startDaemon(): Promise<void> {
   const mcpRelay = new AgentHubMcpRelay();
   await mcpRelay.start();
   const adapter = new CodexAdapter({
+    dailyMemoryRefreshIntervalMs:
+      env.AGENTHUB_DAILY_MEMORY_REFRESH_INTERVAL_MINUTES * 60 * 1000,
+    dailyMemoryRefreshTranscriptMaxBytes:
+      env.AGENTHUB_DAILY_MEMORY_REFRESH_TRANSCRIPT_MAX_BYTES,
     executablePath: env.CODEX_EXECUTABLE_PATH,
     mcpRelay,
   });

@@ -25,7 +25,12 @@ import type {
 } from "@agent-hub/core/protocol";
 
 import type { AgentHubMcpSessionHandle } from "../mcp/relay";
-import { appendMemory, buildMemoryPrompt } from "../memory";
+import {
+  appendMemory,
+  buildMemoryPrompt,
+  hasDailyMemoryDedupeKey,
+  readTranscriptForDailyMemoryRefresh,
+} from "../memory";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 type SpawnedProcess = Pick<
@@ -40,6 +45,8 @@ export type SpawnCodexProcess = (
 ) => SpawnedProcess;
 
 export interface CodexAdapterOptions {
+  dailyMemoryRefreshIntervalMs?: number;
+  dailyMemoryRefreshTranscriptMaxBytes?: number;
   executablePath?: string;
   mcpRelay?: AgentHubMcpRelayLike;
   mcpServerCommand?: AgentHubMcpServerCommand;
@@ -478,15 +485,124 @@ async function runHiddenCodexPrompt(input: {
   return output.join("\n").trim();
 }
 
+function periodicDailyMemoryDedupeKey(input: {
+  date: string;
+  intervalMs: number;
+  now: Date;
+}): string {
+  const bucket = Math.floor(input.now.getTime() / input.intervalMs);
+
+  return `periodic-daily-memory:${input.date}:${bucket}`;
+}
+
+async function maybeRefreshDailyMemory(input: {
+  agentInstructions?: string;
+  executablePath: string;
+  intervalMs: number;
+  maxTranscriptBytes: number;
+  spawnProcess: SpawnCodexProcess;
+  workspacePath: string;
+}): Promise<
+  | {
+      refreshed: false;
+    }
+  | {
+      refreshed: true;
+      date: string;
+      summary: string;
+      sourceChars: number;
+      transcriptFile: string;
+      truncated: boolean;
+    }
+> {
+  if (input.intervalMs <= 0) {
+    return { refreshed: false };
+  }
+
+  const now = new Date();
+  const transcript = await readTranscriptForDailyMemoryRefresh({
+    workspacePath: input.workspacePath,
+    maxBytes: input.maxTranscriptBytes,
+  });
+
+  if (transcript.content.length === 0) {
+    return { refreshed: false };
+  }
+
+  const dedupeKey = periodicDailyMemoryDedupeKey({
+    date: transcript.date,
+    intervalMs: input.intervalMs,
+    now,
+  });
+
+  if (
+    await hasDailyMemoryDedupeKey(input.workspacePath, {
+      date: transcript.date,
+      dedupeKey,
+    })
+  ) {
+    return { refreshed: false };
+  }
+
+  const summary = await runHiddenCodexPrompt({
+    agentInstructions: [
+      input.agentInstructions,
+      [
+        "You are updating this AgentHub agent's daily memory from its local transcript.",
+        "Return concise Markdown notes for durable context from today.",
+        "Preserve user goals, decisions, side effects, task/artifact/deployment references, open questions, and follow-ups.",
+        "Ignore routine chatter and do not produce a visible chat reply.",
+        "Keep the memory entry under 6000 characters.",
+      ].join("\n"),
+    ].filter((line): line is string => line !== undefined).join("\n\n"),
+    executablePath: input.executablePath,
+    prompt: [
+      `<transcript file="${transcript.file}" date="${transcript.date}" truncated="${transcript.truncated ? "true" : "false"}">`,
+      transcript.content,
+      "</transcript>",
+    ].join("\n"),
+    spawnProcess: input.spawnProcess,
+    workspacePath: input.workspacePath,
+  });
+
+  if (summary.trim().length === 0) {
+    return { refreshed: false };
+  }
+
+  await appendMemory({
+    workspacePath: input.workspacePath,
+    kind: "daily",
+    title: "Periodic daily memory update",
+    content: summary,
+    tags: ["daily-memory", "periodic-summary"],
+    dedupeKey,
+  });
+
+  return {
+    refreshed: true,
+    date: transcript.date,
+    summary,
+    sourceChars: transcript.content.length,
+    transcriptFile: transcript.file,
+    truncated: transcript.truncated,
+  };
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
+  #dailyMemoryRefreshIntervalMs: number;
+  #dailyMemoryRefreshTranscriptMaxBytes: number;
   #executablePath: string;
   #mcpRelay: AgentHubMcpRelayLike | undefined;
   #mcpServerCommand: AgentHubMcpServerCommand;
   #spawnProcess: SpawnCodexProcess;
 
   constructor(options: CodexAdapterOptions = {}) {
+    this.#dailyMemoryRefreshIntervalMs =
+      options.dailyMemoryRefreshIntervalMs ?? 4 * 60 * 60 * 1000;
+    this.#dailyMemoryRefreshTranscriptMaxBytes =
+      options.dailyMemoryRefreshTranscriptMaxBytes ?? 60 * 1024;
     this.#executablePath = options.executablePath ?? "codex";
     this.#mcpRelay = options.mcpRelay;
     this.#mcpServerCommand =
@@ -729,10 +845,8 @@ export class CodexAdapter implements AgentAdapter {
     });
     void (async () => {
       try {
-        const memoryPrompt = await buildMemoryPrompt({
-          workspacePath: input.workspacePath,
-        });
         let runPrompt = input.prompt;
+        let contextCompacted = false;
 
         if (
           input.contextCompression !== undefined &&
@@ -757,6 +871,7 @@ export class CodexAdapter implements AgentAdapter {
             tags: ["context-compression"],
             dedupeKey: `context-compression:${input.run.id}`,
           });
+          contextCompacted = true;
           queue.push({
             type: "runtime.event",
             runId: input.run.id,
@@ -775,6 +890,40 @@ export class CodexAdapter implements AgentAdapter {
             compressedContext,
           );
         }
+
+        if (!contextCompacted) {
+          const periodicRefresh = await maybeRefreshDailyMemory({
+            agentInstructions: input.agentInstructions,
+            executablePath: this.#executablePath,
+            intervalMs: this.#dailyMemoryRefreshIntervalMs,
+            maxTranscriptBytes: this.#dailyMemoryRefreshTranscriptMaxBytes,
+            spawnProcess: this.#spawnProcess,
+            workspacePath: input.workspacePath,
+          });
+
+          if (periodicRefresh.refreshed) {
+            queue.push({
+              type: "runtime.event",
+              runId: input.run.id,
+              raw: {
+                runtimeKind: "codex",
+                nativeType: "memory.periodic_refreshed",
+                payload: {
+                  date: periodicRefresh.date,
+                  summaryChars: periodicRefresh.summary.length,
+                  sourceChars: periodicRefresh.sourceChars,
+                  transcriptFile: periodicRefresh.transcriptFile,
+                  truncated: periodicRefresh.truncated,
+                },
+              },
+              createdAt: nowIsoDateTime(),
+            });
+          }
+        }
+
+        const memoryPrompt = await buildMemoryPrompt({
+          workspacePath: input.workspacePath,
+        });
 
         process.stdin.write([memoryPrompt, runPrompt].join("\n\n"));
         process.stdin.end();

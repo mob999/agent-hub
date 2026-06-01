@@ -8,6 +8,7 @@ import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { AgentRunInput, RunEvent } from "@agent-hub/core";
 import { describe, expect, it } from "vitest";
 
+import { appendMemory } from "../../src/memory";
 import { CodexAdapter, type SpawnCodexProcess } from "../../src/runtime";
 
 class MockCodexProcess extends EventEmitter {
@@ -186,6 +187,82 @@ describe("Codex context compression integration", () => {
       expect(dailyMemory).toContain("Context compression");
       expect(dailyMemory).toContain(compressedSummary);
       expect(dailyMemory).toContain("[Full conversation transcript](./transcripts/");
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a hidden periodic daily memory refresh when transcript exists below compression threshold", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-periodic-memory-"));
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new CodexAdapter({
+      dailyMemoryRefreshIntervalMs: 24 * 60 * 60 * 1000,
+      spawnProcess,
+    });
+    const dailySummary = "Periodic summary: user asked for deployment routing and memory updates.";
+
+    try {
+      await appendMemory({
+        workspacePath,
+        kind: "transcript",
+        title: "Recent conversation",
+        content: [
+          "Conversation: #测试群",
+          "User: 部署列表页面需要路由。",
+          "Agent: 已经开始修改部署面板。",
+        ].join("\n"),
+        dedupeKey: "message:test-periodic-memory",
+      });
+      const eventsPromise = collectEvents(
+        adapter.run(createRunInput(workspacePath, {
+          prompt: "continue latest work",
+        })),
+      );
+
+      await waitFor(() => calls.length === 2, "Expected periodic memory process to spawn.");
+      const normalRun = calls[0]?.process;
+      const periodicRefresh = calls[1]?.process;
+
+      expect(normalRun).toBeDefined();
+      expect(periodicRefresh).toBeDefined();
+      expect(periodicRefresh?.stdinText).toContain("部署列表页面需要路由");
+
+      periodicRefresh?.stdout.write(
+        `${JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "msg_1",
+            type: "agent_message",
+            text: dailySummary,
+          },
+        })}\n`,
+      );
+      periodicRefresh?.close(0);
+
+      await waitFor(
+        () => normalRun?.stdinText.includes(dailySummary) === true,
+        "Expected normal run memory prompt to contain periodic summary.",
+      );
+
+      normalRun?.close(0);
+      const events = await eventsPromise;
+      const refreshedEvent = events.find(
+        (event) =>
+          event.type === "runtime.event" &&
+          event.raw.nativeType === "memory.periodic_refreshed",
+      );
+      const dailyMemory = await readFile(
+        path.join(
+          workspacePath,
+          "memory",
+          `${new Date().toISOString().slice(0, 10)}.md`,
+        ),
+        "utf8",
+      );
+
+      expect(refreshedEvent).toBeDefined();
+      expect(dailyMemory).toContain("Periodic daily memory update");
+      expect(dailyMemory).toContain(dailySummary);
     } finally {
       await rm(workspacePath, { recursive: true, force: true });
     }

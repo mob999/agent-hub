@@ -48,7 +48,7 @@ import {
 import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
-import type { GoalRouteState } from '../App'
+import type { ChatPanelRoute, GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
@@ -186,13 +186,21 @@ function toLocalRun(summary: AgentRunSummary, agents: AgentDetails[] = []): Loca
 
 interface WorkspacePageProps {
   chatConversationId?: string | null
+  chatPanelRoute?: ChatPanelRoute
   goalRoute?: GoalRouteState | null
   route: WorkspaceRoutePath
   editorRoute?: { artifactId: string | null; conversationId: string } | null
   navigate: (path: RoutePath) => void
 }
 
-export function WorkspacePage({ route, chatConversationId = null, goalRoute = null, editorRoute = null, navigate }: WorkspacePageProps) {
+export function WorkspacePage({
+  route,
+  chatConversationId = null,
+  chatPanelRoute = null,
+  goalRoute = null,
+  editorRoute = null,
+  navigate,
+}: WorkspacePageProps) {
   const initialSearchRouteState = readCurrentSearchRouteState()
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -1270,6 +1278,9 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
   const openTasksRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}/tasks` as RoutePath)
   }
+  const openDeploymentsRoute = (conversationId: string) => {
+    navigate(`/chat/${encodeURIComponent(conversationId)}/deployments` as RoutePath)
+  }
   const closeConversationRoute = (conversationId: string) => {
     navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
   }
@@ -1833,6 +1844,7 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               openRun={openRun}
               focusedGoalRoute={focusedGoalRoute}
               taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+              deploymentRouteActive={chatPanelRoute === 'deployments'}
               openGoalRoute={(goalId, taskIndex) => {
                 if (activeConversation?.id) {
                   openGoalRoute(activeConversation.id, goalId, taskIndex)
@@ -1841,6 +1853,11 @@ export function WorkspacePage({ route, chatConversationId = null, goalRoute = nu
               openTasksRoute={() => {
                 if (activeConversation?.id) {
                   openTasksRoute(activeConversation.id)
+                }
+              }}
+              openDeploymentsRoute={() => {
+                if (activeConversation?.id) {
+                  openDeploymentsRoute(activeConversation.id)
                 }
               }}
               closeConversationRoute={() => {

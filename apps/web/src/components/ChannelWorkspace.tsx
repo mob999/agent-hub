@@ -50,6 +50,7 @@ interface ChannelWorkspaceProps {
   openArtifactEditor: (artifactId: string) => void
   openGoalRoute: (goalId: string, taskIndex?: number | null) => void
   openTasksRoute: () => void
+  openDeploymentsRoute: () => void
   closeConversationRoute: () => void
   openRun: (runId: string) => void
   openConversationEditor?: (conversationId: string) => void
@@ -61,6 +62,7 @@ interface ChannelWorkspaceProps {
   refreshDeployments?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
   taskRouteActive?: boolean
+  deploymentRouteActive?: boolean
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -168,6 +170,7 @@ export function ChannelWorkspace({
   openArtifactEditor,
   openGoalRoute,
   openTasksRoute,
+  openDeploymentsRoute,
   closeConversationRoute,
   openRun,
   openConversationEditor,
@@ -179,6 +182,7 @@ export function ChannelWorkspace({
   refreshDeployments,
   focusedGoalRoute = null,
   taskRouteActive = false,
+  deploymentRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'deployments' } | null>(null)
@@ -502,6 +506,19 @@ export function ChannelWorkspace({
 
     return () => window.clearTimeout(timeout)
   }, [activeConversation?.id, taskRouteActive])
+
+  useEffect(() => {
+    if (activeConversation?.id === undefined || !deploymentRouteActive) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWorkspacePanel({ conversationId: activeConversation.id, view: 'deployments' })
+      refreshDeployments?.()
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [activeConversation?.id, deploymentRouteActive, refreshDeployments])
 
   useEffect(() => {
     if (!showTasks || taskAggregationMode !== 'goal' || focusedGoalId === null) {
@@ -974,6 +991,7 @@ export function ChannelWorkspace({
               closeArtifactEditor?.()
               if (activeConversation !== null) {
                 setWorkspacePanel({ conversationId: activeConversation.id, view: 'deployments' })
+                openDeploymentsRoute()
                 refreshDeployments?.()
               }
             }}

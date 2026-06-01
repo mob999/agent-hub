@@ -51,6 +51,12 @@ export interface MemoryPromptInput {
   now?: Date;
 }
 
+export interface DailyMemoryRefreshInput {
+  date?: string;
+  maxBytes?: number;
+  workspacePath: string;
+}
+
 function todayUtc(date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
@@ -256,6 +262,40 @@ export async function appendMemory(input: MemoryAppendInput): Promise<MemoryAppe
   return {
     entryId,
     file: relativeMemoryPath(input.workspacePath, filePath),
+  };
+}
+
+export async function hasDailyMemoryDedupeKey(
+  workspacePath: string,
+  input: { date?: string; dedupeKey: string },
+): Promise<boolean> {
+  const date = input.date ?? todayUtc();
+  assertDate(date);
+  await ensureMemoryFiles(workspacePath, date);
+  const filePath = memoryFileForScope(workspacePath, "daily", date);
+  const existing = await readOptionalFile(filePath);
+
+  return existing.includes(`dedupeKey: ${input.dedupeKey}`);
+}
+
+export async function readTranscriptForDailyMemoryRefresh(
+  input: DailyMemoryRefreshInput,
+): Promise<{ content: string; date: string; file: string; truncated: boolean }> {
+  const date = input.date ?? todayUtc();
+  assertDate(date);
+  await ensureMemoryFiles(input.workspacePath, date);
+  const filePath = memoryFileForScope(input.workspacePath, "transcript", date);
+  const content = await readOptionalFile(filePath);
+  const body = content
+    .replace(/^# AgentHub Conversation Transcript - .+?\r?\n+/, "")
+    .trim();
+  const clipped = truncateBytes(body, input.maxBytes ?? 60 * 1024);
+
+  return {
+    content: clipped.text.trim(),
+    date,
+    file: relativeMemoryPath(input.workspacePath, filePath),
+    truncated: clipped.truncated,
   };
 }
 

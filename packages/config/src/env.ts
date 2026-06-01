@@ -128,6 +128,15 @@ export const daemonEnvSchema = z.object({
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DEVICE_ID: z.string().min(1),
   AGENTHUB_WORKSPACE_ROOT: workspaceRootSchema,
+  AGENTHUB_DAILY_MEMORY_REFRESH_INTERVAL_MINUTES: z.coerce
+    .number()
+    .nonnegative()
+    .default(240),
+  AGENTHUB_DAILY_MEMORY_REFRESH_TRANSCRIPT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60000),
   CODEX_EXECUTABLE_PATH: z.string().min(1).optional(),
 });
 

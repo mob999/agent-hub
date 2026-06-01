@@ -27,7 +27,7 @@ function chatStateFromPath(path: string): {
   }
 
   if (segments[1] === 'search') {
-    return { conversationId: null, goalRoute: null }
+    return { conversationId: null, goalRoute: null, panelRoute: null }
   }
 
   const conversationId = segments[1] === undefined ? null : decodeURIComponent(segments[1])

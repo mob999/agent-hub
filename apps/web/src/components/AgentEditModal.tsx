@@ -8,7 +8,7 @@ import {
   TextInput,
 } from '@carbon/react'
 import { Document, Folder, Renew } from '@carbon/react/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse, type AgentMemoryScope } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
@@ -34,6 +34,29 @@ export function AgentEditModal({
   onArchive,
   onSave,
 }: AgentEditModalProps) {
+  return (
+    <AgentEditModalContent
+      key={agent.agent.id}
+      agent={agent}
+      error={error}
+      isSaving={isSaving}
+      open={open}
+      onClose={onClose}
+      onArchive={onArchive}
+      onSave={onSave}
+    />
+  )
+}
+
+function AgentEditModalContent({
+  agent,
+  error,
+  isSaving,
+  open,
+  onClose,
+  onArchive,
+  onSave,
+}: AgentEditModalProps) {
   const [name, setName] = useState(agent.agent.name)
   const [description, setDescription] = useState(agent.agent.description ?? '')
   const [avatar, setAvatar] = useState(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
@@ -51,7 +74,7 @@ export function AgentEditModal({
   const longTermMemory = memoryFiles.find((file) => file.scope === 'long_term') ?? null
   const dailyMemory = memoryFiles.find((file) => file.scope === 'daily') ?? null
 
-  const loadMemoryFiles = async () => {
+  const loadMemoryFiles = useCallback(async () => {
     setMemoryLoading(true)
     setMemoryError(null)
 
@@ -73,19 +96,21 @@ export function AgentEditModal({
     } finally {
       setMemoryLoading(false)
     }
-  }
+  }, [agent.agent.id])
 
   useEffect(() => {
     if (!open) {
       return
     }
 
-    setName(agent.agent.name)
-    setDescription(agent.agent.description ?? '')
-    setAvatar(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
-    setSelectedSection('profile')
-    void loadMemoryFiles()
-  }, [agent.agent.avatar, agent.agent.description, agent.agent.id, agent.agent.name, open])
+    const timeoutId = window.setTimeout(() => {
+      void loadMemoryFiles()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [loadMemoryFiles, open])
 
   const sectionButtonClass = (section: AgentSettingsSection) =>
     `w-full cursor-pointer border-0 px-3 py-2 text-left text-sm font-semibold ${

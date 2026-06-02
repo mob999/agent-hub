@@ -47,6 +47,7 @@ export async function prepareRunDispatch(
     conversationId?: string;
     createdAt: Date;
     daemonDeviceId: string;
+    handoffActiveTaskRuns?: boolean;
     newRunId: RunId;
     ownerUserId: string;
   },
@@ -82,6 +83,52 @@ export async function prepareRunDispatch(
     .map((run) => run.id);
   const realtimeEvents: RealtimeEvent[] = [];
   const interruptedAt = input.createdAt.toISOString();
+  const activeRunIds = activeRuns.map((run) => run.id);
+
+  if (input.handoffActiveTaskRuns !== false && activeRunIds.length > 0) {
+    const handedOffTasks = await db
+      .update(conversationGoalTasks)
+      .set({
+        assigneeRunId: input.newRunId,
+        blockedReason: null,
+        updatedAt: input.createdAt,
+      })
+      .where(inArray(conversationGoalTasks.assigneeRunId, activeRunIds))
+      .returning({
+        goalId: conversationGoalTasks.goalId,
+        id: conversationGoalTasks.id,
+      });
+    const handedOffGoals = handedOffTasks.length === 0
+      ? []
+      : await db
+          .select({
+            conversationId: conversationGoals.conversationId,
+            id: conversationGoals.id,
+            ownerUserId: conversationGoals.ownerUserId,
+          })
+          .from(conversationGoals)
+          .where(inArray(conversationGoals.id, handedOffTasks.map((task) => task.goalId)));
+    const handedOffGoalsById = new Map(
+      handedOffGoals.map((goal) => [goal.id, goal]),
+    );
+
+    realtimeEvents.push(
+      ...handedOffTasks.flatMap((task) => {
+        const goal = handedOffGoalsById.get(task.goalId);
+
+        return goal === undefined
+          ? []
+          : [
+              createRealtimeEvent({
+                conversationId: goal.conversationId,
+                ownerUserId: goal.ownerUserId,
+                taskId: task.id,
+                type: "task.updated" as const,
+              }),
+            ];
+      }),
+    );
+  }
 
   for (const activeRun of activeRuns) {
     if (activeRun.status === "running") {
@@ -131,32 +178,6 @@ export async function prepareRunDispatch(
       createdAt: input.createdAt,
     });
 
-    const interruptedTasks = await db
-      .update(conversationGoalTasks)
-      .set({
-        status: "interrupted",
-        blockedReason: "Interrupted by a newer run for this agent.",
-        updatedAt: input.createdAt,
-      })
-      .where(eq(conversationGoalTasks.assigneeRunId, activeRun.id))
-      .returning({
-        goalId: conversationGoalTasks.goalId,
-        id: conversationGoalTasks.id,
-      });
-    const interruptedGoals = interruptedTasks.length === 0
-      ? []
-      : await db
-          .select({
-            conversationId: conversationGoals.conversationId,
-            id: conversationGoals.id,
-            ownerUserId: conversationGoals.ownerUserId,
-          })
-          .from(conversationGoals)
-          .where(inArray(conversationGoals.id, interruptedTasks.map((task) => task.goalId)));
-    const interruptedGoalsById = new Map(
-      interruptedGoals.map((goal) => [goal.id, goal]),
-    );
-
     if (updatedRun !== undefined) {
       realtimeEvents.push(
         createRealtimeEvent({
@@ -171,20 +192,6 @@ export async function prepareRunDispatch(
           ownerUserId: updatedRun.ownerUserId,
           run: toDispatchAgentRun(updatedRun),
           type: "run.updated",
-        }),
-        ...interruptedTasks.flatMap((task) => {
-          const goal = interruptedGoalsById.get(task.goalId);
-
-          return goal === undefined
-            ? []
-            : [
-                createRealtimeEvent({
-                  conversationId: goal.conversationId,
-                  ownerUserId: goal.ownerUserId,
-                  taskId: task.id,
-                  type: "task.updated" as const,
-                }),
-              ];
         }),
       );
     }

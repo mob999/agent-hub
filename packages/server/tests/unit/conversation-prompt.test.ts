@@ -276,7 +276,9 @@ describe("conversation prompt builder", () => {
         latestEventType: "run.started",
         runId: "00000000-0000-4000-8000-000000000010",
         status: "running",
+        taskId: "00000000-0000-4000-8000-000000000012",
         taskIndex: 0,
+        taskTitle: "Implement landing page",
       },
       {
         createdAt: "2026-05-25T00:00:00.000Z",
@@ -288,8 +290,11 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("<agenthub_active_runs>");
     expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: running");
     expect(prompt).toContain("latestEvent: run.started");
+    expect(prompt).toContain("continue that same assigned task");
     expect(prompt).toContain("Goal ID: 00000000-0000-4000-8000-000000000099");
+    expect(prompt).toContain("Task ID: 00000000-0000-4000-8000-000000000012");
     expect(prompt).toContain("Task #0");
+    expect(prompt).toContain("Task title: Implement landing page");
     expect(prompt).not.toContain("00000000-0000-4000-8000-000000000011");
   });
 

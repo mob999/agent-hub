@@ -114,6 +114,7 @@ async function prepareConversationRunJobDispatch(
   input: {
     conversationId: string;
     createdAt: Date;
+    handoffActiveTaskRuns?: boolean;
     ownerUserId: string;
     realtimeEvents?: RealtimeEvent[];
   },
@@ -123,6 +124,7 @@ async function prepareConversationRunJobDispatch(
     conversationId: input.conversationId,
     createdAt: input.createdAt,
     daemonDeviceId: job.daemonDeviceId,
+    handoffActiveTaskRuns: input.handoffActiveTaskRuns,
     newRunId: job.run.id,
     ownerUserId: input.ownerUserId,
   });
@@ -147,7 +149,10 @@ export interface ActiveRunContext {
   latestEventType?: string;
   runId: string;
   status: string;
+  taskDescription?: string;
+  taskId?: string;
   taskIndex?: number;
+  taskTitle?: string;
 }
 
 const uuidPattern =
@@ -909,6 +914,7 @@ export function buildActiveRunsPrompt(
     "<agenthub_active_runs>",
     "You already have active runs in this conversation.",
     "Do not assume they are complete. Coordinate with the visible conversation state and avoid duplicating the exact same work unless the user explicitly asks.",
+    "If a listed run is tied to a Goal/Task and this new run is continuing after an interruption, continue that same assigned task. Do not restart from scratch if useful artifacts or partial progress already exist. Use list_artifacts, read_artifact, and download_artifact to inspect previous output. Finish with complete_task for the same Goal ID and Task Index.",
     ...filteredRuns.map((run) => {
       const details = [
         `Run ${run.runId}: ${run.status}`,
@@ -917,7 +923,10 @@ export function buildActiveRunsPrompt(
           ? undefined
           : `latestEvent: ${run.latestEventType}`,
         run.goalId === undefined ? undefined : `Goal ID: ${run.goalId}`,
+        run.taskId === undefined ? undefined : `Task ID: ${run.taskId}`,
         run.taskIndex === undefined ? undefined : `Task #${run.taskIndex}`,
+        run.taskTitle === undefined ? undefined : `Task title: ${run.taskTitle}`,
+        run.taskDescription === undefined ? undefined : `Task description: ${run.taskDescription}`,
       ].filter((detail): detail is string => detail !== undefined);
 
       return `- ${details.join(", ")}`;
@@ -4746,7 +4755,10 @@ async function getActiveRunContextPromptForAgent(
     .select({
       goalId: conversationGoalTasks.goalId,
       runId: conversationGoalTasks.assigneeRunId,
+      taskDescription: conversationGoalTasks.description,
+      taskId: conversationGoalTasks.id,
       taskIndex: conversationGoalTasks.index,
+      taskTitle: conversationGoalTasks.title,
     })
     .from(conversationGoalTasks)
     .where(inArray(conversationGoalTasks.assigneeRunId, activeRunIds));
@@ -4754,7 +4766,16 @@ async function getActiveRunContextPromptForAgent(
     taskRows.flatMap((task) =>
       task.runId === null
         ? []
-        : [[task.runId, { goalId: task.goalId, taskIndex: task.taskIndex }]]
+        : [[
+            task.runId,
+            {
+              goalId: task.goalId,
+              taskDescription: task.taskDescription ?? undefined,
+              taskId: task.taskId,
+              taskIndex: task.taskIndex,
+              taskTitle: task.taskTitle,
+            },
+          ]]
     ),
   );
 
@@ -4768,7 +4789,10 @@ async function getActiveRunContextPromptForAgent(
         latestEventType: latestEventTypeByRunId.get(run.id),
         runId: run.id,
         status: run.status,
+        taskDescription: task?.taskDescription,
+        taskId: task?.taskId,
         taskIndex: task?.taskIndex,
+        taskTitle: task?.taskTitle,
       };
     }),
   );
@@ -4895,6 +4919,7 @@ async function createMentionedGroupChatRuns(
       job = {
         ...job,
         prompt: buildMentionedGroupChatRunPrompt({
+          activeRunsPrompt,
           agentGroupsPrompt,
           agentName: runAgent.agent.name,
           agentNamesById,
@@ -6146,6 +6171,7 @@ export async function appendRunEventToConversationMessage(
         job = await prepareConversationRunJobDispatch(db, job, {
           conversationId: conversation.id,
           createdAt,
+          handoffActiveTaskRuns: false,
           ownerUserId: run.ownerUserId,
           realtimeEvents,
         });
@@ -6445,6 +6471,7 @@ export async function appendRunEventToConversationMessage(
       job = await prepareConversationRunJobDispatch(db, job, {
         conversationId: context.conversation.id,
         createdAt: updatedAt,
+        handoffActiveTaskRuns: false,
         ownerUserId: context.run.ownerUserId,
         realtimeEvents,
       });

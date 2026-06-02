@@ -106,6 +106,13 @@
       "when": 1780045000000,
       "tag": "0014_static_site_deployments",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780050000000,
+      "tag": "0015_user_message_uploads",
+      "breakpoints": true
     }
   ]
 }

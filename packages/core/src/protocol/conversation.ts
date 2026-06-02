@@ -34,6 +34,7 @@ export type ConversationArtifactStatus =
   | "ready"
   | "failed"
   | "deleted";
+export type ConversationArtifactCreatorType = "agent" | "user";
 export type ConversationArtifactActionType = "apply" | "publish" | "preview";
 export type ConversationArtifactActionStatus =
   | "queued"
@@ -79,8 +80,10 @@ export interface ConversationArtifact {
   goalId?: ConversationGoalId;
   goalTaskId?: ConversationGoalTaskId;
   taskIndex?: number;
-  runId: RunId;
-  creatorAgentId: AgentId;
+  runId?: RunId;
+  creatorAgentId?: AgentId;
+  creatorType: ConversationArtifactCreatorType;
+  creatorUserId?: UserId;
   status: ConversationArtifactStatus;
   title: string;
   filename: string;
@@ -96,7 +99,7 @@ export interface ConversationMessageAttachment {
   id: string;
   messageId: ConversationMessageId;
   artifactId: ConversationArtifactId;
-  type: "image";
+  type: "image" | "file";
   artifact: ConversationArtifact;
   createdAt: IsoDateTime;
 }

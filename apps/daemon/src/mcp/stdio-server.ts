@@ -188,7 +188,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: listArtifactsToolName,
               description:
-                "List files and reports for a goal in the current AgentHub group workspace.",
+                "List files and reports in the current AgentHub conversation workspace. Pass goalId to limit results to one goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -196,7 +196,7 @@ export async function startAgentHubMcpStdioServer(
                   goalId: {
                     type: "string",
                     minLength: 1,
-                    description: "Goal id to inspect.",
+                    description: "Optional goal id to inspect.",
                   },
                   taskIndex: {
                     type: "number",
@@ -210,7 +210,7 @@ export async function startAgentHubMcpStdioServer(
                     description: "Maximum number of artifacts to return.",
                   },
                 },
-                required: ["goalId"],
+                required: [],
               },
             },
           ]
@@ -220,7 +220,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: readArtifactToolName,
               description:
-                "Read one artifact from a goal in the current AgentHub group workspace. Text files return text; binary files return base64.",
+                "Read one artifact from the current AgentHub conversation workspace. Text files return text; binary files return base64. Pass goalId when you want to assert the artifact belongs to a specific goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -228,7 +228,7 @@ export async function startAgentHubMcpStdioServer(
                   goalId: { type: "string", minLength: 1 },
                   artifactId: { type: "string", minLength: 1 },
                 },
-                required: ["goalId", "artifactId"],
+                required: ["artifactId"],
               },
             },
           ]
@@ -709,12 +709,10 @@ function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput 
   const taskIndex = readTaskIndex(input.taskIndex);
   const limit = input.limit;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    throw new Error("list_artifacts.goalId is required.");
-  }
-
   return {
-    goalId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
     taskIndex: taskIndex ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -728,15 +726,16 @@ function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
   const goalId = input.goalId;
   const artifactId = input.artifactId;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    throw new Error("read_artifact.goalId is required.");
-  }
-
   if (typeof artifactId !== "string" || artifactId.length === 0) {
     throw new Error("read_artifact.artifactId is required.");
   }
 
-  return { goalId, artifactId };
+  return {
+    artifactId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
+  };
 }
 
 function readAppendMemoryInput(value: unknown): AgentHubAppendMemoryToolInput {

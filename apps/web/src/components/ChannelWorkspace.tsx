@@ -1,6 +1,6 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
-import type { FormEvent, KeyboardEvent } from 'react'
+import { Attachment, ChatBot, Close, Document, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
@@ -43,7 +43,8 @@ interface ChannelWorkspaceProps {
   submitRun: (
     event: FormEvent<HTMLFormElement>,
     mode: 'chat' | 'task',
-  ) => void
+    attachments: File[],
+  ) => Promise<boolean>
   openCreateAgent: () => void
   openAgentConversation: (agentId: string) => void
   openEditConversation: () => void
@@ -126,6 +127,13 @@ type MentionSuggestion =
   | { id: 'all'; type: 'all' }
   | { agent: AgentDetails; id: string; type: 'agent' }
 
+interface PendingComposerAttachment {
+  file: File
+  id: string
+  kind: 'image' | 'file'
+  previewUrl?: string
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -148,6 +156,18 @@ function mentionsFromPrompt(
 
 function mentionsAllFromPrompt(value: string): boolean {
   return /(^|\s)@all(?=$|\s|[.,!?;:])/i.test(value)
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 export function ChannelWorkspace({
@@ -191,10 +211,31 @@ export function ChannelWorkspace({
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
+  const [pendingAttachments, setPendingAttachments] = useState<PendingComposerAttachment[]>([])
+  const [pendingAttachmentConversationId, setPendingAttachmentConversationId] = useState<string | null>(null)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const pendingAttachmentsRef = useRef<PendingComposerAttachment[]>([])
   const hasSelectedConversation = activeConversation !== null
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments
+  }, [pendingAttachments])
+
+  useEffect(() => {
+    return () => {
+      pendingAttachmentsRef.current.forEach((attachment) => {
+        if (attachment.previewUrl !== undefined) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
+    }
+  }, [])
+
   const expandedGoalIdSet = useMemo(() => new Set(expandedGoalIds), [expandedGoalIds])
   const flattenedGoalTasks = useMemo(
     () => goals.flatMap((goal) => goal.tasks.map((task) => ({ goal, task }))),
@@ -282,6 +323,10 @@ export function ChannelWorkspace({
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
     : hasSelectedConversation && readyGroupAgentCount > 0
+  const visiblePendingAttachments =
+    pendingAttachmentConversationId === activeConversation?.id
+      ? pendingAttachments
+      : []
   const createAgentLink = (
     <button className={inlineLink} type="button" onClick={openCreateAgent}>
       create an agent
@@ -360,7 +405,10 @@ export function ChannelWorkspace({
       ),
   )
   const userDisplayName = user?.name?.trim() || user?.email || 'User'
-  const canSendMessage = prompt.trim().length > 0 && selectedAgentReady && !isCreatingRun
+  const canSendMessage =
+    (prompt.trim().length > 0 || visiblePendingAttachments.length > 0) &&
+    selectedAgentReady &&
+    !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
   const canOpenWorkspacePanel = hasSelectedConversation
   const chatTitleClassName =
@@ -415,8 +463,99 @@ export function ChannelWorkspace({
       promptInputRef.current?.focus()
     })
   }
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    submitRun(event, composerMode)
+  const addPendingFiles = (files: File[]) => {
+    const conversationId = activeConversation?.id ?? null
+
+    if (conversationId === null) {
+      return
+    }
+
+    setAttachmentError(null)
+    if (pendingAttachmentConversationId !== conversationId) {
+      pendingAttachments.forEach((attachment) => {
+        if (attachment.previewUrl !== undefined) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
+      setPendingAttachmentConversationId(conversationId)
+      setPendingAttachments([])
+    }
+    setPendingAttachments((current) => {
+      const scopedCurrent = pendingAttachmentConversationId === conversationId ? current : []
+      const remainingSlots = Math.max(0, 10 - scopedCurrent.length)
+      const acceptedFiles = files.slice(0, remainingSlots)
+      const rejectedForSize = acceptedFiles.find((file) => file.size > 25 * 1024 * 1024)
+
+      if (files.length > remainingSlots) {
+        setAttachmentError('You can attach up to 10 files.')
+      } else if (rejectedForSize !== undefined) {
+        setAttachmentError('Each attachment must be 25MB or smaller.')
+      }
+
+      const nextFiles = acceptedFiles
+        .filter((file) => file.size <= 25 * 1024 * 1024)
+        .map((file) => {
+          const kind = file.type.startsWith('image/') ? 'image' : 'file'
+
+          return {
+            file,
+            id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+            kind,
+            previewUrl: kind === 'image' ? URL.createObjectURL(file) : undefined,
+          } satisfies PendingComposerAttachment
+        })
+
+      const totalSize = [...scopedCurrent, ...nextFiles].reduce((sum, attachment) => sum + attachment.file.size, 0)
+
+      if (totalSize > 100 * 1024 * 1024) {
+        nextFiles.forEach((attachment) => {
+          if (attachment.previewUrl !== undefined) {
+            URL.revokeObjectURL(attachment.previewUrl)
+          }
+        })
+        setAttachmentError('Attachments must be 100MB or smaller in total.')
+        return scopedCurrent
+      }
+
+      return [...scopedCurrent, ...nextFiles]
+    })
+  }
+  const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    addPendingFiles(Array.from(event.target.files ?? []))
+    event.target.value = ''
+  }
+  const removePendingAttachment = (attachmentId: string) => {
+    setPendingAttachments((current) =>
+      current.filter((attachment) => {
+        if (attachment.id !== attachmentId) {
+          return true
+        }
+
+        if (attachment.previewUrl !== undefined) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+
+        return false
+      }),
+    )
+  }
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const sent = await submitRun(
+      event,
+      composerMode,
+      visiblePendingAttachments.map((attachment) => attachment.file),
+    )
+
+    if (sent) {
+      visiblePendingAttachments.forEach((attachment) => {
+        if (attachment.previewUrl !== undefined) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
+      setPendingAttachments([])
+      setPendingAttachmentConversationId(null)
+      setAttachmentError(null)
+    }
   }
   const handlePromptChange = (value: string) => {
     if (mentionSearchTerm(value) !== mentionTerm) {
@@ -1199,21 +1338,47 @@ export function ChannelWorkspace({
                     )}
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {message.attachments.map((attachment) => (
-                          <button
-                            key={attachment.id}
-                            type="button"
-                            className="max-w-72 cursor-pointer overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-0 text-left hover:border-[var(--cds-border-strong-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                            onClick={() => openArtifactEditorPanel(attachment.artifactId)}
-                            title={attachment.artifact.title}
-                          >
-                            <img
-                              src={apiUrl(`/artifacts/${attachment.artifactId}/preview/`)}
-                              alt={attachment.artifact.title}
-                              className="block max-h-64 w-full object-contain"
-                            />
-                          </button>
-                        ))}
+                        {message.attachments.map((attachment) => {
+                          if (attachment.type === 'image') {
+                            return (
+                              <button
+                                key={attachment.id}
+                                type="button"
+                                className="max-w-72 cursor-pointer overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-0 text-left hover:border-[var(--cds-border-strong-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                                onClick={() => openArtifactEditorPanel(attachment.artifactId)}
+                                title={attachment.artifact.title}
+                              >
+                                <img
+                                  src={apiUrl(`/artifacts/${attachment.artifactId}/preview/`)}
+                                  alt={attachment.artifact.title}
+                                  className="block max-h-64 w-full object-contain"
+                                />
+                              </button>
+                            )
+                          }
+
+                          return (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              className="flex max-w-80 cursor-pointer items-center gap-3 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-left hover:border-[var(--cds-border-strong-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                              onClick={() => openArtifactEditorPanel(attachment.artifactId)}
+                              title={attachment.artifact.title}
+                            >
+                              <span className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]">
+                                <Document size={18} />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold text-[var(--cds-text-primary)]">
+                                  {attachment.artifact.filename}
+                                </span>
+                                <span className="block text-xs text-[var(--cds-text-secondary)]">
+                                  {formatFileSize(attachment.artifact.sizeBytes)}
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                     {message.error && (
@@ -1348,13 +1513,74 @@ export function ChannelWorkspace({
             onChange={(event) => handlePromptChange(event.target.value)}
             onKeyDown={handleComposerKeyDown}
           />
+          {(visiblePendingAttachments.length > 0 || attachmentError !== null) && (
+            <div className="grid gap-2 px-3 pb-2">
+              {attachmentError !== null && (
+                <p className="text-sm text-[var(--cds-support-error)]">{attachmentError}</p>
+              )}
+              {visiblePendingAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {visiblePendingAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex max-w-72 items-center gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2"
+                    >
+                      {attachment.kind === 'image' && attachment.previewUrl !== undefined ? (
+                        <img
+                          src={attachment.previewUrl}
+                          alt=""
+                          className="h-10 w-10 shrink-0 object-cover"
+                        />
+                      ) : (
+                        <span className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]">
+                          <Document size={18} />
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-[var(--cds-text-primary)]">
+                          {attachment.file.name}
+                        </span>
+                        <span className="block text-xs text-[var(--cds-text-secondary)]">
+                          {formatFileSize(attachment.file.size)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                        aria-label={`Remove ${attachment.file.name}`}
+                        onClick={() => removePendingAttachment(attachment.id)}
+                      >
+                        <Close size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex min-h-10 items-center gap-2 px-2 pb-2 pt-1 max-[671px]:flex-wrap">
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleAttachmentInputChange}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleAttachmentInputChange}
+            />
             <div className="flex items-center gap-1.5" aria-label="Message tools">
               <button
                 className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
                 type="button"
                 aria-label="Add image"
                 disabled={isCreatingRun || !selectedAgentReady}
+                onClick={() => imageInputRef.current?.click()}
               >
                 <ImageIcon size={16} />
               </button>
@@ -1363,6 +1589,7 @@ export function ChannelWorkspace({
                 type="button"
                 aria-label="Attach file"
                 disabled={isCreatingRun || !selectedAgentReady}
+                onClick={() => fileInputRef.current?.click()}
               >
                 <Attachment size={16} />
               </button>

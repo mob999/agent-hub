@@ -72,10 +72,12 @@ import {
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
   readArtifactContent,
+  conversationArtifactStorageKey,
   restoreAgentForUser,
   restoreGroupConversationForUser,
   searchConversationsForUser,
   resolveTextMentionedAgentIds,
+  sanitizeArtifactFilename,
   subscribeRealtimeEvents,
   toAgentRun,
   updateConversationOrchestrator,
@@ -83,6 +85,8 @@ import {
   updateGroupConversation,
   type RunnableAgent,
   type RunQueueJob,
+  type UserMessageAttachmentUpload,
+  writeArtifactBuffer,
 } from "@agent-hub/server";
 import { cors } from "hono/cors";
 
@@ -209,6 +213,16 @@ function realtimeEventsForCreatedRuns(input: {
         type: "conversation.message.created" as const,
       }),
     ),
+    ...input.messages.flatMap((message) =>
+      (message.attachments ?? []).map((attachment) =>
+        createRealtimeEvent({
+          artifact: attachment.artifact,
+          conversationId: message.conversationId,
+          ownerUserId: input.ownerUserId,
+          type: "artifact.created" as const,
+        })
+      )
+    ),
     ...input.jobs.flatMap((job) => {
       const queuedEvent = queuedRunEventForJob(job);
 
@@ -251,6 +265,146 @@ function isValidAgentIdList(value: unknown): value is string[] {
     ) &&
     new Set(value).size === value.length
   );
+}
+
+const maxMessageAttachmentCount = 10;
+const maxMessageAttachmentBytes = 25 * 1024 * 1024;
+const maxMessageAttachmentTotalBytes = 100 * 1024 * 1024;
+
+type UploadedFileLike = File;
+
+function isUploadedFile(value: FormDataEntryValue): value is UploadedFileLike {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { arrayBuffer?: unknown }).arrayBuffer === "function" &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { size?: unknown }).size === "number"
+  );
+}
+
+function getFormString(form: FormData, name: string): string | undefined {
+  const value = form.get(name);
+
+  return typeof value === "string" ? value : undefined;
+}
+
+function isImageUpload(file: UploadedFileLike, filename: string): boolean {
+  if (typeof file.type === "string" && file.type.toLowerCase().startsWith("image/")) {
+    return true;
+  }
+
+  return inferArtifactFileInfo({ filename }).category === "image";
+}
+
+function artifactPromptBlockForUserAttachments(
+  attachments: UserMessageAttachmentUpload[],
+  input: { conversationId: string },
+): string {
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  return [
+    "<agenthub_user_message_attachments>",
+    "The user's latest message includes these attachments. Use read_artifact({ artifactId }) to inspect them when needed.",
+    ...attachments.map((attachment) => {
+      const mimeType = inferArtifactFileInfo({ filename: attachment.filename }).mimeType;
+      const editorUrl = new URL(
+        `/editor/${input.conversationId}/${attachment.artifactId}`,
+        env.AGENTHUB_PUBLIC_WEB_URL,
+      ).toString();
+      const downloadUrl = new URL(
+        `/artifacts/${attachment.artifactId}/download`,
+        env.AGENTHUB_PUBLIC_API_URL,
+      ).toString();
+
+      return [
+        `- ${attachment.title}`,
+        `  artifactId: ${attachment.artifactId}`,
+        `  filename: ${attachment.filename}`,
+        `  type: ${attachment.attachmentType}`,
+        `  mimeType: ${mimeType}`,
+        `  sizeBytes: ${attachment.sizeBytes}`,
+        `  editorUrl: ${editorUrl}`,
+        `  downloadUrl: ${downloadUrl}`,
+      ].join("\n");
+    }),
+    "</agenthub_user_message_attachments>",
+  ].join("\n");
+}
+
+function userMessageForPrompt(
+  content: string,
+  attachments: UserMessageAttachmentUpload[],
+  input: { conversationId: string },
+): string {
+  const attachmentBlock = artifactPromptBlockForUserAttachments(attachments, input);
+
+  if (attachmentBlock.length === 0) {
+    return content;
+  }
+
+  return [
+    content.length > 0 ? content : "(The user sent attachments without text.)",
+    attachmentBlock,
+  ].join("\n\n");
+}
+
+async function writeUserMessageAttachments(input: {
+  conversationId: string;
+  files: UploadedFileLike[];
+}): Promise<UserMessageAttachmentUpload[]> {
+  const attachments: UserMessageAttachmentUpload[] = [];
+
+  for (const file of input.files) {
+    const filename = sanitizeArtifactFilename(file.name);
+    const artifactId = randomUUID();
+    const storageKey = conversationArtifactStorageKey({
+      artifactId,
+      conversationId: input.conversationId,
+      filename,
+    });
+    const content = Buffer.from(await file.arrayBuffer());
+    const sizeBytes = await writeArtifactBuffer({
+      content,
+      storageKey,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    });
+
+    attachments.push({
+      artifactId,
+      attachmentType: isImageUpload(file, filename) ? "image" : "file",
+      filename,
+      sizeBytes,
+      storageKey,
+      title: filename,
+    });
+  }
+
+  return attachments;
+}
+
+function validateUploadFiles(files: UploadedFileLike[]): string | null {
+  if (files.length > maxMessageAttachmentCount) {
+    return `You can attach up to ${maxMessageAttachmentCount} files.`;
+  }
+
+  let totalSize = 0;
+
+  for (const file of files) {
+    totalSize += file.size;
+
+    if (file.size > maxMessageAttachmentBytes) {
+      return "Each attachment must be 25MB or smaller.";
+    }
+  }
+
+  if (totalSize > maxMessageAttachmentTotalBytes) {
+    return "Attachments must be 100MB or smaller in total.";
+  }
+
+  return null;
 }
 
 function parseOptionalAgentId(value: unknown): string | undefined {
@@ -2021,24 +2175,53 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as {
-    agentId?: unknown;
-    content?: unknown;
-    mode?: unknown;
-  };
-  const content = typeof body.content === "string" ? body.content.trim() : "";
-  const mode = body.mode === undefined || body.mode === "chat"
+  const isMultipart = c.req.header("content-type")
+    ?.toLowerCase()
+    .includes("multipart/form-data") ?? false;
+  const body = isMultipart
+    ? (() => ({} as { agentId?: unknown; content?: unknown; mode?: unknown }))()
+    : (await c.req.json().catch(() => ({}))) as {
+        agentId?: unknown;
+        content?: unknown;
+        mode?: unknown;
+      };
+  const form = isMultipart ? await c.req.formData() : null;
+  const uploadFiles = form === null
+    ? []
+    : [
+        ...form.getAll("attachments"),
+        ...form.getAll("attachments[]"),
+      ].filter(isUploadedFile);
+  const uploadValidationError = validateUploadFiles(uploadFiles);
+
+  if (uploadValidationError !== null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ATTACHMENT_REQUEST",
+          message: uploadValidationError,
+        },
+      },
+      400,
+    );
+  }
+
+  const rawContent = form === null ? body.content : getFormString(form, "content");
+  const rawMode = form === null ? body.mode : getFormString(form, "mode");
+  const rawAgentId = form === null ? body.agentId : getFormString(form, "agentId");
+  const content = typeof rawContent === "string" ? rawContent.trim() : "";
+  const mode = rawMode === undefined || rawMode === "chat"
     ? "chat"
-    : body.mode === "task"
+    : rawMode === "task"
       ? "task"
       : undefined;
 
-  if (content.length === 0 || mode === undefined) {
+  if ((content.length === 0 && uploadFiles.length === 0) || mode === undefined) {
     return c.json(
       {
         error: {
           code: "INVALID_MESSAGE_REQUEST",
-          message: "content is required and mode must be chat or task.",
+          message: "content or attachments are required and mode must be chat or task.",
         },
       },
       400,
@@ -2075,9 +2258,18 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const requestedAgentId =
-    typeof body.agentId === "string" && body.agentId.length > 0
-      ? body.agentId
+    typeof rawAgentId === "string" && rawAgentId.length > 0
+      ? rawAgentId
       : undefined;
+  let userMessageAttachmentsCache: UserMessageAttachmentUpload[] | null = null;
+  const getUserMessageAttachments = async () => {
+    userMessageAttachmentsCache ??= await writeUserMessageAttachments({
+      conversationId: conversation.id,
+      files: uploadFiles,
+    });
+
+    return userMessageAttachmentsCache;
+  };
   const now = new Date().toISOString();
   const priorMessages = await listConversationMessagesForUser(db, {
     conversationId: conversation.id,
@@ -2153,6 +2345,12 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       agentId: runAgent.agent.id,
       ownerUserId: user.id,
     });
+    const userMessageAttachments = await getUserMessageAttachments();
+    const currentUserMessageForPrompt = userMessageForPrompt(
+      content,
+      userMessageAttachments,
+      { conversationId: conversation.id },
+    );
     const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
@@ -2160,7 +2358,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         agentGroupsPrompt,
         buildConversationRunPrompt({
           agentNamesById,
-          currentUserMessage: content,
+          currentUserMessage: currentUserMessageForPrompt,
           messages: priorMessages,
         }),
       ].join("\n\n"),
@@ -2183,7 +2381,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       runtime: runAgent.runtime,
     }, {
       agentNamesById,
-      currentUserMessage: content,
+      currentUserMessage: currentUserMessageForPrompt,
       messages: priorMessages,
     });
     const result = await createUserMessageAndRun(db, {
@@ -2191,6 +2389,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       conversationId: conversation.id,
       job,
       userMessageContent: content,
+      userMessageAttachments,
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
     });
 
     if (result === null) {
@@ -2306,6 +2507,12 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
+    const userMessageAttachments = await getUserMessageAttachments();
+    const currentUserMessageForPrompt = userMessageForPrompt(
+      content,
+      userMessageAttachments,
+      { conversationId: conversation.id },
+    );
     const job = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
@@ -2315,7 +2522,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         agents: readyGroupAgents,
         agentGroupsPrompt,
         conversationTitle: conversation.title,
-        currentUserMessage: content,
+        currentUserMessage: currentUserMessageForPrompt,
         messages: priorMessages,
         orchestratorAgentId: conversation.orchestratorAgentId,
       }),
@@ -2343,7 +2550,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       runtime: orchestrator.runtime,
     }, {
       agentNamesById,
-      currentUserMessage: content,
+      currentUserMessage: currentUserMessageForPrompt,
       messages: priorMessages,
     });
     const result = await createUserMessageAndRuns(db, {
@@ -2351,6 +2558,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       conversationId: conversation.id,
       jobs: [job],
       userMessageContent: content,
+      userMessageAttachments,
+      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
     });
 
     if (result === null) {
@@ -2440,6 +2650,12 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
   }
 
+  const userMessageAttachments = await getUserMessageAttachments();
+  const currentUserMessageForPrompt = userMessageForPrompt(
+    content,
+    userMessageAttachments,
+    { conversationId: conversation.id },
+  );
   const jobs = await Promise.all(
     runAgents.map(async (runAgent): Promise<RunQueueJob> => {
       const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
@@ -2456,7 +2672,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           agentNamesById,
           agentName: runAgent.agent.name,
           conversationTitle: conversation.title,
-          currentUserMessage: content,
+          currentUserMessage: currentUserMessageForPrompt,
           directMessagesPrompt: buildRecentDirectMessagesPrompt({
             agentName: runAgent.agent.name,
             agentNamesById,
@@ -2499,7 +2715,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         runtime: runAgent.runtime,
       }, {
         agentNamesById,
-        currentUserMessage: content,
+        currentUserMessage: currentUserMessageForPrompt,
         messages: priorMessages,
       });
     }),
@@ -2509,6 +2725,9 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     conversationId: conversation.id,
     jobs,
     userMessageContent: content,
+    userMessageAttachments,
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
   });
 
   if (result === null) {

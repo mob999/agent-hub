@@ -91,6 +91,15 @@ type ConversationArtifactRevisionRow =
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 type ConversationDeploymentRow = typeof conversationDeployments.$inferSelect;
 
+export interface UserMessageAttachmentUpload {
+  artifactId: string;
+  attachmentType: ConversationMessageAttachment["type"];
+  filename: string;
+  sizeBytes: number;
+  storageKey: string;
+  title: string;
+}
+
 export interface ActiveRunContext {
   createdAt: string;
   goalId?: string;
@@ -285,8 +294,10 @@ export function toConversationArtifact(
     goalId: optionalString(row.goalId),
     goalTaskId: optionalString(row.goalTaskId),
     taskIndex: row.taskIndex ?? undefined,
-    runId: row.runId,
-    creatorAgentId: row.creatorAgentId,
+    runId: optionalString(row.runId),
+    creatorAgentId: optionalString(row.creatorAgentId),
+    creatorType: row.creatorType as ConversationArtifact["creatorType"],
+    creatorUserId: optionalString(row.creatorUserId),
     status: row.status as ConversationArtifact["status"],
     title: row.title,
     filename: row.filename,
@@ -347,6 +358,78 @@ function toConversationMessageAttachment(
     artifact,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+async function insertUserMessageAttachments(
+  db: Db,
+  input: {
+    attachments?: UserMessageAttachmentUpload[];
+    conversationId: string;
+    createdAt: Date;
+    messageId: string;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
+): Promise<ConversationMessageAttachment[]> {
+  const attachments = input.attachments ?? [];
+
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  const artifactRows = await db
+    .insert(conversationArtifacts)
+    .values(
+      attachments.map((attachment) => ({
+        id: attachment.artifactId,
+        ownerUserId: input.ownerUserId,
+        conversationId: input.conversationId,
+        creatorType: "user",
+        creatorUserId: input.ownerUserId,
+        status: "ready",
+        title: attachment.title,
+        filename: attachment.filename,
+        sizeBytes: attachment.sizeBytes,
+        storageKey: attachment.storageKey,
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      })),
+    )
+    .returning();
+  const artifactById = new Map(artifactRows.map((artifact) => [artifact.id, artifact]));
+  const messageArtifactRows = await db
+    .insert(conversationMessageArtifacts)
+    .values(
+      attachments.flatMap((attachment, index) =>
+        artifactById.has(attachment.artifactId)
+          ? [{
+              messageId: input.messageId,
+              artifactId: attachment.artifactId,
+              type: attachment.attachmentType,
+              position: index,
+              createdAt: input.createdAt,
+            }]
+          : []
+      ),
+    )
+    .returning();
+
+  return messageArtifactRows.flatMap((messageArtifact) => {
+    const artifact = artifactById.get(messageArtifact.artifactId);
+
+    return artifact === undefined
+      ? []
+      : [
+          toConversationMessageAttachment(
+            messageArtifact,
+            toConversationArtifact(artifact, {
+              publicApiBaseUrl: input.publicApiBaseUrl,
+              publicWebBaseUrl: input.publicWebBaseUrl,
+            }),
+          ),
+        ];
+  });
 }
 
 export function toConversationArtifactRevision(
@@ -1715,7 +1798,7 @@ export async function getConversationArtifactForUser(
 function availableArtifactActions(
   artifact: ConversationArtifact,
 ): ConversationArtifactActionType[] {
-  if (artifact.status !== "ready") {
+  if (artifact.status !== "ready" || artifact.creatorType === "user") {
     return [];
   }
 
@@ -1898,6 +1981,10 @@ export async function createConversationArtifactAction(
   });
 
   if (record === null) {
+    return null;
+  }
+
+  if (record.artifact.runId === undefined) {
     return null;
   }
 
@@ -2205,6 +2292,9 @@ export async function createUserMessageAndRun(
     conversationId: ConversationId;
     job: RunQueueJob;
     userMessageContent: string;
+    userMessageAttachments?: UserMessageAttachmentUpload[];
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<{
   conversation: Conversation;
@@ -2243,6 +2333,19 @@ export async function createUserMessageAndRun(
         updatedAt: createdAt,
       })
       .returning();
+    const userAttachments = await insertUserMessageAttachments(tx as unknown as Db, {
+      attachments: input.userMessageAttachments,
+      conversationId: input.conversationId,
+      createdAt,
+      messageId: userMessage.id,
+      ownerUserId: input.ownerUserId,
+      publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    });
+    const userMessageWithAttachments = toConversationMessage(
+      userMessage,
+      userAttachments,
+    );
 
     await tx.insert(runs).values({
       id: input.job.run.id,
@@ -2304,10 +2407,10 @@ export async function createUserMessageAndRun(
       conversation: toConversation(conversationRow, agentIds),
       memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
         conversation: conversationRow,
-        message: toConversationMessage(userMessage),
+        message: userMessageWithAttachments,
       }),
       messages: {
-        user: toConversationMessage(userMessage),
+        user: userMessageWithAttachments,
         assistant: toConversationMessage(assistantMessage),
       },
     };
@@ -2321,6 +2424,9 @@ export async function createUserMessageAndRuns(
     conversationId: ConversationId;
     jobs: RunQueueJob[];
     userMessageContent: string;
+    userMessageAttachments?: UserMessageAttachmentUpload[];
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
   },
 ): Promise<{
   conversation: Conversation;
@@ -2359,6 +2465,19 @@ export async function createUserMessageAndRuns(
         updatedAt: createdAt,
       })
       .returning();
+    const userAttachments = await insertUserMessageAttachments(tx as unknown as Db, {
+      attachments: input.userMessageAttachments,
+      conversationId: input.conversationId,
+      createdAt,
+      messageId: userMessage.id,
+      ownerUserId: input.ownerUserId,
+      publicApiBaseUrl: input.publicApiBaseUrl,
+      publicWebBaseUrl: input.publicWebBaseUrl,
+    });
+    const userMessageWithAttachments = toConversationMessage(
+      userMessage,
+      userAttachments,
+    );
 
     if (input.jobs.length > 0) {
       await tx.insert(runs).values(
@@ -2413,10 +2532,10 @@ export async function createUserMessageAndRuns(
       conversation: toConversation(conversationRow, agentIds),
       memoryAppendJobs: await createConversationTranscriptMemoryJobs(tx as unknown as Db, {
         conversation: conversationRow,
-        message: toConversationMessage(userMessage),
+        message: userMessageWithAttachments,
       }),
       messages: {
-        user: toConversationMessage(userMessage),
+        user: userMessageWithAttachments,
         assistants: [],
       },
     };
@@ -2667,19 +2786,19 @@ function readListArtifactsToolInput(
   const taskIndex = record.taskIndex;
   const limit = record.limit;
 
-  return typeof goalId === "string" && goalId.length > 0
-    ? {
-        goalId,
-        taskIndex: typeof taskIndex === "number" &&
-          Number.isInteger(taskIndex) &&
-          taskIndex >= 0
-          ? taskIndex
-          : undefined,
-        limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
-          ? Math.min(limit, 50)
-          : undefined,
-      }
-    : null;
+  return {
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
+    taskIndex: typeof taskIndex === "number" &&
+      Number.isInteger(taskIndex) &&
+      taskIndex >= 0
+      ? taskIndex
+      : undefined,
+    limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
+      ? Math.min(limit, 50)
+      : undefined,
+  };
 }
 
 function readReadArtifactToolInput(
@@ -2693,11 +2812,14 @@ function readReadArtifactToolInput(
   const goalId = record.goalId;
   const artifactId = record.artifactId;
 
-  return typeof goalId === "string" &&
-    goalId.length > 0 &&
-    typeof artifactId === "string" &&
+  return typeof artifactId === "string" &&
     artifactId.length > 0
-    ? { goalId, artifactId }
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+      }
     : null;
 }
 
@@ -3268,6 +3390,10 @@ export async function createArtifactUploadMemoryAppendJobs(
   db: Db,
   input: { artifact: ConversationArtifact },
 ): Promise<MemoryAppendQueueJob[]> {
+  if (input.artifact.runId === undefined) {
+    return [];
+  }
+
   return createRunDailyMemoryJob(db, {
     runId: input.artifact.runId,
     createdAt: input.artifact.createdAt,
@@ -4634,8 +4760,11 @@ export async function appendRunEventToConversationMessage(
       const conditions = [
         eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
         eq(conversationArtifacts.conversationId, context.conversation.id),
-        eq(conversationArtifacts.goalId, input.goalId),
       ];
+
+      if (input.goalId !== undefined) {
+        conditions.push(eq(conversationArtifacts.goalId, input.goalId));
+      }
 
       if (input.taskIndex !== undefined) {
         conditions.push(eq(conversationArtifacts.taskIndex, input.taskIndex));
@@ -4678,9 +4807,11 @@ export async function appendRunEventToConversationMessage(
         .where(
           and(
             eq(conversationArtifacts.id, input.artifactId),
-            eq(conversationArtifacts.goalId, input.goalId),
             eq(conversationArtifacts.ownerUserId, context.run.ownerUserId),
             eq(conversationArtifacts.conversationId, context.conversation.id),
+            ...(input.goalId === undefined
+              ? []
+              : [eq(conversationArtifacts.goalId, input.goalId)]),
           ),
         )
         .limit(1);

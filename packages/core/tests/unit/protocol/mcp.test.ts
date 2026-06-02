@@ -224,6 +224,7 @@ describe("AgentHub MCP protocol", () => {
         taskIndex: uploadInput.taskIndex,
         runId: "00000000-0000-4000-8000-000000000014",
         creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        creatorType: "agent",
         status: "ready",
         title: uploadInput.title,
         filename: "report.md",

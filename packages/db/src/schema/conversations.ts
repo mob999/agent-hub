@@ -191,10 +191,14 @@ export const conversationArtifacts = pgTable(
       onDelete: "set null",
     }),
     taskIndex: integer("task_index"),
-    runId: uuid("run_id").notNull(),
-    creatorAgentId: uuid("creator_agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    runId: uuid("run_id"),
+    creatorAgentId: uuid("creator_agent_id").references(() => agents.id, {
+      onDelete: "cascade",
+    }),
+    creatorType: varchar("creator_type", { length: 32 }).notNull().default("agent"),
+    creatorUserId: uuid("creator_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
     status: varchar("status", { length: 32 }).notNull().default("ready"),
     title: varchar("title", { length: 160 }).notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
@@ -221,6 +225,9 @@ export const conversationArtifacts = pgTable(
     conversationArtifactsCreatorAgentIdIdx: index(
       "conversation_artifacts_creator_agent_id_idx",
     ).on(table.creatorAgentId),
+    conversationArtifactsCreatorUserIdIdx: index(
+      "conversation_artifacts_creator_user_id_idx",
+    ).on(table.creatorUserId),
   }),
 );
 

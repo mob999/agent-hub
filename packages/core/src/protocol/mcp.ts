@@ -150,7 +150,7 @@ export interface AgentHubCompleteGoalToolResult {
 }
 
 export interface AgentHubListArtifactsToolInput {
-  goalId: ConversationGoalId;
+  goalId?: ConversationGoalId;
   taskIndex?: number;
   limit?: number;
 }
@@ -161,7 +161,7 @@ export interface AgentHubListArtifactsToolResult {
 }
 
 export interface AgentHubReadArtifactToolInput {
-  goalId: ConversationGoalId;
+  goalId?: ConversationGoalId;
   artifactId: ConversationArtifactId;
 }
 

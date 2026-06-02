@@ -876,12 +876,10 @@ function readListArtifactsInput(
   const taskIndex = record.taskIndex;
   const limit = record.limit;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    return null;
-  }
-
   return {
-    goalId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
     taskIndex: readTaskIndex(taskIndex) ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -901,9 +899,13 @@ function readReadArtifactInput(
   const goalId = record.goalId;
   const artifactId = record.artifactId;
 
-  return typeof goalId === "string" && goalId.length > 0 &&
-    typeof artifactId === "string" && artifactId.length > 0
-    ? { goalId, artifactId }
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+      }
     : null;
 }
 

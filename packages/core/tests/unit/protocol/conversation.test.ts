@@ -99,6 +99,7 @@ describe("conversation protocol", () => {
       taskIndex: 0,
       runId: "00000000-0000-4000-8000-000000000016",
       creatorAgentId: "00000000-0000-4000-8000-000000000015",
+      creatorType: "agent",
       status: "ready",
       title: "Implementation report",
       filename: "implementation-report.md",

@@ -844,16 +844,17 @@ export function WorkspacePage({
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
     mode: SendConversationMessageMode,
-  ) => {
+    attachments: File[] = [],
+  ): Promise<boolean> => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
-    if (!trimmedPrompt || isCreatingRun) {
-      return
+    if ((!trimmedPrompt && attachments.length === 0) || isCreatingRun) {
+      return false
     }
 
     if (activeConversation === null) {
       setRunError('Select a conversation before sending a message.')
-      return
+      return false
     }
 
     const selectedAgent =
@@ -868,7 +869,7 @@ export function WorkspacePage({
       setRunError(
         'Selected agent is not ready to receive messages.',
       )
-      return
+      return false
     }
 
     if (
@@ -877,21 +878,31 @@ export function WorkspacePage({
       activeConversation.orchestratorAgentId === undefined
     ) {
       setRunError('Set a group orchestrator in settings before using Task mode.')
-      return
+      return false
     }
 
     setRunError(null)
     setIsCreatingRun(true)
 
     try {
+      const body = attachments.length > 0
+        ? (() => {
+            const formData = new FormData()
+            formData.set('content', trimmedPrompt)
+            formData.set('mode', mode)
+            attachments.forEach((file) => formData.append('attachments', file))
+
+            return formData
+          })()
+        : JSON.stringify({
+            content: trimmedPrompt,
+            mode,
+          })
       const response = await apiRequest<SendConversationMessageResponse>(
         `/conversations/${activeConversation.id}/messages`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            content: trimmedPrompt,
-            mode,
-          }),
+          body,
         },
       )
       const responseRuns = response.runs.length > 0
@@ -952,12 +963,14 @@ export function WorkspacePage({
       void loadMessages(activeConversation.id)
       void loadTasks(activeConversation.id)
       void loadArtifacts(activeConversation.id)
+      return true
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
       } else {
         setRunError('Unable to create the run. Try again in a moment.')
       }
+      return false
     } finally {
       setIsCreatingRun(false)
     }

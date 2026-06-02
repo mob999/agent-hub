@@ -232,8 +232,10 @@ export interface ConversationArtifact {
   goalId?: string
   goalTaskId?: string
   taskIndex?: number
-  runId: string
-  creatorAgentId: string
+  runId?: string
+  creatorAgentId?: string
+  creatorType: 'agent' | 'user'
+  creatorUserId?: string
   status: ConversationArtifactStatus
   title: string
   filename: string
@@ -324,7 +326,7 @@ export interface ConversationMessageAttachment {
   id: string
   messageId: string
   artifactId: string
-  type: 'image'
+  type: 'image' | 'file'
   artifact: ConversationArtifact
   createdAt: string
 }
@@ -523,11 +525,12 @@ export class ApiRequestError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
   const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...init.headers,
     },
   })

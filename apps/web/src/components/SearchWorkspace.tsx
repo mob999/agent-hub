@@ -58,7 +58,7 @@ function highlightText(text: string, query: string): ReactNode {
 
 function resultCountLabel(results: SearchConversationsResponse | null): string {
   if (results === null) {
-    return 'Search chats, channels, and DMs'
+    return 'Search messages'
   }
 
   return `${results.totalCount} results`
@@ -126,7 +126,7 @@ export function SearchWorkspace({
             <input
               ref={inputRef}
               className="min-w-0 flex-1 self-stretch border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] px-3 py-2 text-base text-[var(--cds-text-primary)] outline-none focus:border-[var(--cds-focus)]"
-              placeholder="Search channels, DMs, messages..."
+              placeholder="Search messages..."
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
             />
@@ -201,7 +201,7 @@ export function SearchWorkspace({
         )}
         {!isLoading && query.trim().length === 0 && (
           <div className="grid min-h-80 place-items-center text-center text-[var(--cds-text-secondary)]">
-            Start typing to search active channels, DMs, and messages.
+            Start typing to search any messages.
           </div>
         )}
         {!isLoading && query.trim().length > 0 && results !== null && results.totalCount === 0 && (
@@ -212,7 +212,7 @@ export function SearchWorkspace({
         {results !== null && results.conversationHits.length > 0 && (
           <section className="mb-6">
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--cds-text-secondary)]">
-              Channels &amp; DMs
+              Messages
             </div>
             <div className="grid gap-2">
               {results.conversationHits.map((hit) => (

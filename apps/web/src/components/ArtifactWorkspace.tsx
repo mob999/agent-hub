@@ -1,5 +1,5 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { Code, Document, FileDiff, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -34,6 +34,15 @@ interface ArtifactFileInfo {
   language: string
   canEdit: boolean
   canPreview: boolean
+}
+
+interface SiteTreeNode {
+  children: SiteTreeNode[]
+  file?: ConversationArtifactFile
+  id: string
+  name: string
+  path: string
+  type: 'directory' | 'file'
 }
 
 const imageExtensions = new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp'])
@@ -145,6 +154,17 @@ function shouldLoadArtifactContent(filename: string): boolean {
   return fileInfo.category === 'markdown' || fileInfo.category === 'diff' || fileInfo.category === 'text'
 }
 
+function shouldLoadSiteFileContent(filename: string): boolean {
+  const fileInfo = inferArtifactFileInfo(filename)
+
+  return (
+    fileInfo.category === 'html' ||
+    fileInfo.category === 'markdown' ||
+    fileInfo.category === 'diff' ||
+    fileInfo.category === 'text'
+  )
+}
+
 function parseUnifiedDiff(content: string): {
   language: string
   modified: string
@@ -234,6 +254,64 @@ function ArtifactFileIcon({ fileInfo }: { fileInfo: ArtifactFileInfo }) {
   }
 }
 
+function buildSiteFileTree(files: ConversationArtifactFile[]): SiteTreeNode[] {
+  const root: SiteTreeNode[] = []
+
+  for (const file of files) {
+    const parts = file.path.split('/').filter(Boolean)
+    let current = root
+    let currentPath = ''
+
+    parts.forEach((part, index) => {
+      currentPath = currentPath.length === 0 ? part : `${currentPath}/${part}`
+      const isFile = index === parts.length - 1
+      let node = current.find((child) => child.name === part)
+
+      if (node === undefined) {
+        node = {
+          children: [],
+          id: isFile ? file.id : `dir:${currentPath}`,
+          name: part,
+          path: currentPath,
+          type: isFile ? 'file' : 'directory',
+        }
+        current.push(node)
+      }
+
+      if (isFile) {
+        node.file = file
+        node.id = file.id
+        node.type = 'file'
+      } else {
+        current = node.children
+      }
+    })
+  }
+
+  return sortSiteTreeNodes(root)
+}
+
+function sortSiteTreeNodes(nodes: SiteTreeNode[]): SiteTreeNode[] {
+  return nodes
+    .map((node) => ({
+      ...node,
+      children: sortSiteTreeNodes(node.children),
+    }))
+    .sort((left, right) => {
+      if (left.type !== right.type) {
+        return left.type === 'directory' ? -1 : 1
+      }
+
+      return left.name.localeCompare(right.name)
+    })
+}
+
+function expandedDirectoriesForPath(filePath: string): string[] {
+  const parts = filePath.split('/').filter(Boolean)
+
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
+}
+
 export function ArtifactWorkspace({
   artifacts,
   activeArtifactId,
@@ -261,6 +339,7 @@ export function ArtifactWorkspace({
   const [leftInfoPanel, setLeftInfoPanel] = useState<'details' | 'history' | null>(null)
   const [activeSiteFilePath, setActiveSiteFilePath] = useState<string | null>(null)
   const [activeSiteFile, setActiveSiteFile] = useState<ConversationArtifactFile | null>(null)
+  const [expandedSiteDirectories, setExpandedSiteDirectories] = useState<Set<string>>(() => new Set())
   const activeSiteFilePathRef = useRef<string | null>(null)
   const markdownEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const markdownScrollDisposableRef = useRef<{ dispose: () => void } | null>(null)
@@ -299,6 +378,16 @@ export function ArtifactWorkspace({
             ? currentPath
             : detailsResponse.artifact.entrypoint ?? detailsResponse.files?.[0]?.path ?? null
           setActiveSiteFilePath(nextPath)
+          if (nextPath !== null) {
+            setExpandedSiteDirectories((current) => {
+              const next = new Set(current)
+              for (const directory of expandedDirectoriesForPath(nextPath)) {
+                next.add(directory)
+              }
+
+              return next
+            })
+          }
           if (nextPath !== currentPath) {
             setActiveSiteFile(null)
             setContent('')
@@ -333,6 +422,10 @@ export function ArtifactWorkspace({
       return
     }
 
+    if (!shouldLoadSiteFileContent(activeSiteFilePath)) {
+      return
+    }
+
     let cancelled = false
 
     apiRequest<GetConversationArtifactFileContentResponse>(
@@ -359,14 +452,30 @@ export function ArtifactWorkspace({
     return () => {
       cancelled = true
     }
-  }, [activeSiteFilePath, artifact?.id, artifact?.kind])
+  }, [activeSiteFilePath, artifact?.id, artifact?.kind, details?.files])
 
   const availableActions = details?.availableActions ?? []
   const activeFilename = artifact?.kind === 'site'
     ? activeSiteFilePath ?? artifact.filename
     : artifact?.filename ?? ''
   const fileInfo = inferArtifactFileInfo(activeFilename)
-  const previewUrl = artifact !== null && fileInfo.canPreview
+  const siteFiles = useMemo(
+    () => artifact?.kind === 'site' ? details?.files ?? [] : [],
+    [artifact?.kind, details?.files],
+  )
+  const siteFileTree = useMemo(() => buildSiteFileTree(siteFiles), [siteFiles])
+  const selectedSiteFile = useMemo(
+    () =>
+      artifact?.kind === 'site' && activeSiteFilePath !== null
+        ? siteFiles.find((file) => file.path === activeSiteFilePath) ?? null
+        : null,
+    [activeSiteFilePath, artifact?.kind, siteFiles],
+  )
+  const displayedSiteFile = activeSiteFile ?? selectedSiteFile
+  const siteFileRawUrl = artifact?.kind === 'site' && activeSiteFilePath !== null
+    ? apiUrl(`/artifacts/${artifact.id}/files/raw?path=${encodeURIComponent(activeSiteFilePath)}`)
+    : undefined
+  const previewUrl = artifact !== null && artifact.kind !== 'site' && fileInfo.canPreview
     ? apiUrl(`/artifacts/${artifact.id}/preview/`)
     : undefined
   const canEdit = artifact !== null && fileInfo.canEdit
@@ -541,6 +650,86 @@ export function ArtifactWorkspace({
     }
   }
 
+  const selectSiteFile = (filePath: string) => {
+    setActiveSiteFilePath(filePath)
+    if (!shouldLoadSiteFileContent(filePath)) {
+      setActiveSiteFile(siteFiles.find((file) => file.path === filePath) ?? null)
+      setContent('')
+      setDraft('')
+      setError(null)
+    } else {
+      setActiveSiteFile(null)
+    }
+    setExpandedSiteDirectories((current) => {
+      const next = new Set(current)
+      for (const directory of expandedDirectoriesForPath(filePath)) {
+        next.add(directory)
+      }
+
+      return next
+    })
+  }
+
+  const toggleSiteDirectory = (directoryPath: string) => {
+    setExpandedSiteDirectories((current) => {
+      const next = new Set(current)
+
+      if (next.has(directoryPath)) {
+        next.delete(directoryPath)
+      } else {
+        next.add(directoryPath)
+      }
+
+      return next
+    })
+  }
+
+  const renderSiteTreeNodes = (nodes: SiteTreeNode[], depth = 0) =>
+    nodes.map((node) => {
+      const isDirectory = node.type === 'directory'
+      const expanded = expandedSiteDirectories.has(node.path)
+      const selected = node.type === 'file' && node.path === activeSiteFilePath
+      const itemFileInfo = node.file === undefined ? null : inferArtifactFileInfo(node.file.path)
+
+      return (
+        <div key={node.id}>
+          <button
+            type="button"
+            className={`grid w-full cursor-pointer grid-cols-[1.25rem_1.25rem_minmax(0,1fr)] items-center gap-1 border p-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+              selected
+                ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
+                : 'border-transparent bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+            }`}
+            style={{ paddingLeft: `${0.5 + depth * 0.875}rem` }}
+            onClick={() => {
+              if (isDirectory) {
+                toggleSiteDirectory(node.path)
+              } else {
+                selectSiteFile(node.path)
+              }
+            }}
+          >
+            <span className="grid size-5 place-items-center text-[var(--cds-icon-secondary)]">
+              {isDirectory ? (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
+            </span>
+            <span className="grid size-5 place-items-center text-[var(--cds-icon-secondary)]">
+              {isDirectory
+                ? expanded
+                  ? <FolderOpen size={18} />
+                  : <Folder size={18} />
+                : itemFileInfo !== null
+                  ? <ArtifactFileIcon fileInfo={itemFileInfo} />
+                  : <Document size={18} />}
+            </span>
+            <span className="truncate font-medium">{node.name}</span>
+          </button>
+          {isDirectory && expanded && node.children.length > 0 && (
+            <div>{renderSiteTreeNodes(node.children, depth + 1)}</div>
+          )}
+        </div>
+      )
+    })
+
   if (artifacts.length === 0) {
     return (
       <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
@@ -596,34 +785,13 @@ export function ArtifactWorkspace({
               </button>
             )
           })}
-          {artifact?.kind === 'site' && (details?.files ?? []).length > 0 && (
+          {artifact?.kind === 'site' && siteFileTree.length > 0 && (
             <div className="mt-3 border-t border-[var(--cds-border-subtle-01)] pt-3">
               <h3 className="mb-2 px-2 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
                 Site files
               </h3>
               <div className="grid gap-0.5">
-                {(details?.files ?? []).map((file) => {
-                  const selected = file.path === activeSiteFilePath
-                  const itemFileInfo = inferArtifactFileInfo(file.path)
-
-                  return (
-                    <button
-                      key={file.id}
-                      type="button"
-                      className={`grid cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2 border p-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
-                        selected
-                          ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                          : 'border-transparent bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)]'
-                      }`}
-                      onClick={() => setActiveSiteFilePath(file.path)}
-                    >
-                      <span className="grid size-5 place-items-center text-[var(--cds-icon-secondary)]">
-                        <ArtifactFileIcon fileInfo={itemFileInfo} />
-                      </span>
-                      <span className="truncate">{file.path}</span>
-                    </button>
-                  )
-                })}
+                {renderSiteTreeNodes(siteFileTree)}
               </div>
             </div>
           )}
@@ -639,7 +807,7 @@ export function ArtifactWorkspace({
                   {artifact.fileCount ?? 0} files · entry {artifact.entrypoint ?? 'index.html'}
                 </p>
               )}
-              <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil((activeSiteFile?.sizeBytes ?? artifact.sizeBytes) / 1024)) : 0} KB</p>
+              <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil((displayedSiteFile?.sizeBytes ?? artifact.sizeBytes) / 1024)) : 0} KB</p>
               {artifact && <p className="text-[var(--cds-text-secondary)]">Updated {formatTime(artifact.updatedAt)}</p>}
             </section>
           )}
@@ -816,12 +984,12 @@ export function ArtifactWorkspace({
               </div>
             )
           ) : fileInfo.category === 'image' ? (
-            previewUrl ? (
+            previewUrl || siteFileRawUrl ? (
               <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[var(--cds-layer-01)] p-3">
                 <img
-                  alt={artifact.title}
+                  alt={artifact.kind === 'site' ? activeSiteFilePath ?? artifact.title : artifact.title}
                   className="max-h-full max-w-full object-contain"
-                  src={previewUrl}
+                  src={siteFileRawUrl ?? previewUrl}
                 />
               </div>
             ) : (

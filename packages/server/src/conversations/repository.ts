@@ -2138,6 +2138,63 @@ export async function getConversationArtifactFileContentForUser(
   };
 }
 
+export async function getConversationArtifactFileRawContentForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    path: string;
+    storageRoot: string;
+  },
+): Promise<{
+  content: Buffer;
+  file: ConversationArtifactFile;
+  revision?: ConversationArtifactFileRevision;
+} | null> {
+  const normalizedPath = normalizeSiteArtifactPath(input.path);
+  const [row] = await db
+    .select({
+      artifact: conversationArtifacts,
+      file: conversationArtifactFiles,
+      revision: conversationArtifactFileRevisions,
+    })
+    .from(conversationArtifactFiles)
+    .innerJoin(
+      conversationArtifacts,
+      eq(conversationArtifactFiles.artifactId, conversationArtifacts.id),
+    )
+    .leftJoin(
+      conversationArtifactFileRevisions,
+      eq(conversationArtifactFiles.latestRevisionId, conversationArtifactFileRevisions.id),
+    )
+    .where(
+      and(
+        eq(conversationArtifactFiles.artifactId, input.artifactId),
+        eq(conversationArtifactFiles.ownerUserId, input.ownerUserId),
+        eq(conversationArtifactFiles.path, normalizedPath),
+        eq(conversationArtifacts.kind, "site"),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  const content = await readArtifactContent({
+    storageKey: row.revision?.storageKey ?? row.file.storageKey,
+    storageRoot: input.storageRoot,
+  });
+
+  return {
+    content,
+    file: toConversationArtifactFile(row.file),
+    revision: row.revision === null
+      ? undefined
+      : toConversationArtifactFileRevision(row.revision),
+  };
+}
+
 export async function getSiteArtifactZipForUser(
   db: Db,
   input: {

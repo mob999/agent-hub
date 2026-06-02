@@ -56,6 +56,7 @@ import {
   getConversationArtifactContentForUser,
   getConversationArtifactDetailsForUser,
   getConversationArtifactFileContentForUser,
+  getConversationArtifactFileRawContentForUser,
   getConversationDeploymentFileForUser,
   getSiteArtifactZipForUser,
   getReadyDaemonRuntime,
@@ -3272,6 +3273,69 @@ app.get("/artifacts/:artifactId/files/content", async (c) => {
   }
 
   return c.json(result);
+});
+
+app.get("/artifacts/:artifactId/files/raw", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const filePath = c.req.query("path");
+  if (filePath === undefined || filePath.trim().length === 0) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ARTIFACT_FILE_REQUEST",
+          message: "path is required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await getConversationArtifactFileRawContentForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    path: filePath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  }).catch((error: unknown) => {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_FILE_NOT_FOUND",
+          message: "Artifact file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const filename = result.file.path.split("/").pop() ?? "file";
+
+  return new Response(new Uint8Array(result.content), {
+    headers: {
+      "content-disposition": `inline; filename="${filename.replace(/"/g, "_")}"`,
+      "content-type": result.file.mimeType,
+    },
+  });
 });
 
 app.post("/artifacts/:artifactId/files/revisions", async (c) => {

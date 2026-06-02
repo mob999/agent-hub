@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readdir, readFile, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 
@@ -12,6 +12,8 @@ import type {
   AgentHubDeployStaticSiteToolResult,
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolInput,
@@ -297,6 +299,25 @@ export class AgentHubMcpRelay {
         }
       }
 
+      if (toolName === "download_artifact") {
+        const downloadInput = input as AgentHubDownloadArtifactToolInput;
+        const serverResult = await session.onToolCall({
+          runId: session.runId,
+          toolCallId,
+          name: toolName,
+          input,
+          createdAt: new Date().toISOString(),
+        }) as AgentHubDownloadArtifactToolResult;
+
+        const result = await writeDownloadedArtifact({
+          input: downloadInput,
+          result: serverResult,
+          workspacePath: session.workspacePath,
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
       if (toolName === "append_memory") {
         const result = await appendMemoryTool(
           session.workspacePath,
@@ -437,6 +458,10 @@ function readToolInput(
 
   if (toolName === "read_artifact") {
     return readReadArtifactInput(input);
+  }
+
+  if (toolName === "download_artifact") {
+    return readDownloadArtifactInput(input);
   }
 
   if (toolName === "append_memory") {
@@ -937,6 +962,113 @@ function readReadArtifactInput(
           : undefined,
       }
     : null;
+}
+
+function readDownloadArtifactInput(
+  input: unknown,
+): AgentHubDownloadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const artifactId = record.artifactId;
+  const localPath = record.localPath;
+
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+        localPath:
+          typeof localPath === "string" && localPath.trim().length > 0
+            ? localPath.trim()
+            : undefined,
+      }
+    : null;
+}
+
+async function writeDownloadedArtifact(input: {
+  input: AgentHubDownloadArtifactToolInput;
+  result: AgentHubDownloadArtifactToolResult;
+  workspacePath: string;
+}): Promise<AgentHubDownloadArtifactToolResult> {
+  if (input.result.contentBase64 === undefined) {
+    throw new Error("download_artifact did not return artifact content.");
+  }
+
+  const filename = sanitizeLocalFilename(
+    input.result.filename ?? input.result.artifact.filename,
+  );
+  const relativeTargetPath = input.input.localPath ?? path.join("artifacts", filename);
+  const resolvedTargetPath = path.resolve(input.workspacePath, relativeTargetPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, resolvedTargetPath)) {
+    throw new Error("download_artifact.localPath must stay inside this run workspace.");
+  }
+
+  const targetPath = await resolveUniqueFilePath(resolvedTargetPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, targetPath)) {
+    throw new Error("download_artifact.localPath must stay inside this run workspace.");
+  }
+
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  const content = Buffer.from(input.result.contentBase64, "base64");
+  await writeFile(targetPath, content);
+
+  const localPath = path
+    .relative(input.workspacePath, targetPath)
+    .split(path.sep)
+    .join("/");
+
+  return {
+    accepted: true,
+    artifact: input.result.artifact,
+    localPath,
+    sizeBytes: content.byteLength,
+  };
+}
+
+function sanitizeLocalFilename(filename: string): string {
+  const base = path.basename(filename).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim();
+
+  return base.length > 0 ? base.slice(0, 255) : "artifact";
+}
+
+async function resolveUniqueFilePath(filePath: string): Promise<string> {
+  const parsed = path.parse(filePath);
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? filePath
+      : path.join(parsed.dir, `${parsed.name}-${attempt}${parsed.ext}`);
+
+    if (!(await pathExists(candidate))) {
+      return candidate;
+    }
+  }
+
+  throw new Error("download_artifact could not find an available local filename.");
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  return lstat(filePath)
+    .then(() => true)
+    .catch((error: unknown) => {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "ENOENT"
+      ) {
+        return false;
+      }
+
+      throw error;
+    });
 }
 
 async function readMessageAttachmentUpload(input: {

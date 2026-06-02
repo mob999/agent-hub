@@ -17,6 +17,7 @@ export type AgentHubMcpToolName =
   | "list_goals"
   | "list_artifacts"
   | "read_artifact"
+  | "download_artifact"
   | "append_memory"
   | "search_memory"
   | "read_memory"
@@ -34,6 +35,7 @@ export const agentHubAllMcpTools = [
   "list_goals",
   "list_artifacts",
   "read_artifact",
+  "download_artifact",
   "append_memory",
   "search_memory",
   "read_memory",
@@ -49,6 +51,7 @@ export const agentHubNonOrchestratorMcpTools = [
   "list_goals",
   "list_artifacts",
   "read_artifact",
+  "download_artifact",
   "append_memory",
   "search_memory",
   "read_memory",
@@ -174,6 +177,21 @@ export interface AgentHubReadArtifactToolResult {
   truncated?: boolean;
 }
 
+export interface AgentHubDownloadArtifactToolInput {
+  artifactId: ConversationArtifactId;
+  goalId?: ConversationGoalId;
+  localPath?: string;
+}
+
+export interface AgentHubDownloadArtifactToolResult {
+  accepted: true;
+  artifact: ConversationArtifact;
+  contentBase64?: string;
+  filename?: string;
+  localPath?: string;
+  sizeBytes: number;
+}
+
 export type AgentHubMemoryScope = "long_term" | "daily" | "transcript";
 
 export interface AgentHubAppendMemoryToolInput {
@@ -268,6 +286,7 @@ export type AgentHubMcpToolInput =
   | AgentHubListGoalsToolInput
   | AgentHubListArtifactsToolInput
   | AgentHubReadArtifactToolInput
+  | AgentHubDownloadArtifactToolInput
   | AgentHubAppendMemoryToolInput
   | AgentHubSearchMemoryToolInput
   | AgentHubReadMemoryToolInput
@@ -284,6 +303,7 @@ export type AgentHubMcpToolResult =
   | AgentHubListGoalsToolResult
   | AgentHubListArtifactsToolResult
   | AgentHubReadArtifactToolResult
+  | AgentHubDownloadArtifactToolResult
   | AgentHubAppendMemoryToolResult
   | AgentHubSearchMemoryToolResult
   | AgentHubReadMemoryToolResult

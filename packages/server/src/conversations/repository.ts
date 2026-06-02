@@ -8,6 +8,7 @@ import type {
   AgentHubCompleteGoalToolInput,
   AgentHubCompleteTaskToolInput,
   AgentHubDeployStaticSiteToolInput,
+  AgentHubDownloadArtifactToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubReadArtifactToolInput,
   AgentHubMcpToolCall,
@@ -2191,6 +2192,98 @@ export async function getSiteArtifactZipForUser(
   };
 }
 
+async function getDownloadableArtifactContentForRun(
+  db: Db,
+  input: {
+    artifactId: string;
+    conversationId: string;
+    goalId?: string;
+    ownerUserId: string;
+    storageRoot: string;
+  },
+): Promise<{ artifact: ConversationArtifactRow; content: Buffer; filename: string } | null> {
+  const [artifact] = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(
+      and(
+        eq(conversationArtifacts.id, input.artifactId),
+        eq(conversationArtifacts.ownerUserId, input.ownerUserId),
+        eq(conversationArtifacts.conversationId, input.conversationId),
+        ...(input.goalId === undefined
+          ? []
+          : [eq(conversationArtifacts.goalId, input.goalId)]),
+      ),
+    )
+    .limit(1);
+
+  if (artifact === undefined) {
+    return null;
+  }
+
+  if (artifact.kind === "site") {
+    const fileRows = await db
+      .select({
+        file: conversationArtifactFiles,
+        revision: conversationArtifactFileRevisions,
+      })
+      .from(conversationArtifactFiles)
+      .leftJoin(
+        conversationArtifactFileRevisions,
+        eq(conversationArtifactFiles.latestRevisionId, conversationArtifactFileRevisions.id),
+      )
+      .where(eq(conversationArtifactFiles.artifactId, artifact.id))
+      .orderBy(asc(conversationArtifactFiles.path));
+
+    if (fileRows.length === 0) {
+      return null;
+    }
+
+    const files = [];
+    for (const row of fileRows) {
+      files.push({
+        path: row.file.path,
+        content: await readArtifactContent({
+          storageKey: row.revision?.storageKey ?? row.file.storageKey,
+          storageRoot: input.storageRoot,
+        }),
+      });
+    }
+
+    return {
+      artifact,
+      content: createStoredZip(files),
+      filename: `${sanitizeArtifactFilename(artifact.filename)}.zip`,
+    };
+  }
+
+  let storageKey = artifact.storageKey;
+  if (artifact.latestRevisionId !== null) {
+    const [revision] = await db
+      .select({ storageKey: conversationArtifactRevisions.storageKey })
+      .from(conversationArtifactRevisions)
+      .where(
+        and(
+          eq(conversationArtifactRevisions.id, artifact.latestRevisionId),
+          eq(conversationArtifactRevisions.artifactId, artifact.id),
+          eq(conversationArtifactRevisions.ownerUserId, artifact.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    storageKey = revision?.storageKey ?? storageKey;
+  }
+
+  return {
+    artifact,
+    content: await readArtifactContent({
+      storageKey,
+      storageRoot: input.storageRoot,
+    }),
+    filename: artifact.filename,
+  };
+}
+
 export async function createConversationArtifactRevision(
   db: Db,
   input: CreateConversationArtifactRevisionInput,
@@ -3282,6 +3375,32 @@ function readCreateGoalToolInput(
     : null;
 }
 
+function readDownloadArtifactToolInput(
+  input: unknown,
+): AgentHubDownloadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const artifactId = record.artifactId;
+  const goalId = record.goalId;
+  const localPath = record.localPath;
+
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+        localPath:
+          typeof localPath === "string" && localPath.trim().length > 0
+            ? localPath.trim()
+            : undefined,
+      }
+    : null;
+}
+
 function readCreateTaskToolInput(
   input: unknown,
 ): AgentHubCreateTaskToolInput | null {
@@ -4310,7 +4429,8 @@ export function buildAssignedTaskPrompt(input: {
     "",
     "You were assigned this task by the group orchestrator.",
     "Create the requested report or result file in your current workspace.",
-    "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
+    "You can inspect prior group workspace artifacts before producing your result. Use list_artifacts to find ids, read_artifact for small text snippets, and download_artifact to save images, zip files, source packages, site artifacts, large files, or binary resources into your current workspace.",
+    "Do not use curl/wget against artifact downloadUrl or editorUrl for internal resource access; those links are user-facing and require browser authentication.",
     "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
     "If the result is a report, screenshot, zip, or source package, upload it with upload_artifact. If the result is a runnable static HTML/CSS/JavaScript website that the user should review, edit, and publish, upload the site directory with upload_artifact using kind=site and entrypoint=index.html. Use deploy_static_site only for quick temporary deployment previews, not as the primary editable deliverable.",
     "After uploading/deploying, call complete_task with a concise summary and any uploaded artifact ids.",
@@ -4340,7 +4460,7 @@ function buildAssignedTaskInstructions(input: {
       scenario: "assigned task",
     }),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
-    "Visible task updates must be sent with send_message. Completed files must be reported with upload_artifact. Editable static websites should be uploaded with upload_artifact kind=site so the user can edit and publish them in AgentHub. Use deploy_static_site only for quick temporary deployment previews. Always finish assigned work with complete_task.",
+    "Visible task updates must be sent with send_message. Use list_artifacts plus download_artifact when you need previous agents' images, zip files, source packages, site artifacts, large files, or binary resources locally; use read_artifact only for small text inspection. Completed files must be reported with upload_artifact. Editable static websites should be uploaded with upload_artifact kind=site so the user can edit and publish them in AgentHub. Use deploy_static_site only for quick temporary deployment previews. Always finish assigned work with complete_task.",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
@@ -5026,6 +5146,9 @@ async function maybeCreateCheckpointRunForTask(
     task.summary ? `Completed task summary: ${task.summary}` : undefined,
     "Review the completed task and decide how to continue the goal.",
     "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_goal only when the goal is done.",
+    "Before approving or creating same-assignee follow-up work, inspect the task graph. Tasks for the same assignee within this Goal must remain serial.",
+    "Do not approve a ready task if the same assignee has an earlier active task with status waiting, ready, assigned, or running in this Goal.",
+    "When creating more work for the same assignee, set dependsOnTaskIndexes to that assignee's previous task index.",
     "create_task and approve_task automatically create the visible assignment message and start the assignee run. Do not follow them with send_message that mentions the assignee; @AgentName and @all force ordinary chat runs and can duplicate the task.",
     "When using send_message for checkpoint updates, omit @AgentName/@all unless you intentionally want a separate ordinary chat reply run.",
     artifactUserFacingLinkInstructions,
@@ -5050,6 +5173,7 @@ async function maybeCreateCheckpointRunForTask(
         scenario: "task checkpoint",
       }),
       "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the goal using AgentHub MCP tools.",
+      "Keep tasks for the same assignee serial within the Goal. Check list_goals/task_graph before approving same-assignee downstream work, and do not approve it while an earlier same-assignee task is active.",
       "Do not use send_message with @AgentName or @all to dispatch task work. Use create_task for new tasks and approve_task for ready downstream tasks; both tools dispatch automatically.",
       "When you send a user-facing summary that mentions artifacts, use the provided userFacingLink Markdown links. Prefer editor links and never leave deliverables as bare filenames.",
     ].join("\n\n"),
@@ -5459,6 +5583,43 @@ export async function appendRunEventToConversationMessage(
           ? { contentText: sliced.toString("utf8"), encoding: "text" as const }
           : { contentBase64: sliced.toString("base64"), encoding: "base64" as const }),
         truncated: content.byteLength > maxBytes ? true : undefined,
+      };
+      return result();
+    }
+
+    if (event.name === "download_artifact") {
+      const input = readDownloadArtifactToolInput(event.input);
+      const context = await getToolRunContext(db, event.runId);
+
+      if (
+        input === null ||
+        context === null ||
+        options.storageRoot === undefined
+      ) {
+        return result();
+      }
+
+      const record = await getDownloadableArtifactContentForRun(db, {
+        artifactId: input.artifactId,
+        conversationId: context.conversation.id,
+        goalId: input.goalId,
+        ownerUserId: context.run.ownerUserId,
+        storageRoot: options.storageRoot,
+      });
+
+      if (record === null) {
+        return result();
+      }
+
+      toolResult = {
+        accepted: true,
+        artifact: toConversationArtifact(record.artifact, {
+          publicApiBaseUrl: options.publicApiBaseUrl,
+          publicWebBaseUrl: options.publicWebBaseUrl,
+        }),
+        contentBase64: record.content.toString("base64"),
+        filename: record.filename,
+        sizeBytes: record.content.byteLength,
       };
       return result();
     }

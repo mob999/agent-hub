@@ -8,6 +8,8 @@ import type {
   AgentHubCreateTaskToolResult,
   AgentHubDeployStaticSiteToolInput,
   AgentHubDeployStaticSiteToolResult,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
@@ -32,6 +34,7 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "download_artifact",
       "append_memory",
       "search_memory",
       "read_memory",
@@ -46,6 +49,7 @@ describe("AgentHub MCP protocol", () => {
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "download_artifact",
       "append_memory",
       "search_memory",
       "read_memory",
@@ -176,9 +180,36 @@ describe("AgentHub MCP protocol", () => {
       goalId: list.goalId,
       artifactId: "00000000-0000-4000-8000-000000000011",
     };
+    const download: AgentHubDownloadArtifactToolInput = {
+      goalId: list.goalId,
+      artifactId: read.artifactId,
+      localPath: "inputs/report.md",
+    };
+    const result: AgentHubDownloadArtifactToolResult = {
+      accepted: true,
+      artifact: {
+        id: read.artifactId,
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        goalId: list.goalId,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        creatorType: "agent",
+        status: "ready",
+        title: "Report",
+        filename: "report.md",
+        sizeBytes: 128,
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+      localPath: "inputs/report.md",
+      sizeBytes: 128,
+    };
 
     expect(list.limit).toBe(10);
     expect(read.goalId).toBe(list.goalId);
+    expect(download.localPath).toBe("inputs/report.md");
+    expect(result.artifact.id).toBe(download.artifactId);
   });
 
   it("expresses memory tools scoped to the current agent workspace", () => {

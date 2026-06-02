@@ -21,6 +21,8 @@ import type {
   AgentHubCreateGoalToolResult,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubAppendMemoryToolResult,
   AgentHubListArtifactsToolInput,
@@ -45,6 +47,7 @@ const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
 const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
+const downloadArtifactToolName = "download_artifact" satisfies AgentHubMcpToolName;
 const appendMemoryToolName = "append_memory" satisfies AgentHubMcpToolName;
 const searchMemoryToolName = "search_memory" satisfies AgentHubMcpToolName;
 const readMemoryToolName = "read_memory" satisfies AgentHubMcpToolName;
@@ -61,6 +64,7 @@ const agentHubMcpToolNames = [
   listGoalsToolName,
   listArtifactsToolName,
   readArtifactToolName,
+  downloadArtifactToolName,
   appendMemoryToolName,
   searchMemoryToolName,
   readMemoryToolName,
@@ -168,7 +172,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: listGoalsToolName,
               description:
-                "List goals in the current AgentHub group conversation, including each goal's tasks and task indexes.",
+                "List goals in the current AgentHub group conversation, including each goal's tasks, assignees, statuses, dependencies, and task indexes. Use this before planning or approving work to keep tasks for the same assignee serial within one Goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -220,13 +224,37 @@ export async function startAgentHubMcpStdioServer(
             {
               name: readArtifactToolName,
               description:
-                "Read one artifact from the current AgentHub conversation workspace. Text files return text; binary files return base64. Pass goalId when you want to assert the artifact belongs to a specific goal.",
+                "Read one small artifact from the current AgentHub conversation workspace. Text files return text; binary files return base64 and may be truncated. For images, zip files, resource packages, large files, or anything you need to inspect with local tools, use download_artifact instead.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
                   goalId: { type: "string", minLength: 1 },
                   artifactId: { type: "string", minLength: 1 },
+                },
+                required: ["artifactId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(downloadArtifactToolName)
+        ? [
+            {
+              name: downloadArtifactToolName,
+              description:
+                "Download one artifact from the current AgentHub conversation workspace into this run's local workspace. Use this for images, zip/resource packages, site artifacts, and large files instead of curling downloadUrl/editorUrl, which require user authentication. Pass goalId to assert the artifact belongs to a specific goal. localPath is optional and defaults to artifacts/<filename>.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  goalId: { type: "string", minLength: 1 },
+                  artifactId: { type: "string", minLength: 1 },
+                  localPath: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Optional destination path inside the current run workspace. Existing files are not overwritten; AgentHub will choose a unique filename.",
+                  },
                 },
                 required: ["artifactId"],
               },
@@ -336,7 +364,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Dependent tasks wait for Orchestrator approval after dependencies succeed. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
+                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Dependent tasks wait for Orchestrator approval after dependencies succeed. For the same assignee within one Goal, create serial tasks by setting dependsOnTaskIndexes to that assignee's previous task index; do not create multiple parallel no-dependency tasks for the same assignee. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -365,7 +393,7 @@ export async function startAgentHubMcpStdioServer(
                     type: "array",
                     items: { type: "number", minimum: 0 },
                     description:
-                      "Optional upstream task indexes in the same goal that must succeed before this task can be approved.",
+                      "Optional upstream task indexes in the same goal that must succeed before this task can be approved. Required for later same-assignee tasks so one agent's work stays serial.",
                   },
                 },
                 required: ["goalId", "title", "assigneeAgentId"],
@@ -378,7 +406,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: approveTaskToolName,
               description:
-                "Approve and dispatch a ready downstream task after reviewing a checkpoint. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
+                "Approve and dispatch a ready downstream task after reviewing a checkpoint. Before approving, use list_goals to ensure the same assignee has no earlier active task in this Goal. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -548,29 +576,31 @@ export async function startAgentHubMcpStdioServer(
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
               ? readReadArtifactInput(request.params.arguments)
-              : toolName === appendMemoryToolName
-                ? readAppendMemoryInput(request.params.arguments)
-                : toolName === searchMemoryToolName
-                  ? readSearchMemoryInput(request.params.arguments)
-                  : toolName === readMemoryToolName
-                    ? readReadMemoryInput(request.params.arguments)
-                    : toolName === createGoalToolName
-                      ? readCreateGoalInput(request.params.arguments)
-                      : toolName === createTaskToolName
-                        ? readCreateTaskInput(request.params.arguments)
-                        : toolName === approveTaskToolName
-                          ? readApproveTaskInput(request.params.arguments)
-                          : toolName === cancelTaskToolName
-                            ? readCancelTaskInput(request.params.arguments)
-                            : toolName === uploadArtifactToolName
-                              ? readUploadArtifactInput(request.params.arguments)
-                              : toolName === deployStaticSiteToolName
-                                ? readDeployStaticSiteInput(request.params.arguments)
-                                : toolName === completeTaskToolName
-                                  ? readCompleteTaskInput(request.params.arguments)
-                                  : toolName === completeGoalToolName
-                                    ? readCompleteGoalInput(request.params.arguments)
-                                    : undefined;
+              : toolName === downloadArtifactToolName
+                ? readDownloadArtifactInput(request.params.arguments)
+                : toolName === appendMemoryToolName
+                  ? readAppendMemoryInput(request.params.arguments)
+                  : toolName === searchMemoryToolName
+                    ? readSearchMemoryInput(request.params.arguments)
+                    : toolName === readMemoryToolName
+                      ? readReadMemoryInput(request.params.arguments)
+                      : toolName === createGoalToolName
+                        ? readCreateGoalInput(request.params.arguments)
+                        : toolName === createTaskToolName
+                          ? readCreateTaskInput(request.params.arguments)
+                          : toolName === approveTaskToolName
+                            ? readApproveTaskInput(request.params.arguments)
+                            : toolName === cancelTaskToolName
+                              ? readCancelTaskInput(request.params.arguments)
+                              : toolName === uploadArtifactToolName
+                                ? readUploadArtifactInput(request.params.arguments)
+                                : toolName === deployStaticSiteToolName
+                                  ? readDeployStaticSiteInput(request.params.arguments)
+                                  : toolName === completeTaskToolName
+                                    ? readCompleteTaskInput(request.params.arguments)
+                                    : toolName === completeGoalToolName
+                                      ? readCompleteGoalInput(request.params.arguments)
+                                      : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -746,6 +776,27 @@ function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
     artifactId,
     goalId: typeof goalId === "string" && goalId.length > 0
       ? goalId
+      : undefined,
+  };
+}
+
+function readDownloadArtifactInput(value: unknown): AgentHubDownloadArtifactToolInput {
+  const input = readObjectArguments(value, "download_artifact");
+  const goalId = input.goalId;
+  const artifactId = input.artifactId;
+  const localPath = input.localPath;
+
+  if (typeof artifactId !== "string" || artifactId.length === 0) {
+    throw new Error("download_artifact.artifactId is required.");
+  }
+
+  return {
+    artifactId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
+    localPath: typeof localPath === "string" && localPath.trim().length > 0
+      ? localPath.trim()
       : undefined,
   };
 }

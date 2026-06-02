@@ -22,6 +22,7 @@ import {
   ensureMemoryAppendQueueGroup,
   ensureRunQueueGroup,
   getArtifactActionAssignment,
+  getRunById,
   markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
@@ -306,6 +307,21 @@ while (!shuttingDown) {
   );
 
   for (const message of messages) {
+    const run = await getRunById(db, message.job.run.id);
+
+    if (run === null || run.status !== "queued") {
+      await ackRunQueueMessage(redis, message.id);
+      logger.info(
+        {
+          messageId: message.id,
+          runId: message.job.run.id,
+          status: run?.status ?? "missing",
+        },
+        "Skipped stale run queue job",
+      );
+      continue;
+    }
+
     const assigned = gateway.assignRun(message.job);
 
     if (!assigned) {

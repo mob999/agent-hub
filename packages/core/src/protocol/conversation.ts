@@ -28,6 +28,7 @@ export type ConversationGoalTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled"
+  | "interrupted"
   | "blocked";
 export type ConversationArtifactStatus =
   | "pending"

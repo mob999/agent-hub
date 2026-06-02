@@ -36,6 +36,10 @@ export const runs = pgTable(
     agentId: varchar("agent_id", { length: 120 }).notNull(),
     daemonDeviceId: varchar("daemon_device_id", { length: 120 }).notNull(),
     status: varchar("status", { length: 32 }).notNull(),
+    runtimeSessionId: text("runtime_session_id"),
+    parentRunId: uuid("parent_run_id"),
+    preemptedByRunId: uuid("preempted_by_run_id"),
+    dispatchMode: varchar("dispatch_mode", { length: 16 }).notNull().default("new"),
     prompt: text("prompt").notNull(),
     workspacePath: text("workspace_path").notNull(),
     runtime: jsonb("runtime").notNull(),
@@ -49,6 +53,15 @@ export const runs = pgTable(
     ),
     runsDaemonDeviceIdIdx: index("runs_daemon_device_id_idx").on(
       table.daemonDeviceId,
+    ),
+    runsActiveScopeIdx: index("runs_active_scope_idx").on(
+      table.ownerUserId,
+      table.conversationId,
+      table.agentId,
+      table.status,
+    ),
+    runsRuntimeSessionIdIdx: index("runs_runtime_session_id_idx").on(
+      table.runtimeSessionId,
     ),
   }),
 );

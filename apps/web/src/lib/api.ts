@@ -4,7 +4,7 @@ export function apiUrl(path: string): string {
   return `${apiBaseUrl}${path}`
 }
 
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
 export type DeviceStatus = 'online' | 'offline' | string
 export type WorkspaceView = 'chat' | 'runs' | 'daemon'
 export type RuntimeKind = 'claude-code' | 'codex' | 'opencode' | 'custom'
@@ -134,6 +134,10 @@ export interface AgentRun {
   agentId: string
   daemonDeviceId: string
   status: RunStatus
+  runtimeSessionId?: string
+  parentRunId?: string
+  preemptedByRunId?: string
+  dispatchMode?: 'new' | 'resume'
   createdAt: string
   updatedAt: string
 }
@@ -157,6 +161,7 @@ export type ConversationGoalTaskStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+  | 'interrupted'
   | 'blocked'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
 export type ConversationArtifactKind = 'file' | 'site'

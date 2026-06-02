@@ -349,6 +349,7 @@ function StatusDot({ status }: StatusDotProps) {
     succeeded: 'border-[var(--cds-support-success)] bg-[var(--cds-support-success)]',
     failed: 'border-[var(--cds-support-error)] bg-[var(--cds-support-error)]',
     cancelled: 'border-[var(--cds-text-placeholder)] bg-[var(--cds-text-placeholder)]',
+    interrupted: 'border-[var(--cds-text-placeholder)] bg-[var(--cds-text-placeholder)]',
   }[status]
 
   return (

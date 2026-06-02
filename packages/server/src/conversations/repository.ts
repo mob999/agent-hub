@@ -83,6 +83,10 @@ import type {
   RunQueueJob,
 } from "../queue/index.js";
 import { createRealtimeEvent } from "../realtime/index.js";
+import {
+  applyRunDispatchPreparation,
+  prepareRunDispatch,
+} from "../runs/dispatch.js";
 
 export const defaultGroupConversationKey = "all";
 export const defaultGroupConversationTitle = "all";
@@ -101,6 +105,30 @@ type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 type ConversationDeploymentRow = typeof conversationDeployments.$inferSelect;
+
+async function prepareConversationRunJobDispatch(
+  db: Db,
+  job: RunQueueJob,
+  input: {
+    conversationId: string;
+    createdAt: Date;
+    ownerUserId: string;
+    realtimeEvents?: RealtimeEvent[];
+  },
+): Promise<RunQueueJob> {
+  const preparation = await prepareRunDispatch(db, {
+    agentId: job.run.agentId,
+    conversationId: input.conversationId,
+    createdAt: input.createdAt,
+    daemonDeviceId: job.daemonDeviceId,
+    newRunId: job.run.id,
+    ownerUserId: input.ownerUserId,
+  });
+
+  input.realtimeEvents?.push(...preparation.realtimeEvents);
+
+  return applyRunDispatchPreparation(job, preparation);
+}
 
 export interface UserMessageAttachmentUpload {
   artifactId: string;
@@ -3115,8 +3143,12 @@ export async function createUserMessageAndRun(
       conversationId: input.conversationId,
       agentId: input.job.run.agentId,
       daemonDeviceId: input.job.daemonDeviceId,
-      status: input.job.run.status,
-      prompt: input.job.prompt,
+        status: input.job.run.status,
+        runtimeSessionId: input.job.runtimeSessionId,
+        parentRunId: input.job.run.parentRunId,
+        preemptedByRunId: input.job.run.preemptedByRunId,
+        dispatchMode: input.job.dispatchMode ?? input.job.run.dispatchMode ?? "new",
+        prompt: input.job.prompt,
       workspacePath: input.job.workspacePath,
       runtime: input.job.runtime,
       createdAt,
@@ -3249,8 +3281,12 @@ export async function createUserMessageAndRuns(
           conversationId: input.conversationId,
           agentId: job.run.agentId,
           daemonDeviceId: job.daemonDeviceId,
-          status: job.run.status,
-          prompt: job.prompt,
+            status: job.run.status,
+            runtimeSessionId: job.runtimeSessionId,
+            parentRunId: job.run.parentRunId,
+            preemptedByRunId: job.run.preemptedByRunId,
+            dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
+            prompt: job.prompt,
           workspacePath: job.workspacePath,
           runtime: job.runtime,
           createdAt: new Date(job.run.createdAt),
@@ -4756,7 +4792,7 @@ async function createMentionedGroupChatRuns(
       conversationId: input.conversation.id,
       ownerUserId: input.ownerUserId,
     });
-    const job: RunQueueJob = {
+    const initialJob: RunQueueJob = {
       conversationId: input.conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: buildMentionedGroupChatRunPrompt({
@@ -4800,6 +4836,36 @@ async function createMentionedGroupChatRuns(
       },
       runtime: runAgent.runtime,
     };
+    let job = await prepareConversationRunJobDispatch(db, initialJob, {
+      conversationId: input.conversation.id,
+      createdAt: input.createdAt,
+      ownerUserId: input.ownerUserId,
+      realtimeEvents,
+    });
+    if (job.runtimeSessionId !== undefined) {
+      job = {
+        ...job,
+        prompt: buildMentionedGroupChatRunPrompt({
+          agentGroupsPrompt,
+          agentName: runAgent.agent.name,
+          agentNamesById,
+          conversationTitle: input.conversation.title,
+          currentMessage: input.content,
+          directMessagesPrompt: buildRecentDirectMessagesPrompt({
+            agentName: runAgent.agent.name,
+            agentNamesById,
+            messages: await listRecentDirectConversationMessagesForAgent(db, {
+              agentId: runAgent.agent.id,
+              limit: 20,
+              ownerUserId: input.ownerUserId,
+            }),
+          }),
+          isOrchestrator,
+          messages: priorMessages,
+          senderAgentName,
+        }),
+      };
+    }
     const queuedEvent: RunEvent = {
       type: "run.queued",
       runId,
@@ -4829,6 +4895,10 @@ async function createMentionedGroupChatRuns(
         agentId: runAgent.agent.id,
         daemonDeviceId: runAgent.daemonDeviceId,
         status: "queued",
+        runtimeSessionId: job.runtimeSessionId,
+        parentRunId: job.run.parentRunId,
+        preemptedByRunId: job.run.preemptedByRunId,
+        dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
         prompt: job.prompt,
         workspacePath: runAgent.workspacePath,
         runtime: runAgent.runtime,
@@ -4952,7 +5022,8 @@ export function toConversationDeployment(
 function isTerminalTaskStatus(status: string): boolean {
   return status === "succeeded" ||
     status === "failed" ||
-    status === "cancelled";
+    status === "cancelled" ||
+    status === "interrupted";
 }
 
 function isActiveTaskStatus(status: string): boolean {
@@ -4999,6 +5070,7 @@ function dependencyStatusForTask(
       task !== undefined &&
       (task.status === "failed" ||
         task.status === "cancelled" ||
+        task.status === "interrupted" ||
         task.status === "blocked")
     );
 
@@ -5052,6 +5124,7 @@ async function updateDependentTaskReadiness(
         dependency !== undefined &&
         (dependency.status === "failed" ||
           dependency.status === "cancelled" ||
+          dependency.status === "interrupted" ||
           dependency.status === "blocked")
       );
     const nextStatus: ConversationGoalTask["status"] = failedDependency !== undefined
@@ -5217,7 +5290,7 @@ async function maybeCreateCheckpointRunForTask(
     taskLines.join("\n\n"),
     "</task_graph>",
   ].filter((line): line is string => line !== undefined).join("\n");
-  const job: RunQueueJob = {
+  let job: RunQueueJob = {
     conversationId: conversation.id,
     daemonDeviceId: runAgent.daemonDeviceId,
     prompt,
@@ -5270,6 +5343,13 @@ async function maybeCreateCheckpointRunForTask(
       return;
     }
 
+    job = await prepareConversationRunJobDispatch(tx as unknown as Db, job, {
+      conversationId: conversation.id,
+      createdAt: input.createdAt,
+      ownerUserId: goal.ownerUserId,
+      realtimeEvents: input.realtimeEvents,
+    });
+
     await tx.insert(runs).values({
       id: runId,
       ownerUserId: goal.ownerUserId,
@@ -5277,6 +5357,10 @@ async function maybeCreateCheckpointRunForTask(
       agentId: runAgent.agent.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       status: "queued",
+      runtimeSessionId: job.runtimeSessionId,
+      parentRunId: job.run.parentRunId,
+      preemptedByRunId: job.run.preemptedByRunId,
+      dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
       prompt,
       workspacePath: runAgent.workspacePath,
       runtime: runAgent.runtime,
@@ -5464,6 +5548,9 @@ export async function appendRunEventToConversationMessage(
           : event.status === "succeeded"
             ? sql`case when ${conversationGoalTasks.status} = 'succeeded' then 'succeeded' else 'failed' end`
             : event.status,
+        ...(event.type === "run.completed" && event.status === "interrupted"
+          ? { blockedReason: "Interrupted by a newer run for this agent." }
+          : {}),
         updatedAt,
       })
       .where(eq(conversationGoalTasks.assigneeRunId, event.runId))
@@ -5510,15 +5597,17 @@ export async function appendRunEventToConversationMessage(
         });
       }
 
-      for (const task of updatedTasks) {
-        await maybeCreateCheckpointRunForTask(db, {
-          goalTaskId: task.id,
-          createdAt: updatedAt,
-          dispatchJobs,
-          publicApiBaseUrl: options.publicApiBaseUrl,
-          publicWebBaseUrl: options.publicWebBaseUrl,
-          realtimeEvents,
-        });
+      if (event.status !== "interrupted") {
+        for (const task of updatedTasks) {
+          await maybeCreateCheckpointRunForTask(db, {
+            goalTaskId: task.id,
+            createdAt: updatedAt,
+            dispatchJobs,
+            publicApiBaseUrl: options.publicApiBaseUrl,
+            publicWebBaseUrl: options.publicWebBaseUrl,
+            realtimeEvents,
+          });
+        }
       }
     }
   }
@@ -5861,7 +5950,7 @@ export async function appendRunEventToConversationMessage(
       });
       const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${taskIndex}](${taskHref})`;
       const shouldDispatch = taskStatus === "assigned";
-      const job = shouldDispatch && !isSelfAssigned
+      let job = shouldDispatch && !isSelfAssigned
         ? await createAssignedTaskRunJob(db, {
             assigneeAgentId,
             agentHubMcpGoals: [toConversationGoal(goal, existingTaskRows.map((row) => toConversationGoalTask(row)))],
@@ -5881,6 +5970,15 @@ export async function appendRunEventToConversationMessage(
       if (shouldDispatch && !isSelfAssigned && job === null) {
         taskStatus = "failed";
         blockedReason = "Assignee agent is not ready.";
+      }
+
+      if (job !== null) {
+        job = await prepareConversationRunJobDispatch(db, job, {
+          conversationId: conversation.id,
+          createdAt,
+          ownerUserId: run.ownerUserId,
+          realtimeEvents,
+        });
       }
 
       const assigneeRunId = isSelfAssigned
@@ -5967,6 +6065,10 @@ export async function appendRunEventToConversationMessage(
             agentId: job.run.agentId,
             daemonDeviceId: job.daemonDeviceId,
             status: "queued",
+            runtimeSessionId: job.runtimeSessionId,
+            parentRunId: job.run.parentRunId,
+            preemptedByRunId: job.run.preemptedByRunId,
+            dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
             prompt: job.prompt,
             workspacePath: job.workspacePath,
             runtime: job.runtime,
@@ -6119,7 +6221,7 @@ export async function appendRunEventToConversationMessage(
       });
       const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${task.index}](${taskHref})`;
       const goalTasks = await listGoalTasks(db, goal.id);
-      const job = await createAssignedTaskRunJob(db, {
+      let job = await createAssignedTaskRunJob(db, {
         assigneeAgentId: task.assigneeAgentId,
         agentHubMcpGoals: [toConversationGoal(goal, goalTasks.map((row) => toConversationGoalTask(row)))],
         conversation: context.conversation,
@@ -6170,6 +6272,13 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
+      job = await prepareConversationRunJobDispatch(db, job, {
+        conversationId: context.conversation.id,
+        createdAt: updatedAt,
+        ownerUserId: context.run.ownerUserId,
+        realtimeEvents,
+      });
+
       const queuedEvent: RunEvent = {
         type: "run.queued",
         runId: job.run.id,
@@ -6199,6 +6308,10 @@ export async function appendRunEventToConversationMessage(
           agentId: job.run.agentId,
           daemonDeviceId: job.daemonDeviceId,
           status: "queued",
+          runtimeSessionId: job.runtimeSessionId,
+          parentRunId: job.run.parentRunId,
+          preemptedByRunId: job.run.preemptedByRunId,
+          dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
           prompt: job.prompt,
           workspacePath: job.workspacePath,
           runtime: job.runtime,

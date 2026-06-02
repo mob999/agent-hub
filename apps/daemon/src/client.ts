@@ -65,6 +65,15 @@ const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
 const mcpToolCallTimeoutMs = 30_000;
+const runPreemptTimeoutMs = 10_000;
+
+type RunAbortReason = "cancelled" | "interrupted";
+interface ActiveRun {
+  abortController: AbortController;
+  abortReason?: RunAbortReason;
+  done: Promise<void>;
+  resolveDone(): void;
+}
 
 async function handleArtifactAction(input: {
   env: ReturnType<typeof loadDaemonEnv>;
@@ -119,7 +128,7 @@ export async function startDaemon(): Promise<void> {
       service: "daemon",
     },
   });
-  const abortControllers = new Map<RunId, AbortController>();
+  const activeRuns = new Map<RunId, ActiveRun>();
   const pendingArtifactUploads = new Map<
     string,
     PendingDaemonRequest<AgentHubUploadArtifactToolResult>
@@ -151,7 +160,12 @@ export async function startDaemon(): Promise<void> {
     }
 
     if (message.type === "run.cancel") {
-      abortControllers.get(message.runId)?.abort();
+      const activeRun = activeRuns.get(message.runId);
+
+      if (activeRun !== undefined) {
+        activeRun.abortReason = "cancelled";
+        activeRun.abortController.abort("cancelled");
+      }
       logger.info({ runId: message.runId }, "Run cancellation requested");
       return;
     }
@@ -347,173 +361,207 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
-    if (abortControllers.has(message.run.id)) {
-      return;
-    }
+    void (async () => {
+      const preemptRunIds = message.preemptRunIds ?? [];
 
-    try {
-      assertPathInsideWorkspace(
-        env.AGENTHUB_WORKSPACE_ROOT,
-        message.workspacePath,
-      );
-    } catch (error) {
+      for (const runId of preemptRunIds) {
+        const activeRun = activeRuns.get(runId);
+
+        if (activeRun === undefined) {
+          continue;
+        }
+
+        activeRun.abortReason = "interrupted";
+        activeRun.abortController.abort("interrupted");
+        logger.info(
+          { newRunId: message.run.id, preemptedRunId: runId },
+          "Preempting active run before accepting new run",
+        );
+
+        await Promise.race([
+          activeRun.done,
+          new Promise((resolve) => setTimeout(resolve, runPreemptTimeoutMs)),
+        ]);
+      }
+
+      if (activeRuns.has(message.run.id)) {
+        return;
+      }
+
+      try {
+        assertPathInsideWorkspace(
+          env.AGENTHUB_WORKSPACE_ROOT,
+          message.workspacePath,
+        );
+      } catch (error) {
+        send(ws, {
+          type: "run.rejected",
+          runId: message.run.id,
+          reason: error instanceof Error ? error.message : String(error),
+          sentAt: nowIsoDateTime(),
+        });
+        logger.warn(
+          { runId: message.run.id, workspacePath: message.workspacePath },
+          "Rejected run because workspace path is outside daemon root",
+        );
+        return;
+      }
+
+      const abortController = new AbortController();
+      let resolveDone!: () => void;
+      const done = new Promise<void>((resolve) => {
+        resolveDone = resolve;
+      });
+      const activeRun: ActiveRun = {
+        abortController,
+        done,
+        resolveDone,
+      };
+      activeRuns.set(message.run.id, activeRun);
       send(ws, {
-        type: "run.rejected",
+        type: "run.accepted",
         runId: message.run.id,
-        reason: error instanceof Error ? error.message : String(error),
         sentAt: nowIsoDateTime(),
       });
-      logger.warn(
+      logger.info(
         { runId: message.run.id, workspacePath: message.workspacePath },
-        "Rejected run because workspace path is outside daemon root",
+        "Accepted daemon run",
       );
-      return;
-    }
 
-    const abortController = new AbortController();
-    abortControllers.set(message.run.id, abortController);
-    send(ws, {
-      type: "run.accepted",
-      runId: message.run.id,
-      sentAt: nowIsoDateTime(),
-    });
-    logger.info(
-      { runId: message.run.id, workspacePath: message.workspacePath },
-      "Accepted daemon run",
-    );
+      const uploadArtifact = (
+        upload: AgentRunArtifactUpload,
+      ): Promise<AgentHubUploadArtifactToolResult> => {
+        const uploadId = randomUUID();
 
-    const uploadArtifact = (
-      upload: AgentRunArtifactUpload,
-    ): Promise<AgentHubUploadArtifactToolResult> => {
-      const uploadId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingArtifactUploads.delete(uploadId);
+            reject(new Error("Artifact upload timed out."));
+          }, artifactUploadTimeoutMs);
 
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingArtifactUploads.delete(uploadId);
-          reject(new Error("Artifact upload timed out."));
-        }, artifactUploadTimeoutMs);
-
-        pendingArtifactUploads.set(uploadId, {
-          resolve,
-          reject,
-          timer,
+          pendingArtifactUploads.set(uploadId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "artifact.upload",
+            uploadId,
+            runId: message.run.id,
+            goalId: upload.goalId,
+            taskIndex: upload.taskIndex,
+            messageTarget: upload.messageTarget,
+            kind: upload.kind,
+            title: upload.title,
+            filename: upload.filename,
+            entrypoint: upload.entrypoint,
+            files: upload.files,
+            sizeBytes: upload.sizeBytes,
+            sourcePath: upload.sourcePath,
+            contentBase64: upload.contentBase64,
+            sentAt: nowIsoDateTime(),
+          });
         });
-        send(ws, {
-          type: "artifact.upload",
-          uploadId,
-          runId: message.run.id,
-          goalId: upload.goalId,
-          taskIndex: upload.taskIndex,
-          messageTarget: upload.messageTarget,
-          kind: upload.kind,
-          title: upload.title,
-          filename: upload.filename,
-          entrypoint: upload.entrypoint,
-          files: upload.files,
-          sizeBytes: upload.sizeBytes,
-          sourcePath: upload.sourcePath,
-          contentBase64: upload.contentBase64,
-          sentAt: nowIsoDateTime(),
+      };
+
+      const callAgentHubMcpTool = (
+        call: AgentHubMcpToolCall,
+      ): Promise<AgentHubMcpToolResult> => {
+        const requestId = randomUUID();
+
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingMcpToolCalls.delete(requestId);
+            reject(new Error("AgentHub MCP tool call timed out."));
+          }, mcpToolCallTimeoutMs);
+
+          pendingMcpToolCalls.set(requestId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "agenthub.tool.call",
+            requestId,
+            call,
+            sentAt: nowIsoDateTime(),
+          });
         });
-      });
-    };
+      };
 
-    const callAgentHubMcpTool = (
-      call: AgentHubMcpToolCall,
-    ): Promise<AgentHubMcpToolResult> => {
-      const requestId = randomUUID();
+      const deployStaticSite = (
+        deployment: AgentRunStaticSiteDeploy,
+      ): Promise<AgentHubDeployStaticSiteToolResult> => {
+        const deploymentId = randomUUID();
 
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingMcpToolCalls.delete(requestId);
-          reject(new Error("AgentHub MCP tool call timed out."));
-        }, mcpToolCallTimeoutMs);
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingStaticSiteDeployments.delete(deploymentId);
+            reject(new Error("Static site deployment timed out."));
+          }, artifactUploadTimeoutMs);
 
-        pendingMcpToolCalls.set(requestId, {
-          resolve,
-          reject,
-          timer,
+          pendingStaticSiteDeployments.set(deploymentId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "static_site.deploy",
+            deploymentId,
+            runId: message.run.id,
+            goalId: deployment.goalId,
+            taskIndex: deployment.taskIndex,
+            title: deployment.title,
+            entrypoint: deployment.entrypoint,
+            files: deployment.files,
+            sentAt: nowIsoDateTime(),
+          });
         });
-        send(ws, {
-          type: "agenthub.tool.call",
-          requestId,
-          call,
-          sentAt: nowIsoDateTime(),
-        });
-      });
-    };
+      };
 
-    const deployStaticSite = (
-      deployment: AgentRunStaticSiteDeploy,
-    ): Promise<AgentHubDeployStaticSiteToolResult> => {
-      const deploymentId = randomUUID();
-
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingStaticSiteDeployments.delete(deploymentId);
-          reject(new Error("Static site deployment timed out."));
-        }, artifactUploadTimeoutMs);
-
-        pendingStaticSiteDeployments.set(deploymentId, {
-          resolve,
-          reject,
-          timer,
-        });
-        send(ws, {
-          type: "static_site.deploy",
-          deploymentId,
-          runId: message.run.id,
-          goalId: deployment.goalId,
-          taskIndex: deployment.taskIndex,
-          title: deployment.title,
-          entrypoint: deployment.entrypoint,
-          files: deployment.files,
-          sentAt: nowIsoDateTime(),
-        });
-      });
-    };
-
-    void (async () => {
-      try {
-        for await (const event of adapter.run({
-          run: message.run,
-          prompt: message.prompt,
-          contextCompression: message.contextCompression,
-          agentInstructions: message.agentInstructions,
-          workspacePath: message.workspacePath,
-          runtime: message.runtime,
-          agentHubMcpTools: message.agentHubMcpTools,
-          agentHubMcpGoals: message.agentHubMcpGoals,
-          uploadArtifact,
-          deployStaticSite,
-          callAgentHubMcpTool,
-          abortSignal: abortController.signal,
-        })) {
+      void (async () => {
+        try {
+          for await (const event of adapter.run({
+            run: message.run,
+            prompt: message.prompt,
+            contextCompression: message.contextCompression,
+            agentInstructions: message.agentInstructions,
+            workspacePath: message.workspacePath,
+            runtime: message.runtime,
+            agentHubMcpTools: message.agentHubMcpTools,
+            agentHubMcpGoals: message.agentHubMcpGoals,
+            uploadArtifact,
+            deployStaticSite,
+            callAgentHubMcpTool,
+            abortSignal: abortController.signal,
+          })) {
+            send(ws, {
+              type: "run.event",
+              runId: message.run.id,
+              event,
+              sentAt: nowIsoDateTime(),
+            });
+          }
+        } catch (error) {
+          logger.error({ err: error, runId: message.run.id }, "Daemon run failed");
           send(ws, {
             type: "run.event",
             runId: message.run.id,
-            event,
+            event: {
+              type: "run.completed",
+              runId: message.run.id,
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error),
+              createdAt: nowIsoDateTime(),
+            },
             sentAt: nowIsoDateTime(),
           });
+        } finally {
+          activeRun.resolveDone();
+          activeRuns.delete(message.run.id);
+          logger.info({ runId: message.run.id }, "Daemon run finished");
         }
-      } catch (error) {
-        logger.error({ err: error, runId: message.run.id }, "Daemon run failed");
-        send(ws, {
-          type: "run.event",
-          runId: message.run.id,
-          event: {
-            type: "run.completed",
-            runId: message.run.id,
-            status: "failed",
-            error: error instanceof Error ? error.message : String(error),
-            createdAt: nowIsoDateTime(),
-          },
-          sentAt: nowIsoDateTime(),
-        });
-      } finally {
-        abortControllers.delete(message.run.id);
-        logger.info({ runId: message.run.id }, "Daemon run finished");
-      }
+      })();
     })();
   };
 
@@ -553,7 +601,7 @@ export async function startDaemon(): Promise<void> {
       send(ws, {
         type: "daemon.heartbeat",
         deviceId: env.AGENTHUB_DEVICE_ID,
-        runningRunIds: Array.from(abortControllers.keys()),
+        runningRunIds: Array.from(activeRuns.keys()),
         sentAt: nowIsoDateTime(),
       });
     }, 10_000);
@@ -564,8 +612,9 @@ export async function startDaemon(): Promise<void> {
 
     ws.on("close", () => {
       clearInterval(heartbeat);
-      for (const abortController of abortControllers.values()) {
-        abortController.abort();
+      for (const activeRun of activeRuns.values()) {
+        activeRun.abortReason = "cancelled";
+        activeRun.abortController.abort("cancelled");
       }
       for (const [uploadId, pending] of pendingArtifactUploads) {
         clearTimeout(pending.timer);

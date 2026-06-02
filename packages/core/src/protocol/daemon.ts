@@ -23,10 +23,14 @@ import type {
   ConversationGoalId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
+import type { RunDispatchMode } from "./run.js";
 
 export interface DaemonRunAssignment {
   run: AgentRun;
   prompt: string;
+  dispatchMode?: RunDispatchMode;
+  runtimeSessionId?: string;
+  preemptRunIds?: RunId[];
   contextCompression?: {
     compressibleText: string;
     promptTemplate: string;

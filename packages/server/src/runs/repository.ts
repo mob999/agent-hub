@@ -31,6 +31,10 @@ export async function createRunRecord(
     agentId: input.job.run.agentId,
     daemonDeviceId: input.job.daemonDeviceId,
     status: input.job.run.status,
+    runtimeSessionId: input.job.runtimeSessionId,
+    parentRunId: input.job.run.parentRunId,
+    preemptedByRunId: input.job.run.preemptedByRunId,
+    dispatchMode: input.job.dispatchMode ?? input.job.run.dispatchMode ?? "new",
     prompt: input.job.prompt,
     workspacePath: input.job.workspacePath,
     runtime: input.job.runtime,
@@ -48,6 +52,12 @@ export async function getRunForUser(
     .from(runs)
     .where(and(eq(runs.id, input.runId), eq(runs.ownerUserId, input.ownerUserId)))
     .limit(1);
+
+  return run ?? null;
+}
+
+export async function getRunById(db: Db, runId: RunId) {
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
 
   return run ?? null;
 }
@@ -109,11 +119,16 @@ export async function appendRunEvent(
       : event.type === "run.completed"
         ? event.status
         : undefined;
+  const nextRuntimeSessionId =
+    event.type === "runtime.session.started" ? event.sessionId : undefined;
 
   const [run] = await db
     .update(runs)
     .set({
       ...(nextStatus === undefined ? {} : { status: nextStatus }),
+      ...(nextRuntimeSessionId === undefined
+        ? {}
+        : { runtimeSessionId: nextRuntimeSessionId }),
       updatedAt: new Date(event.createdAt),
     })
     .where(eq(runs.id, event.runId))
@@ -211,6 +226,10 @@ export function toAgentRun(row: typeof runs.$inferSelect): AgentRun {
     agentId: row.agentId,
     daemonDeviceId: row.daemonDeviceId,
     status: row.status as AgentRun["status"],
+    runtimeSessionId: row.runtimeSessionId ?? undefined,
+    parentRunId: row.parentRunId ?? undefined,
+    preemptedByRunId: row.preemptedByRunId ?? undefined,
+    dispatchMode: row.dispatchMode as AgentRun["dispatchMode"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

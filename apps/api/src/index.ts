@@ -30,6 +30,7 @@ import {
   createAgentProvisioningRecords,
   createAgentHubRedisClient,
   createLogger,
+  applyRunDispatchPreparation,
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
   buildRecentDirectMessagesPrompt,
@@ -78,6 +79,7 @@ import {
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
+  prepareRunDispatch,
   publishSiteArtifactForUser,
   readArtifactContent,
   conversationArtifactStorageKey,
@@ -713,6 +715,47 @@ function applyContextCompressionToJob(
       thresholdChars: env.AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD,
     },
   };
+}
+
+async function prepareApiRunJobDispatch(
+  job: RunQueueJob,
+  input: {
+    conversationId?: string;
+    ownerUserId: string;
+  },
+): Promise<{ job: RunQueueJob; realtimeEvents: RealtimeEvent[] }> {
+  const preparation = await prepareRunDispatch(db, {
+    agentId: job.run.agentId,
+    conversationId: input.conversationId ?? job.conversationId,
+    createdAt: new Date(job.run.createdAt),
+    daemonDeviceId: job.daemonDeviceId,
+    newRunId: job.run.id,
+    ownerUserId: input.ownerUserId,
+  });
+
+  return {
+    job: applyRunDispatchPreparation(job, preparation),
+    realtimeEvents: preparation.realtimeEvents,
+  };
+}
+
+async function prepareApiRunJobsDispatch(
+  jobs: RunQueueJob[],
+  input: {
+    conversationId?: string;
+    ownerUserId: string;
+  },
+): Promise<{ jobs: RunQueueJob[]; realtimeEvents: RealtimeEvent[] }> {
+  const preparedJobs: RunQueueJob[] = [];
+  const realtimeEvents: RealtimeEvent[] = [];
+
+  for (const job of jobs) {
+    const prepared = await prepareApiRunJobDispatch(job, input);
+    preparedJobs.push(prepared.job);
+    realtimeEvents.push(...prepared.realtimeEvents);
+  }
+
+  return { jobs: preparedJobs, realtimeEvents };
 }
 
 async function buildAgentGroupsPromptForAgent(input: {
@@ -2477,7 +2520,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       userMessageAttachments,
       { conversationId: conversation.id },
     );
-    const job = applyContextCompressionToJob({
+    const initialJob = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: runAgent.daemonDeviceId,
       prompt: [
@@ -2510,6 +2553,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentUserMessage: currentUserMessageForPrompt,
       messages: priorMessages,
     });
+    const { job, realtimeEvents: preemptRealtimeEvents } =
+      await prepareApiRunJobDispatch(initialJob, {
+        conversationId: conversation.id,
+        ownerUserId: user.id,
+      });
     const result = await createUserMessageAndRun(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -2538,15 +2586,18 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     );
     const assistant = result.messages.assistant;
     await publishRealtimeEvents(
-      realtimeEventsForCreatedRuns({
-        conversation: result.conversation,
-        jobs: [job],
-        messages: [
-          result.messages.user,
-          ...(assistant === undefined ? [] : [assistant]),
-        ],
-        ownerUserId: user.id,
-      }),
+      [
+        ...preemptRealtimeEvents,
+        ...realtimeEventsForCreatedRuns({
+          conversation: result.conversation,
+          jobs: [job],
+          messages: [
+            result.messages.user,
+            ...(assistant === undefined ? [] : [assistant]),
+          ],
+          ownerUserId: user.id,
+        }),
+      ],
     );
 
     return c.json(
@@ -2639,7 +2690,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       userMessageAttachments,
       { conversationId: conversation.id },
     );
-    const job = applyContextCompressionToJob({
+    const initialJob = applyContextCompressionToJob({
       conversationId: conversation.id,
       daemonDeviceId: orchestrator.daemonDeviceId,
       prompt: buildGroupTaskOrchestratorPrompt({
@@ -2679,6 +2730,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentUserMessage: currentUserMessageForPrompt,
       messages: priorMessages,
     });
+    const { job, realtimeEvents: preemptRealtimeEvents } =
+      await prepareApiRunJobDispatch(initialJob, {
+        conversationId: conversation.id,
+        ownerUserId: user.id,
+      });
     const result = await createUserMessageAndRuns(db, {
       ownerUserId: user.id,
       conversationId: conversation.id,
@@ -2706,15 +2762,18 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
     );
     await publishRealtimeEvents(
-      realtimeEventsForCreatedRuns({
-        conversation: result.conversation,
-        jobs: [job],
-        messages: [
-          result.messages.user,
-          ...result.messages.assistants,
-        ],
-        ownerUserId: user.id,
-      }),
+      [
+        ...preemptRealtimeEvents,
+        ...realtimeEventsForCreatedRuns({
+          conversation: result.conversation,
+          jobs: [job],
+          messages: [
+            result.messages.user,
+            ...result.messages.assistants,
+          ],
+          ownerUserId: user.id,
+        }),
+      ],
     );
 
     return c.json(
@@ -2782,7 +2841,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     userMessageAttachments,
     { conversationId: conversation.id },
   );
-  const jobs = await Promise.all(
+  const initialJobs = await Promise.all(
     runAgents.map(async (runAgent): Promise<RunQueueJob> => {
       const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
 
@@ -2846,6 +2905,11 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       });
     }),
   );
+  const { jobs, realtimeEvents: preemptRealtimeEvents } =
+    await prepareApiRunJobsDispatch(initialJobs, {
+      conversationId: conversation.id,
+      ownerUserId: user.id,
+    });
   const result = await createUserMessageAndRuns(db, {
     ownerUserId: user.id,
     conversationId: conversation.id,
@@ -2875,15 +2939,18 @@ app.post("/conversations/:conversationId/messages", async (c) => {
     result.memoryAppendJobs.map((memoryJob) => enqueueMemoryAppendJob(redis, memoryJob)),
   );
   await publishRealtimeEvents(
-    realtimeEventsForCreatedRuns({
-      conversation: result.conversation,
-      jobs,
-      messages: [
-        result.messages.user,
-        ...result.messages.assistants,
-      ],
-      ownerUserId: user.id,
-    }),
+    [
+      ...preemptRealtimeEvents,
+      ...realtimeEventsForCreatedRuns({
+        conversation: result.conversation,
+        jobs,
+        messages: [
+          result.messages.user,
+          ...result.messages.assistants,
+        ],
+        ownerUserId: user.id,
+      }),
+    ],
   );
 
   return c.json(

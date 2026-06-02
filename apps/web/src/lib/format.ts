@@ -42,6 +42,8 @@ export function runTagType(status: RunStatus): 'gray' | 'blue' | 'green' | 'red'
       return 'red'
     case 'cancelled':
       return 'warm-gray'
+    case 'interrupted':
+      return 'warm-gray'
   }
 }
 
@@ -57,6 +59,8 @@ export function runStatusLabel(status: RunStatus): string {
       return 'Failed'
     case 'cancelled':
       return 'Cancelled'
+    case 'interrupted':
+      return 'Interrupted'
   }
 }
 
@@ -72,6 +76,8 @@ export function eventTitle(event: RunEvent): string {
       return event.stream === 'stderr' ? 'Error log' : 'Log line'
     case 'runtime.event':
       return event.raw?.nativeType ?? 'Runtime event'
+    case 'runtime.session.started':
+      return 'Runtime session started'
     case 'tool.call.started':
       return `Tool started${event.name ? `: ${event.name}` : ''}`
     case 'tool.call.completed':

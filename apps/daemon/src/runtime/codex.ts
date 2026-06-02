@@ -232,6 +232,17 @@ function mapCodexJsonEvents(value: unknown, runId: RunId): RunEvent[] {
   const nativeType = readStringProperty(record, ["type"]);
   const raw = createCodexRawEvent(record, nativeType);
   const events: RunEvent[] = [createCodexRuntimeEvent(runId, raw, createdAt)];
+  const threadId = readStringProperty(record, ["thread_id", "threadId"]);
+
+  if (nativeType === "thread.started" && threadId !== undefined) {
+    events.push({
+      type: "runtime.session.started",
+      runId,
+      runtimeKind: "codex",
+      sessionId: threadId,
+      createdAt,
+    });
+  }
 
   if (nativeType !== "item.started" && nativeType !== "item.completed") {
     return events;
@@ -653,7 +664,8 @@ export class CodexAdapter implements AgentAdapter {
       executablePath: this.#executablePath,
       capabilities: [
         { name: "json-events", enabled: true },
-        { name: "ephemeral-runs", enabled: true },
+        { name: "persistent-session", enabled: true },
+        { name: "resume-session", enabled: true },
         { name: "agenthub-mcp", enabled: this.#mcpRelay !== undefined },
       ],
       status: "ready",
@@ -708,12 +720,15 @@ export class CodexAdapter implements AgentAdapter {
         return { accepted: true };
       },
     });
+    const resumeSessionId =
+      input.run.dispatchMode === "resume"
+        ? input.run.runtimeSessionId
+        : undefined;
     const args = [
       "exec",
+      ...(resumeSessionId === undefined ? [] : ["resume", resumeSessionId]),
       "--json",
-      "--ephemeral",
-      "--cd",
-      input.workspacePath,
+      ...(resumeSessionId === undefined ? ["--cd", input.workspacePath] : []),
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
       ...(developerInstructionsConfig === undefined
@@ -737,6 +752,8 @@ export class CodexAdapter implements AgentAdapter {
     const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
+    let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
+      "cancelled";
     let stdinInitialized = false;
     let pendingCloseExitCode: number | null | undefined;
 
@@ -821,7 +838,7 @@ export class CodexAdapter implements AgentAdapter {
     });
     process.once("close", (exitCode) => {
       if (aborted) {
-        complete("cancelled");
+        complete(abortStatus);
         return;
       }
 
@@ -832,6 +849,9 @@ export class CodexAdapter implements AgentAdapter {
       "abort",
       () => {
         aborted = true;
+        abortStatus = input.abortSignal?.reason === "interrupted"
+          ? "interrupted"
+          : "cancelled";
         process.kill("SIGTERM");
       },
       { once: true },

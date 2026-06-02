@@ -19,6 +19,7 @@ const taskStatusOrder = [
   'succeeded',
   'failed',
   'cancelled',
+  'interrupted',
   'blocked',
 ] as const satisfies readonly ConversationGoalTaskStatus[]
 
@@ -103,6 +104,8 @@ function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
     case 'failed':
       return 'red'
     case 'cancelled':
+      return 'gray'
+    case 'interrupted':
       return 'gray'
     case 'blocked':
       return 'magenta'

@@ -11,11 +11,13 @@ import type {
   AgentHubDownloadArtifactToolInput,
   AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
+  AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
   AgentHubMcpToolCall,
   AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchGroupMessagesToolInput,
   AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
@@ -31,6 +33,8 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
+      "list_group_messages",
+      "search_group_messages",
       "list_goals",
       "list_artifacts",
       "read_artifact",
@@ -46,6 +50,8 @@ describe("AgentHub MCP protocol", () => {
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
+      "list_group_messages",
+      "search_group_messages",
       "list_goals",
       "list_artifacts",
       "read_artifact",
@@ -210,6 +216,20 @@ describe("AgentHub MCP protocol", () => {
     expect(read.goalId).toBe(list.goalId);
     expect(download.localPath).toBe("inputs/report.md");
     expect(result.artifact.id).toBe(download.artifactId);
+  });
+
+  it("expresses group message inspection tools", () => {
+    const listInput: AgentHubListGroupMessagesToolInput = {
+      beforeMessageId: "00000000-0000-4000-8000-000000000031",
+      limit: 20,
+    };
+    const searchInput: AgentHubSearchGroupMessagesToolInput = {
+      query: "deployment",
+      limit: 10,
+    };
+
+    expect(listInput.limit).toBe(20);
+    expect(searchInput.query).toBe("deployment");
   });
 
   it("expresses memory tools scoped to the current agent workspace", () => {

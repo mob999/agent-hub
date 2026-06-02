@@ -244,6 +244,30 @@ describe("conversation prompt builder", () => {
     expect(prompt).not.toContain("configured Orchestrator");
   });
 
+  it("limits mentioned group chat history to the 10 most recent messages", () => {
+    const messages = Array.from({ length: 12 }, (_, index) =>
+      createMessage({
+        content: `history-${index + 1}`,
+        createdAt: `2026-05-26T00:${String(index + 1).padStart(2, "0")}:00.000Z`,
+      })
+    );
+    const prompt = buildMentionedGroupChatRunPrompt({
+      agentGroupsPrompt: "<agenthub_agent_groups />",
+      agentName: "jojo",
+      agentNamesById: {},
+      conversationTitle: "Design",
+      currentMessage: "@jojo can you review this?",
+      messages,
+      senderAgentName: "dudu",
+    });
+
+    expect(prompt).toContain("Only the 10 most recent group messages");
+    expect(prompt).not.toMatch(/^history-1$/m);
+    expect(prompt).not.toMatch(/^history-2$/m);
+    expect(prompt).toMatch(/^history-3$/m);
+    expect(prompt).toMatch(/^history-12$/m);
+  });
+
   it("formats only active prior runs for mentioned group chat context", () => {
     const prompt = buildActiveRunsPrompt([
       {

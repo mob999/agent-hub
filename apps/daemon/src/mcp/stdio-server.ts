@@ -25,6 +25,8 @@ import type {
   AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubAppendMemoryToolResult,
+  AgentHubListGroupMessagesToolInput,
+  AgentHubListGroupMessagesToolResult,
   AgentHubListArtifactsToolInput,
   AgentHubListArtifactsToolResult,
   AgentHubListGoalsToolInput,
@@ -35,6 +37,8 @@ import type {
   AgentHubReadMemoryToolResult,
   AgentHubReadArtifactToolInput,
   AgentHubReadArtifactToolResult,
+  AgentHubSearchGroupMessagesToolInput,
+  AgentHubSearchGroupMessagesToolResult,
   AgentHubSearchMemoryToolInput,
   AgentHubSearchMemoryToolResult,
   AgentHubSendMessageToolInput,
@@ -44,6 +48,8 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
+const listGroupMessagesToolName = "list_group_messages" satisfies AgentHubMcpToolName;
+const searchGroupMessagesToolName = "search_group_messages" satisfies AgentHubMcpToolName;
 const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
@@ -61,6 +67,8 @@ const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const completeGoalToolName = "complete_goal" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
+  listGroupMessagesToolName,
+  searchGroupMessagesToolName,
   listGoalsToolName,
   listArtifactsToolName,
   readArtifactToolName,
@@ -163,6 +171,60 @@ export async function startAgentHubMcpStdioServer(
                   },
                 },
                 required: ["content"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(listGroupMessagesToolName)
+        ? [
+            {
+              name: listGroupMessagesToolName,
+              description:
+                "Read visible messages from the current AgentHub group conversation. Use this when the prompt only includes recent history and you need older group context. This tool is scoped to the current group; it cannot read other groups or direct messages.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  limit: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 100,
+                    description: "Maximum number of messages to return. Defaults to 30.",
+                  },
+                  beforeMessageId: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Optional message id cursor. When provided, returns messages older than this message.",
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(searchGroupMessagesToolName)
+        ? [
+            {
+              name: searchGroupMessagesToolName,
+              description:
+                "Search visible messages in the current AgentHub group conversation by text. Use this to retrieve older relevant group context without loading the full history. This tool is scoped to the current group.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  query: {
+                    type: "string",
+                    minLength: 1,
+                    description: "Text to search for in group messages.",
+                  },
+                  limit: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 50,
+                    description: "Maximum number of matches to return. Defaults to 20.",
+                  },
+                },
+                required: ["query"],
               },
             },
           ]
@@ -570,9 +632,13 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
+        : toolName === listGroupMessagesToolName
+          ? readListGroupMessagesInput(request.params.arguments)
+          : toolName === searchGroupMessagesToolName
+            ? readSearchGroupMessagesInput(request.params.arguments)
         : toolName === listGoalsToolName
-          ? readListGoalsInput(request.params.arguments)
-          : toolName === listArtifactsToolName
+            ? readListGoalsInput(request.params.arguments)
+            : toolName === listArtifactsToolName
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
               ? readReadArtifactInput(request.params.arguments)
@@ -743,6 +809,41 @@ function readListGoalsInput(value: unknown): AgentHubListGoalsToolInput {
   return typeof status === "string" && status.length > 0
     ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
+}
+
+function readListGroupMessagesInput(value: unknown): AgentHubListGroupMessagesToolInput {
+  const input = readObjectArguments(value, "list_group_messages");
+  const limit = input.limit;
+  const beforeMessageId = input.beforeMessageId;
+
+  return {
+    beforeMessageId:
+      typeof beforeMessageId === "string" && beforeMessageId.trim().length > 0
+        ? beforeMessageId.trim()
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : undefined,
+  };
+}
+
+function readSearchGroupMessagesInput(value: unknown): AgentHubSearchGroupMessagesToolInput {
+  const input = readObjectArguments(value, "search_group_messages");
+  const query = input.query;
+  const limit = input.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    throw new Error("search_group_messages.query is required.");
+  }
+
+  return {
+    query: query.trim(),
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
 }
 
 function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput {

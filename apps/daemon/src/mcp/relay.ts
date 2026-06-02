@@ -15,6 +15,7 @@ import type {
   AgentHubDownloadArtifactToolInput,
   AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
+  AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolInput,
   AgentHubMcpToolCall,
@@ -23,6 +24,7 @@ import type {
   AgentHubMcpToolResult,
   AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchGroupMessagesToolInput,
   AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
@@ -452,6 +454,14 @@ function readToolInput(
     return readListGoalsInput(input);
   }
 
+  if (toolName === "list_group_messages") {
+    return readListGroupMessagesInput(input);
+  }
+
+  if (toolName === "search_group_messages") {
+    return readSearchGroupMessagesInput(input);
+  }
+
   if (toolName === "list_artifacts") {
     return readListArtifactsInput(input);
   }
@@ -626,6 +636,49 @@ function readListGoalsInput(input: unknown): AgentHubListGoalsToolInput | null {
   return typeof status === "string" && status.length > 0
     ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
+}
+
+function readListGroupMessagesInput(input: unknown): AgentHubListGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const limit = record.limit;
+  const beforeMessageId = record.beforeMessageId;
+
+  return {
+    beforeMessageId:
+      typeof beforeMessageId === "string" && beforeMessageId.trim().length > 0
+        ? beforeMessageId.trim()
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : undefined,
+  };
+}
+
+function readSearchGroupMessagesInput(input: unknown): AgentHubSearchGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const query = record.query;
+  const limit = record.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    query: query.trim(),
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
 }
 
 async function readArtifactUpload(input: {

@@ -8,12 +8,15 @@ import type {
   ConversationGoalStatus,
   ConversationGoalTask,
   ConversationId,
+  ConversationMessage,
   ConversationMessageId,
 } from "./conversation.js";
 import type { RunId } from "./run.js";
 
 export type AgentHubMcpToolName =
   | "send_message"
+  | "list_group_messages"
+  | "search_group_messages"
   | "list_goals"
   | "list_artifacts"
   | "read_artifact"
@@ -32,6 +35,8 @@ export type AgentHubMcpToolName =
 
 export const agentHubAllMcpTools = [
   "send_message",
+  "list_group_messages",
+  "search_group_messages",
   "list_goals",
   "list_artifacts",
   "read_artifact",
@@ -48,6 +53,8 @@ export const agentHubAllMcpTools = [
 
 export const agentHubNonOrchestratorMcpTools = [
   "send_message",
+  "list_group_messages",
+  "search_group_messages",
   "list_goals",
   "list_artifacts",
   "read_artifact",
@@ -156,6 +163,26 @@ export interface AgentHubListArtifactsToolInput {
   goalId?: ConversationGoalId;
   taskIndex?: number;
   limit?: number;
+}
+
+export interface AgentHubListGroupMessagesToolInput {
+  limit?: number;
+  beforeMessageId?: ConversationMessageId;
+}
+
+export interface AgentHubListGroupMessagesToolResult {
+  accepted: true;
+  messages: ConversationMessage[];
+}
+
+export interface AgentHubSearchGroupMessagesToolInput {
+  query: string;
+  limit?: number;
+}
+
+export interface AgentHubSearchGroupMessagesToolResult {
+  accepted: true;
+  messages: ConversationMessage[];
 }
 
 export interface AgentHubListArtifactsToolResult {
@@ -282,6 +309,8 @@ export interface AgentHubCompleteTaskToolResult {
 
 export type AgentHubMcpToolInput =
   | AgentHubSendMessageToolInput
+  | AgentHubListGroupMessagesToolInput
+  | AgentHubSearchGroupMessagesToolInput
   | AgentHubCreateGoalToolInput
   | AgentHubListGoalsToolInput
   | AgentHubListArtifactsToolInput
@@ -299,6 +328,8 @@ export type AgentHubMcpToolInput =
   | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
   | AgentHubSendMessageToolResult
+  | AgentHubListGroupMessagesToolResult
+  | AgentHubSearchGroupMessagesToolResult
   | AgentHubCreateGoalToolResult
   | AgentHubListGoalsToolResult
   | AgentHubListArtifactsToolResult

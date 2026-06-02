@@ -800,10 +800,11 @@ function buildGroupChatRunPrompt(input: {
   isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
 }): string {
+  const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
     agentNamesById: input.agentNamesById,
     currentUserMessage: input.currentUserMessage,
-    messages: input.messages ?? [],
+    messages: recentMessages,
   });
 
   return [
@@ -821,6 +822,7 @@ function buildGroupChatRunPrompt(input: {
     "If the user explicitly asks you to reply, you should normally call send_message.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
+    "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "</agenthub_group_chat_protocol>",
     "",
     input.agentGroupsPrompt,
@@ -865,10 +867,11 @@ function buildGroupTaskOrchestratorPrompt(input: {
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
   orchestratorAgentId?: string;
 }): string {
+  const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
     agentNamesById: input.agentNamesById,
     currentUserMessage: input.currentUserMessage,
-    messages: input.messages ?? [],
+    messages: recentMessages,
   });
   const roster = input.agents.map((agent) => {
     const description = agent.agent.description?.trim();
@@ -900,6 +903,7 @@ function buildGroupTaskOrchestratorPrompt(input: {
     "Ready downstream tasks do not start automatically. In checkpoint runs, call approve_task({ goalId, taskIndex }) after you review and decide to continue.",
     "approve_task also automatically creates the visible assignment message and assignee run; do not send an extra @AgentName message afterward.",
     "Use list_artifacts/read_artifact when later tasks need reports or files uploaded by earlier tasks.",
+    "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "Do not use send_message to dispatch tasks. Use send_message only for progress updates, decisions, or final notes, and omit @AgentName/@all unless you intentionally want a separate ordinary chat reply run.",
     "Call complete_goal only after there are no waiting, ready, assigned, or running tasks.",
     "Normal assistant text is not visible in group task mode.",

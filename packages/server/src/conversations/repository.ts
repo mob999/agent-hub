@@ -9,8 +9,10 @@ import type {
   AgentHubCompleteTaskToolInput,
   AgentHubDeployStaticSiteToolInput,
   AgentHubDownloadArtifactToolInput,
+  AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchGroupMessagesToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
   AgentHubListGoalsToolResult,
@@ -3444,6 +3446,51 @@ function readListGoalsToolInput(
     : {};
 }
 
+function readListGroupMessagesToolInput(
+  input: unknown,
+): AgentHubListGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const limit = record.limit;
+  const beforeMessageId = record.beforeMessageId;
+
+  return {
+    beforeMessageId:
+      typeof beforeMessageId === "string" && beforeMessageId.length > 0
+        ? beforeMessageId
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : undefined,
+  };
+}
+
+function readSearchGroupMessagesToolInput(
+  input: unknown,
+): AgentHubSearchGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const query = record.query;
+  const limit = record.limit;
+
+  return typeof query === "string" && query.trim().length > 0
+    ? {
+        query: query.trim(),
+        limit:
+          typeof limit === "number" && Number.isFinite(limit) && limit > 0
+            ? Math.min(Math.floor(limit), 50)
+            : undefined,
+      }
+    : null;
+}
+
 function readCreateGoalToolInput(
   input: unknown,
 ): AgentHubCreateGoalToolInput | null {
@@ -4596,6 +4643,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
   messages: ConversationMessage[];
   senderAgentName: string;
 }): string {
+  const recentMessages = input.messages.slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
     agentNamesById: input.agentNamesById,
     currentUserMessage: [
@@ -4605,7 +4653,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
       input.currentMessage,
       "</mentioned_message>",
     ].join("\n"),
-    messages: input.messages,
+    messages: recentMessages,
   });
 
   return [
@@ -4622,6 +4670,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
     "For ordinary replies, do not include @AgentName or @all. Only include @AgentName when you intentionally want AgentHub to start that agent's reply run, or @all when you intentionally want all other ready agents in the group to run.",
     "If you should not reply, do not call send_message.",
     "Never use normal assistant text as the visible group reply. Normal assistant text is ignored by AgentHub group chat.",
+    "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "</agenthub_group_chat_protocol>",
     "",
     input.agentGroupsPrompt,
@@ -5522,6 +5571,81 @@ async function getToolRunContext(
       };
 }
 
+async function listCurrentGroupMessagesForTool(
+  db: Db,
+  input: {
+    beforeMessageId?: string;
+    context: {
+      conversation: ConversationRow;
+      run: { ownerUserId: string };
+    };
+    limit?: number;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+  },
+): Promise<ConversationMessage[]> {
+  if (input.context.conversation.type !== "group") {
+    return [];
+  }
+
+  let before: Date | undefined;
+
+  if (input.beforeMessageId !== undefined) {
+    const [message] = await db
+      .select({ createdAt: conversationMessages.createdAt })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.id, input.beforeMessageId),
+          eq(conversationMessages.conversationId, input.context.conversation.id),
+        ),
+      )
+      .limit(1);
+    before = message?.createdAt;
+  }
+
+  return await listConversationMessagesForUser(db, {
+    before,
+    conversationId: input.context.conversation.id,
+    limit: input.limit ?? 30,
+    ownerUserId: input.context.run.ownerUserId,
+    publicApiBaseUrl: input.publicApiBaseUrl,
+    publicWebBaseUrl: input.publicWebBaseUrl,
+  }) ?? [];
+}
+
+async function searchCurrentGroupMessagesForTool(
+  db: Db,
+  input: {
+    context: {
+      conversation: ConversationRow;
+      run: { ownerUserId: string };
+    };
+    limit?: number;
+    publicApiBaseUrl?: string;
+    publicWebBaseUrl?: string;
+    query: string;
+  },
+): Promise<ConversationMessage[]> {
+  if (input.context.conversation.type !== "group") {
+    return [];
+  }
+
+  const messages = await listConversationMessagesForUser(db, {
+    conversationId: input.context.conversation.id,
+    limit: 500,
+    ownerUserId: input.context.run.ownerUserId,
+    publicApiBaseUrl: input.publicApiBaseUrl,
+    publicWebBaseUrl: input.publicWebBaseUrl,
+  }) ?? [];
+  const query = input.query.toLowerCase();
+  const matches = messages.filter((message) =>
+    message.content.toLowerCase().includes(query)
+  );
+
+  return matches.slice(-(input.limit ?? 20));
+}
+
 export async function appendRunEventToConversationMessage(
   db: Db,
   event: RunEvent,
@@ -5613,6 +5737,52 @@ export async function appendRunEventToConversationMessage(
   }
 
   if (event.type === "agenthub.tool.call") {
+    if (event.name === "list_group_messages") {
+      const context = await getToolRunContext(db, event.runId);
+
+      if (context === null) {
+        return result();
+      }
+
+      const input = readListGroupMessagesToolInput(event.input);
+      toolResult = {
+        accepted: true,
+        messages: input === null
+          ? []
+          : await listCurrentGroupMessagesForTool(db, {
+              beforeMessageId: input.beforeMessageId,
+              context,
+              limit: input.limit,
+              publicApiBaseUrl: options.publicApiBaseUrl,
+              publicWebBaseUrl: options.publicWebBaseUrl,
+            }),
+      };
+      return result();
+    }
+
+    if (event.name === "search_group_messages") {
+      const context = await getToolRunContext(db, event.runId);
+
+      if (context === null) {
+        return result();
+      }
+
+      const input = readSearchGroupMessagesToolInput(event.input);
+      toolResult = {
+        accepted: true,
+        messages: input === null
+          ? []
+          : await searchCurrentGroupMessagesForTool(db, {
+              context,
+              limit: input.limit,
+              publicApiBaseUrl: options.publicApiBaseUrl,
+              publicWebBaseUrl: options.publicWebBaseUrl,
+              query: input.query,
+            }),
+      };
+      return result();
+    }
+
     if (event.name === "list_goals") {
       const context = await getToolRunContext(db, event.runId);
 

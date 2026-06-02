@@ -5,12 +5,7 @@ import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { AgentRunInput } from "@agent-hub/core/runtime";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  CodexAdapter,
-  createAgentHubMcpServerCommand,
-  type AgentHubMcpRelayLike,
-  type SpawnCodexProcess,
-} from "../../src/runtime";
+import { CodexAdapter, type AgentHubMcpRelayLike, type SpawnCodexProcess } from "../../src/runtime";
 
 class MockCodexProcess extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -113,17 +108,7 @@ async function collectEvents(
 }
 
 describe("CodexAdapter", () => {
-  it("builds the development MCP server command with an absolute tsx loader path", () => {
-    const command = createAgentHubMcpServerCommand();
-
-    expect(command.command).toBe(process.execPath);
-    expect(command.args[0]).toBe("--import");
-    expect(command.args[1]).toContain("tsx");
-    expect(command.args[1]).not.toBe("tsx");
-    expect(command.args[2]).toMatch(/stdio-server\.ts$|stdio-server\.js$/);
-  });
-
-  it("spawns codex exec with json and ephemeral mode", async () => {
+  it("spawns codex exec with json and persistent session mode", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));

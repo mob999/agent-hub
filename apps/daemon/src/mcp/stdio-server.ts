@@ -107,7 +107,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: sendMessageToolName,
               description:
-                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. In group targets, content containing @AgentName forces that agent to run, and content containing @all forces all other ready agents in the target group to run. If this is an ordinary reply, progress update, or final summary, do not include @AgentName or @all.",
+                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. In group targets, content containing @AgentName forces that agent to run, and content containing @all forces all other ready agents in the target group to run. If this is an ordinary reply, progress update, or final summary, do not include @AgentName or @all. In Task mode, never use @AgentName or @all to assign work; create_task and approve_task already dispatch tasks automatically.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -336,7 +336,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately; dependent tasks wait for Orchestrator approval after dependencies succeed.",
+                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Dependent tasks wait for Orchestrator approval after dependencies succeed. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -378,7 +378,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: approveTaskToolName,
               description:
-                "Approve and dispatch a ready downstream task after reviewing a checkpoint.",
+                "Approve and dispatch a ready downstream task after reviewing a checkpoint. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,

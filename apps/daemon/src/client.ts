@@ -21,11 +21,7 @@ import WebSocket from "ws";
 
 import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
-import {
-  createAgentHubMcpServerCommand,
-  createRuntimeAdapters,
-  getRuntimeAdapter,
-} from "./runtime";
+import { CodexAdapter } from "./runtime/codex";
 import {
   assertPathInsideWorkspace,
   getAgentWorkspacePath,
@@ -118,15 +114,13 @@ export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
   const mcpRelay = new AgentHubMcpRelay();
   await mcpRelay.start();
-  const adapters = createRuntimeAdapters({
+  const adapter = new CodexAdapter({
     dailyMemoryRefreshIntervalMs:
       env.AGENTHUB_DAILY_MEMORY_REFRESH_INTERVAL_MINUTES * 60 * 1000,
     dailyMemoryRefreshTranscriptMaxBytes:
       env.AGENTHUB_DAILY_MEMORY_REFRESH_TRANSCRIPT_MAX_BYTES,
-    CODEX_EXECUTABLE_PATH: env.CODEX_EXECUTABLE_PATH,
-    CLAUDE_CODE_EXECUTABLE_PATH: env.CLAUDE_CODE_EXECUTABLE_PATH,
+    executablePath: env.CODEX_EXECUTABLE_PATH,
     mcpRelay,
-    mcpServerCommand: createAgentHubMcpServerCommand(),
   });
   const logger = createLogger({
     bindings: {
@@ -424,34 +418,6 @@ export async function startDaemon(): Promise<void> {
         resolveDone,
       };
       activeRuns.set(message.run.id, activeRun);
-
-      let adapter;
-
-      try {
-        adapter = getRuntimeAdapter({
-          adapters,
-          runtimeKind: message.runtime.runtimeKind,
-        });
-      } catch (error) {
-        send(ws, {
-          type: "run.rejected",
-          runId: message.run.id,
-          reason: error instanceof Error ? error.message : String(error),
-          sentAt: nowIsoDateTime(),
-        });
-        logger.warn(
-          {
-            err: error,
-            runId: message.run.id,
-            runtimeKind: message.runtime.runtimeKind,
-          },
-          "Rejected run because runtime adapter is unavailable",
-        );
-        activeRuns.delete(message.run.id);
-        activeRun.resolveDone();
-        return;
-      }
-
       send(ws, {
         type: "run.accepted",
         runId: message.run.id,
@@ -608,18 +574,18 @@ export async function startDaemon(): Promise<void> {
       reconnectDelayMs = initialReconnectDelayMs;
       let runtimes: DaemonRuntime[] = [];
 
-      for (const adapter of Object.values(adapters)) {
-        try {
-          runtimes.push({
+      try {
+        runtimes = [
+          {
             ...(await adapter.detect()),
             daemonDeviceId: env.AGENTHUB_DEVICE_ID,
-          });
-        } catch (error) {
-          logger.warn(
-            { err: error, runtimeKind: adapter.runtimeKind },
-            "Daemon runtime detection failed",
-          );
-        }
+          },
+        ];
+      } catch (error) {
+        logger.warn(
+          { err: error },
+          "Codex runtime detection failed",
+        );
       }
 
       send(ws, {

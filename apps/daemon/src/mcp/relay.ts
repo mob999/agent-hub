@@ -627,12 +627,42 @@ async function readArtifactUpload(input: {
       maxFiles: maxDirectoryFileCount,
       workspacePath: input.workspacePath,
     });
-    const zip = createStoredZip(files);
     const sourcePath = path
       .relative(input.workspacePath, resolvedPath)
       .split(path.sep)
       .join("/");
     const directoryName = path.basename(resolvedPath);
+
+    if (input.input.kind === "site") {
+      const entrypoint = normalizeRelativeFilePath(input.input.entrypoint ?? "index.html");
+      if (!files.some((file) => file.path === entrypoint)) {
+        throw new Error("upload_artifact site entrypoint was not found in the directory.");
+      }
+
+      const manifest = Buffer.from(JSON.stringify({
+        entrypoint,
+        files: files.map((file) => ({
+          path: file.path,
+          sizeBytes: file.content.byteLength,
+        })),
+      }));
+
+      return {
+        ...input.input,
+        entrypoint,
+        filename: input.input.filename ?? directoryName,
+        files: files.map((file) => ({
+          path: file.path,
+          sizeBytes: file.content.byteLength,
+          contentBase64: file.content.toString("base64"),
+        })),
+        sourcePath,
+        sizeBytes: files.reduce((sum, file) => sum + file.content.byteLength, 0),
+        contentBase64: manifest.toString("base64"),
+      };
+    }
+
+    const zip = createStoredZip(files);
     const filename = input.input.filename ?? `${directoryName}.zip`;
 
     if (zip.byteLength > maxDirectoryArtifactUploadBytes) {
@@ -977,6 +1007,8 @@ function readUploadArtifactInput(
   const title = record.title;
   const localPath = record.localPath;
   const filename = record.filename;
+  const kind = record.kind;
+  const entrypoint = record.entrypoint;
 
   if (
     typeof goalId !== "string" ||
@@ -999,6 +1031,11 @@ function readUploadArtifactInput(
     filename:
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
+        : undefined,
+    kind: kind === "site" ? "site" : kind === "file" ? "file" : undefined,
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
         : undefined,
   };
 }

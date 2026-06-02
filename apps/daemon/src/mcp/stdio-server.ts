@@ -415,7 +415,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: uploadArtifactToolName,
               description:
-                "Upload a report, result file, screenshot, zip, or source directory from the current run workspace to the current Goal and task. If localPath is a directory, AgentHub uploads it as a zip artifact for download.",
+                "Upload a report, result file, screenshot, zip, or source directory from the current run workspace to the current Goal and task. If localPath is a directory, AgentHub uploads it as a zip artifact unless kind is set to site. Use kind=site for editable static websites that the user should review, modify, and publish from the AgentHub Editor.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -430,6 +430,18 @@ export async function startAgentHubMcpStdioServer(
                       "Path to a file or directory inside the current run workspace.",
                   },
                   filename: { type: "string" },
+                  kind: {
+                    type: "string",
+                    enum: ["file", "site"],
+                    description:
+                      "Use site when uploading an editable static website directory. Omit or use file for ordinary files, screenshots, reports, zips, or source packages.",
+                  },
+                  entrypoint: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Entrypoint for kind=site directory uploads. Defaults to index.html.",
+                  },
                 },
                 required: ["goalId", "taskIndex", "title", "localPath"],
               },
@@ -943,6 +955,8 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
   const title = input.title;
   const localPath = input.localPath;
   const filename = input.filename;
+  const kind = input.kind;
+  const entrypoint = input.entrypoint;
 
   if (typeof goalId !== "string" || goalId.length === 0) {
     throw new Error("upload_artifact.goalId is required.");
@@ -968,6 +982,11 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
     filename:
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
+        : undefined,
+    kind: kind === "site" ? "site" : kind === "file" ? "file" : undefined,
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
         : undefined,
   };
 }

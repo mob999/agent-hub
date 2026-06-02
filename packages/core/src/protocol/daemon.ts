@@ -83,8 +83,15 @@ export type DaemonClientMessage =
       goalId?: ConversationGoalId;
       taskIndex?: number;
       messageTarget?: AgentHubSendMessageTarget;
+      kind?: "file" | "site";
       title: string;
       filename: string;
+      entrypoint?: string;
+      files?: Array<{
+        path: string;
+        sizeBytes: number;
+        contentBase64: string;
+      }>;
       sizeBytes: number;
       contentBase64: string;
       sourcePath?: string;

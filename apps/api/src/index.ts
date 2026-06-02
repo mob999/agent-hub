@@ -36,6 +36,7 @@ import {
   createRunRecord,
   buildConversationRunPrompt,
   createConversationArtifactAction,
+  createConversationArtifactFileRevision,
   createConversationArtifactRevision,
   createGroupConversation,
   createUserMessageAndRun,
@@ -54,11 +55,14 @@ import {
   getConversationArtifactForUser,
   getConversationArtifactContentForUser,
   getConversationArtifactDetailsForUser,
+  getConversationArtifactFileContentForUser,
   getConversationDeploymentFileForUser,
+  getSiteArtifactZipForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
   listConversationArtifactsForUser,
+  listConversationArtifactFilesForUser,
   listConversationDeploymentsForUser,
   listConversationGoalsForUser,
   listConversationsForUser,
@@ -73,6 +77,7 @@ import {
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
+  publishSiteArtifactForUser,
   readArtifactContent,
   conversationArtifactStorageKey,
   restoreAgentForUser,
@@ -3172,6 +3177,158 @@ app.get("/deployments/:deploymentId/*", async (c) => {
   });
 });
 
+app.get("/artifacts/:artifactId/files", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const files = await listConversationArtifactFilesForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+  });
+
+  if (files === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_NOT_FOUND",
+          message: "Site artifact was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ files });
+});
+
+app.get("/artifacts/:artifactId/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const filePath = c.req.query("path");
+  if (filePath === undefined || filePath.trim().length === 0) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ARTIFACT_FILE_REQUEST",
+          message: "path is required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await getConversationArtifactFileContentForUser(db, {
+    artifactId: c.req.param("artifactId"),
+    ownerUserId: user.id,
+    path: filePath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_FILE_NOT_FOUND",
+          message: "Artifact file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(result);
+});
+
+app.post("/artifacts/:artifactId/files/revisions", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    content?: unknown;
+    path?: unknown;
+    summary?: unknown;
+  };
+  const content = typeof body.content === "string" ? body.content : undefined;
+  const filePath = typeof body.path === "string" ? body.path : undefined;
+  const summary = typeof body.summary === "string" && body.summary.trim().length > 0
+    ? body.summary.trim()
+    : undefined;
+
+  if (
+    content === undefined ||
+    filePath === undefined ||
+    Buffer.byteLength(content, "utf8") > 1024 * 1024
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_ARTIFACT_FILE_REVISION",
+          message: "path and content are required; content must be 1MB or smaller.",
+        },
+      },
+      400,
+    );
+  }
+
+  const revision = await createConversationArtifactFileRevision(db, {
+    artifactId: c.req.param("artifactId"),
+    content,
+    editorUserId: user.id,
+    ownerUserId: user.id,
+    path: filePath,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    summary,
+  });
+
+  if (revision === null) {
+    return c.json(
+      {
+        error: {
+          code: "ARTIFACT_FILE_NOT_FOUND",
+          message: "Artifact file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ revision }, 201);
+});
+
 app.post("/artifacts/:artifactId/revisions", async (c) => {
   const user = c.get("user");
 
@@ -3251,6 +3408,64 @@ for (const actionType of ["apply", "preview", "publish"] as const) {
     const body = (await c.req.json().catch(() => ({}))) as {
       revisionId?: unknown;
     };
+    if (actionType === "publish") {
+      const artifactRecord = await getConversationArtifactForUser(db, {
+        artifactId: c.req.param("artifactId"),
+        ownerUserId: user.id,
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      });
+
+      if (artifactRecord?.artifact.kind === "site") {
+        const publishResult = await publishSiteArtifactForUser(db, {
+          artifactId: artifactRecord.artifact.id,
+          ownerUserId: user.id,
+          publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+          storageRoot: env.AGENTHUB_STORAGE_ROOT,
+          userId: user.id,
+        });
+
+        if (publishResult === null) {
+          return c.json(
+            {
+              error: {
+                code: "ARTIFACT_NOT_FOUND",
+                message: "Site artifact was not found.",
+              },
+            },
+            404,
+          );
+        }
+
+        await publishRealtimeEvents([
+          createRealtimeEvent({
+            action: publishResult.action,
+            artifactId: publishResult.action.artifactId,
+            conversationId: artifactRecord.artifact.conversationId,
+            ownerUserId: user.id,
+            type: "artifact.action.updated",
+          }),
+          ...(publishResult.deployment === undefined
+            ? []
+            : [
+                createRealtimeEvent({
+                  conversationId: publishResult.deployment.conversationId,
+                  ownerUserId: user.id,
+                  type: "conversation.updated" as const,
+                }),
+              ]),
+        ]);
+
+        return c.json(
+          {
+            action: publishResult.action,
+            deployment: publishResult.deployment,
+          },
+          202,
+        );
+      }
+    }
+
     const result = await createConversationArtifactAction(db, {
       artifactId: c.req.param("artifactId"),
       ownerUserId: user.id,
@@ -3324,6 +3539,33 @@ app.get("/artifacts/:artifactId/download", async (c) => {
       },
       404,
     );
+  }
+
+  if (record.artifact.kind === "site") {
+    const zip = await getSiteArtifactZipForUser(db, {
+      artifactId: record.artifact.id,
+      ownerUserId: user.id,
+      storageRoot: env.AGENTHUB_STORAGE_ROOT,
+    });
+
+    if (zip === null) {
+      return c.json(
+        {
+          error: {
+            code: "ARTIFACT_NOT_FOUND",
+            message: "Artifact was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    return new Response(new Uint8Array(zip.content), {
+      headers: {
+        "content-disposition": `attachment; filename="${zip.filename.replace(/"/g, "_")}"`,
+        "content-type": "application/zip",
+      },
+    });
   }
 
   const content = await readArtifactContent({

@@ -127,7 +127,10 @@ const gateway = new DaemonGateway({
   onArtifactUpload: async (message) => {
     const artifact = await persistConversationArtifactUpload(db, {
       contentBase64: message.contentBase64,
+      entrypoint: message.entrypoint,
       filename: message.filename,
+      files: message.files,
+      kind: message.kind,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
       runId: message.runId,

@@ -184,6 +184,7 @@ export const conversationArtifacts = pgTable(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 32 }).notNull().default("file"),
     goalId: uuid("goal_id").references(() => conversationGoals.id, {
       onDelete: "set null",
     }),
@@ -202,6 +203,8 @@ export const conversationArtifacts = pgTable(
     status: varchar("status", { length: 32 }).notNull().default("ready"),
     title: varchar("title", { length: 160 }).notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
+    entrypoint: text("entrypoint"),
+    fileCount: integer("file_count"),
     sourcePath: text("source_path"),
     sizeBytes: integer("size_bytes").notNull(),
     storageKey: text("storage_key").notNull(),
@@ -228,6 +231,37 @@ export const conversationArtifacts = pgTable(
     conversationArtifactsCreatorUserIdIdx: index(
       "conversation_artifacts_creator_user_id_idx",
     ).on(table.creatorUserId),
+  }),
+);
+
+export const conversationArtifactFiles = pgTable(
+  "conversation_artifact_files",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => conversationArtifacts.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    mimeType: varchar("mime_type", { length: 120 }).notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    storageKey: text("storage_key").notNull(),
+    latestRevisionId: uuid("latest_revision_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationArtifactFilesArtifactPathUniqueIdx: uniqueIndex(
+      "conversation_artifact_files_artifact_path_unique_idx",
+    ).on(table.artifactId, table.path),
+    conversationArtifactFilesConversationIdx: index(
+      "conversation_artifact_files_conversation_idx",
+    ).on(table.conversationId),
   }),
 );
 
@@ -287,6 +321,41 @@ export const conversationArtifactRevisions = pgTable(
   }),
 );
 
+export const conversationArtifactFileRevisions = pgTable(
+  "conversation_artifact_file_revisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    artifactFileId: uuid("artifact_file_id")
+      .notNull()
+      .references(() => conversationArtifactFiles.id, { onDelete: "cascade" }),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => conversationArtifacts.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    editorUserId: uuid("editor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    storageKey: text("storage_key").notNull(),
+    contentHash: varchar("content_hash", { length: 128 }).notNull(),
+    summary: text("summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationArtifactFileRevisionsFileCreatedAtIdx: index(
+      "conversation_artifact_file_revisions_file_created_at_idx",
+    ).on(table.artifactFileId, table.createdAt),
+    conversationArtifactFileRevisionsArtifactIdx: index(
+      "conversation_artifact_file_revisions_artifact_idx",
+    ).on(table.artifactId),
+  }),
+);
+
 export const conversationArtifactActions = pgTable(
   "conversation_artifact_actions",
   {
@@ -343,6 +412,15 @@ export const conversationDeployments = pgTable(
     creatorAgentId: uuid("creator_agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
+    sourceArtifactId: uuid("source_artifact_id").references(
+      () => conversationArtifacts.id,
+      { onDelete: "set null" },
+    ),
+    sourceRevisionId: uuid("source_revision_id"),
+    publishedByUserId: uuid("published_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedFrom: varchar("published_from", { length: 32 }).notNull().default("agent"),
     title: varchar("title", { length: 160 }).notNull(),
     entrypoint: text("entrypoint").notNull(),
     status: varchar("status", { length: 32 }).notNull().default("ready"),
@@ -363,5 +441,8 @@ export const conversationDeployments = pgTable(
     conversationDeploymentsCreatorAgentIdIdx: index(
       "conversation_deployments_creator_agent_id_idx",
     ).on(table.creatorAgentId),
+    conversationDeploymentsSourceArtifactIdIdx: index(
+      "conversation_deployments_source_artifact_id_idx",
+    ).on(table.sourceArtifactId),
   }),
 );

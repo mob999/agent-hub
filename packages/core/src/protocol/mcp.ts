@@ -229,6 +229,8 @@ export interface AgentHubUploadArtifactToolInput {
   title: string;
   localPath: string;
   filename?: string;
+  kind?: "file" | "site";
+  entrypoint?: string;
 }
 
 export interface AgentHubUploadArtifactToolResult {

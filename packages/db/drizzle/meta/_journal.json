@@ -113,6 +113,13 @@
       "when": 1780050000000,
       "tag": "0015_user_message_uploads",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780055000000,
+      "tag": "0016_site_artifacts",
+      "breakpoints": true
     }
   ]
 }

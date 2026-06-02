@@ -1001,6 +1001,9 @@ export function ChannelWorkspace({
                   <Tag size="sm" type={deployment.status === 'ready' ? 'green' : deployment.status === 'failed' ? 'red' : 'gray'}>
                     {deployment.status.toUpperCase()}
                   </Tag>
+                  <Tag size="sm" type={deployment.publishedFrom === 'user' ? 'blue' : 'gray'}>
+                    {deployment.publishedFrom.toUpperCase()}
+                  </Tag>
                   <h3 className="truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]">
                     {deployment.title}
                   </h3>
@@ -1242,6 +1245,7 @@ export function ChannelWorkspace({
               activeArtifactId={activeEditorArtifactId}
               onActiveArtifactChange={onActiveEditorArtifactChange}
               onRefreshArtifacts={refreshArtifacts}
+              onRefreshDeployments={refreshDeployments}
             />
           </div>
         ) : showWorkspacePage && showDeployments ? (

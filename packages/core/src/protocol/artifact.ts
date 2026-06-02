@@ -85,7 +85,7 @@ export function inferArtifactFileInfo(input: {
       language: "html",
       mimeType: "text/html; charset=utf-8",
       canApply: false,
-      canEdit: false,
+      canEdit: true,
       canPreview: true,
     };
   }

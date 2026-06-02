@@ -34,6 +34,7 @@ export type ConversationArtifactStatus =
   | "ready"
   | "failed"
   | "deleted";
+export type ConversationArtifactKind = "file" | "site";
 export type ConversationArtifactCreatorType = "agent" | "user";
 export type ConversationArtifactActionType = "apply" | "publish" | "preview";
 export type ConversationArtifactActionStatus =
@@ -77,6 +78,7 @@ export interface ConversationArtifact {
   id: ConversationArtifactId;
   ownerUserId: UserId;
   conversationId: ConversationId;
+  kind: ConversationArtifactKind;
   goalId?: ConversationGoalId;
   goalTaskId?: ConversationGoalTaskId;
   taskIndex?: number;
@@ -87,6 +89,8 @@ export interface ConversationArtifact {
   status: ConversationArtifactStatus;
   title: string;
   filename: string;
+  entrypoint?: string;
+  fileCount?: number;
   sizeBytes: number;
   latestRevisionId?: ConversationArtifactRevisionId;
   downloadUrl?: string;
@@ -105,6 +109,7 @@ export interface ConversationMessageAttachment {
 }
 
 export type ConversationArtifactRevisionId = string;
+export type ConversationArtifactFileId = string;
 export type ConversationArtifactActionId = string;
 export type ConversationDeploymentId = string;
 
@@ -114,6 +119,34 @@ export interface ConversationArtifactRevision {
   ownerUserId: UserId;
   conversationId: ConversationId;
   runId?: RunId;
+  editorUserId?: UserId;
+  contentHash: string;
+  summary?: string;
+  createdAt: IsoDateTime;
+}
+
+export interface ConversationArtifactFile {
+  id: ConversationArtifactFileId;
+  artifactId: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  latestRevisionId?: ConversationArtifactFileRevisionId;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export type ConversationArtifactFileRevisionId = string;
+
+export interface ConversationArtifactFileRevision {
+  id: ConversationArtifactFileRevisionId;
+  artifactFileId: ConversationArtifactFileId;
+  artifactId: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  path: string;
   editorUserId?: UserId;
   contentHash: string;
   summary?: string;
@@ -136,6 +169,7 @@ export interface ConversationArtifactAction {
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact;
   latestRevision?: ConversationArtifactRevision;
+  files?: ConversationArtifactFile[];
   actions: ConversationArtifactAction[];
   availableActions: ConversationArtifactActionType[];
 }
@@ -148,6 +182,10 @@ export interface ConversationDeployment {
   taskIndex?: number;
   runId: RunId;
   creatorAgentId: AgentId;
+  sourceArtifactId?: ConversationArtifactId;
+  sourceRevisionId?: ConversationArtifactRevisionId;
+  publishedByUserId?: UserId;
+  publishedFrom: "agent" | "user";
   title: string;
   entrypoint: string;
   status: "ready" | "failed" | "deleted";
@@ -261,6 +299,25 @@ export interface GetConversationArtifactContentResponse {
   revision?: ConversationArtifactRevision;
 }
 
+export interface ListConversationArtifactFilesResponse {
+  files: ConversationArtifactFile[];
+}
+
+export interface GetConversationArtifactFileContentResponse {
+  content: string;
+  file: ConversationArtifactFile;
+  revision?: ConversationArtifactFileRevision;
+}
+
+export interface CreateConversationArtifactFileRevisionRequest {
+  content: string;
+  summary?: string;
+}
+
+export interface CreateConversationArtifactFileRevisionResponse {
+  revision: ConversationArtifactFileRevision;
+}
+
 export interface CreateConversationArtifactRevisionRequest {
   content: string;
   summary?: string;
@@ -272,6 +329,7 @@ export interface CreateConversationArtifactRevisionResponse {
 
 export interface CreateConversationArtifactActionResponse {
   action: ConversationArtifactAction;
+  deployment?: ConversationDeployment;
 }
 
 export type SendConversationMessageMode = "chat" | "task";

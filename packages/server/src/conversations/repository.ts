@@ -24,6 +24,8 @@ import type {
   ConversationMessage,
   ConversationMessageAttachment,
   ConversationArtifactDetails,
+  ConversationArtifactFile,
+  ConversationArtifactFileRevision,
   ConversationArtifactRevision,
   ConversationDeployment,
   ConversationGoal,
@@ -40,6 +42,8 @@ import {
   agents,
   conversationAgentMembers,
   conversationArtifactActions,
+  conversationArtifactFiles,
+  conversationArtifactFileRevisions,
   conversationArtifacts,
   conversationArtifactRevisions,
   conversationDeployments,
@@ -58,7 +62,10 @@ import { getRunnableAgentForUser } from "../agents/repository.js";
 import {
   buildArtifactDownloadUrl,
   buildArtifactEditorUrl,
+  createStoredZip,
   buildDeploymentUrl,
+  conversationArtifactSiteFileRevisionStorageKey,
+  conversationArtifactSiteFileStorageKey,
   conversationDeploymentFileStorageKey,
   conversationDeploymentStoragePrefix,
   conversationArtifactRevisionStorageKey,
@@ -84,6 +91,9 @@ type ConversationMessageRow = typeof conversationMessages.$inferSelect;
 type ConversationGoalRow = typeof conversationGoals.$inferSelect;
 type ConversationGoalTaskRow = typeof conversationGoalTasks.$inferSelect;
 type ConversationArtifactRow = typeof conversationArtifacts.$inferSelect;
+type ConversationArtifactFileRow = typeof conversationArtifactFiles.$inferSelect;
+type ConversationArtifactFileRevisionRow =
+  typeof conversationArtifactFileRevisions.$inferSelect;
 type ConversationMessageArtifactRow =
   typeof conversationMessageArtifacts.$inferSelect;
 type ConversationArtifactRevisionRow =
@@ -167,6 +177,13 @@ export interface AppendRunEventOptions {
 export interface PersistConversationArtifactUploadInput {
   contentBase64: string;
   filename: string;
+  files?: Array<{
+    path: string;
+    contentBase64: string;
+    sizeBytes: number;
+  }>;
+  entrypoint?: string;
+  kind?: "file" | "site";
   publicApiBaseUrl?: string;
   publicWebBaseUrl?: string;
   runId: string;
@@ -199,6 +216,16 @@ export interface CreateConversationArtifactRevisionInput {
   content: string;
   editorUserId: string;
   ownerUserId: string;
+  storageRoot: string;
+  summary?: string;
+}
+
+export interface CreateConversationArtifactFileRevisionInput {
+  artifactId: string;
+  content: string;
+  editorUserId: string;
+  ownerUserId: string;
+  path: string;
   storageRoot: string;
   summary?: string;
 }
@@ -297,6 +324,7 @@ export function toConversationArtifact(
     id: row.id,
     ownerUserId: row.ownerUserId,
     conversationId: row.conversationId,
+    kind: row.kind as ConversationArtifact["kind"],
     goalId: optionalString(row.goalId),
     goalTaskId: optionalString(row.goalTaskId),
     taskIndex: row.taskIndex ?? undefined,
@@ -307,6 +335,8 @@ export function toConversationArtifact(
     status: row.status as ConversationArtifact["status"],
     title: row.title,
     filename: row.filename,
+    entrypoint: optionalString(row.entrypoint),
+    fileCount: row.fileCount ?? undefined,
     sizeBytes: row.sizeBytes,
     latestRevisionId: optionalString(row.latestRevisionId),
     downloadUrl:
@@ -366,6 +396,40 @@ function toConversationMessageAttachment(
   };
 }
 
+export function toConversationArtifactFile(
+  row: ConversationArtifactFileRow,
+): ConversationArtifactFile {
+  return {
+    id: row.id,
+    artifactId: row.artifactId,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    path: row.path,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    latestRevisionId: optionalString(row.latestRevisionId),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toConversationArtifactFileRevision(
+  row: ConversationArtifactFileRevisionRow,
+): ConversationArtifactFileRevision {
+  return {
+    id: row.id,
+    artifactFileId: row.artifactFileId,
+    artifactId: row.artifactId,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    path: row.path,
+    editorUserId: optionalString(row.editorUserId),
+    contentHash: row.contentHash,
+    summary: optionalString(row.summary),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 async function insertUserMessageAttachments(
   db: Db,
   input: {
@@ -391,6 +455,7 @@ async function insertUserMessageAttachments(
         id: attachment.artifactId,
         ownerUserId: input.ownerUserId,
         conversationId: input.conversationId,
+        kind: "file",
         creatorType: "user",
         creatorUserId: input.ownerUserId,
         status: "ready",
@@ -1849,6 +1914,10 @@ function availableArtifactActions(
     return [];
   }
 
+  if (artifact.kind === "site") {
+    return ["publish"];
+  }
+
   const fileInfo = inferArtifactFileInfo({ filename: artifact.filename });
   const actions: ConversationArtifactActionType[] = [];
 
@@ -1890,6 +1959,13 @@ export async function getConversationArtifactDetailsForUser(
     .from(conversationArtifactActions)
     .where(eq(conversationArtifactActions.artifactId, input.artifactId))
     .orderBy(desc(conversationArtifactActions.createdAt));
+  const fileRows = record.artifact.kind === "site"
+    ? await db
+        .select()
+        .from(conversationArtifactFiles)
+        .where(eq(conversationArtifactFiles.artifactId, input.artifactId))
+        .orderBy(asc(conversationArtifactFiles.path))
+    : [];
 
   return {
     artifact: record.artifact,
@@ -1897,9 +1973,41 @@ export async function getConversationArtifactDetailsForUser(
       latestRevision === undefined
         ? undefined
         : toConversationArtifactRevision(latestRevision),
+    files: fileRows.map(toConversationArtifactFile),
     actions: actionRows.map(toConversationArtifactAction),
     availableActions: availableArtifactActions(record.artifact),
   };
+}
+
+export async function listConversationArtifactFilesForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+  },
+): Promise<ConversationArtifactFile[] | null> {
+  const [artifact] = await db
+    .select({ id: conversationArtifacts.id, kind: conversationArtifacts.kind })
+    .from(conversationArtifacts)
+    .where(
+      and(
+        eq(conversationArtifacts.id, input.artifactId),
+        eq(conversationArtifacts.ownerUserId, input.ownerUserId),
+      ),
+    )
+    .limit(1);
+
+  if (artifact === undefined || artifact.kind !== "site") {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationArtifactFiles)
+    .where(eq(conversationArtifactFiles.artifactId, input.artifactId))
+    .orderBy(asc(conversationArtifactFiles.path));
+
+  return rows.map(toConversationArtifactFile);
 }
 
 export async function getConversationArtifactContentForUser(
@@ -1954,6 +2062,133 @@ export async function getConversationArtifactContentForUser(
   });
 
   return { content: content.toString("utf8") };
+}
+
+function normalizeSiteArtifactPath(filePath: string): string {
+  const normalized = filePath.split(/[\\/]+/).filter(Boolean).join("/");
+
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../")
+  ) {
+    throw new Error("Artifact file path is invalid.");
+  }
+
+  return normalized;
+}
+
+export async function getConversationArtifactFileContentForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    path: string;
+    storageRoot: string;
+  },
+): Promise<{
+  content: string;
+  file: ConversationArtifactFile;
+  revision?: ConversationArtifactFileRevision;
+} | null> {
+  const normalizedPath = normalizeSiteArtifactPath(input.path);
+  const [row] = await db
+    .select({
+      artifact: conversationArtifacts,
+      file: conversationArtifactFiles,
+      revision: conversationArtifactFileRevisions,
+    })
+    .from(conversationArtifactFiles)
+    .innerJoin(
+      conversationArtifacts,
+      eq(conversationArtifactFiles.artifactId, conversationArtifacts.id),
+    )
+    .leftJoin(
+      conversationArtifactFileRevisions,
+      eq(conversationArtifactFiles.latestRevisionId, conversationArtifactFileRevisions.id),
+    )
+    .where(
+      and(
+        eq(conversationArtifactFiles.artifactId, input.artifactId),
+        eq(conversationArtifactFiles.ownerUserId, input.ownerUserId),
+        eq(conversationArtifactFiles.path, normalizedPath),
+        eq(conversationArtifacts.kind, "site"),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) {
+    return null;
+  }
+
+  const content = await readArtifactContent({
+    storageKey: row.revision?.storageKey ?? row.file.storageKey,
+    storageRoot: input.storageRoot,
+  });
+
+  return {
+    content: content.toString("utf8"),
+    file: toConversationArtifactFile(row.file),
+    revision: row.revision === null
+      ? undefined
+      : toConversationArtifactFileRevision(row.revision),
+  };
+}
+
+export async function getSiteArtifactZipForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    storageRoot: string;
+  },
+): Promise<{ content: Buffer; filename: string } | null> {
+  const [artifact] = await db
+    .select()
+    .from(conversationArtifacts)
+    .where(
+      and(
+        eq(conversationArtifacts.id, input.artifactId),
+        eq(conversationArtifacts.ownerUserId, input.ownerUserId),
+        eq(conversationArtifacts.kind, "site"),
+      ),
+    )
+    .limit(1);
+
+  if (artifact === undefined) {
+    return null;
+  }
+
+  const fileRows = await db
+    .select({
+      file: conversationArtifactFiles,
+      revision: conversationArtifactFileRevisions,
+    })
+    .from(conversationArtifactFiles)
+    .leftJoin(
+      conversationArtifactFileRevisions,
+      eq(conversationArtifactFiles.latestRevisionId, conversationArtifactFileRevisions.id),
+    )
+    .where(eq(conversationArtifactFiles.artifactId, input.artifactId))
+    .orderBy(asc(conversationArtifactFiles.path));
+
+  const files = [];
+  for (const row of fileRows) {
+    files.push({
+      path: row.file.path,
+      content: await readArtifactContent({
+        storageKey: row.revision?.storageKey ?? row.file.storageKey,
+        storageRoot: input.storageRoot,
+      }),
+    });
+  }
+
+  return {
+    content: createStoredZip(files),
+    filename: `${sanitizeArtifactFilename(artifact.filename)}.zip`,
+  };
 }
 
 export async function createConversationArtifactRevision(
@@ -2013,6 +2248,94 @@ export async function createConversationArtifactRevision(
   });
 
   return revision === undefined ? null : toConversationArtifactRevision(revision);
+}
+
+export async function createConversationArtifactFileRevision(
+  db: Db,
+  input: CreateConversationArtifactFileRevisionInput,
+): Promise<ConversationArtifactFileRevision | null> {
+  const normalizedPath = normalizeSiteArtifactPath(input.path);
+  const [record] = await db
+    .select({
+      artifact: conversationArtifacts,
+      file: conversationArtifactFiles,
+    })
+    .from(conversationArtifactFiles)
+    .innerJoin(
+      conversationArtifacts,
+      eq(conversationArtifactFiles.artifactId, conversationArtifacts.id),
+    )
+    .where(
+      and(
+        eq(conversationArtifactFiles.artifactId, input.artifactId),
+        eq(conversationArtifactFiles.ownerUserId, input.ownerUserId),
+        eq(conversationArtifactFiles.path, normalizedPath),
+        eq(conversationArtifacts.kind, "site"),
+      ),
+    )
+    .limit(1);
+
+  if (record === undefined) {
+    return null;
+  }
+
+  const revisionId = randomUUID();
+  const storageKey = conversationArtifactSiteFileRevisionStorageKey({
+    artifactId: input.artifactId,
+    conversationId: record.file.conversationId,
+    filePath: normalizedPath,
+    revisionId,
+  });
+  const writtenBytes = await writeArtifactTextContent({
+    content: input.content,
+    storageKey,
+    storageRoot: input.storageRoot,
+  });
+  const now = new Date();
+  const contentHash = createHash("sha256").update(input.content).digest("hex");
+
+  const revision = await db.transaction(async (tx) => {
+    const [revisionRow] = await tx
+      .insert(conversationArtifactFileRevisions)
+      .values({
+        id: revisionId,
+        artifactFileId: record.file.id,
+        artifactId: input.artifactId,
+        ownerUserId: input.ownerUserId,
+        conversationId: record.file.conversationId,
+        path: normalizedPath,
+        editorUserId: input.editorUserId,
+        storageKey,
+        contentHash,
+        summary: input.summary,
+        createdAt: now,
+      })
+      .returning();
+
+    if (revisionRow === undefined) {
+      return undefined;
+    }
+
+    await tx
+      .update(conversationArtifactFiles)
+      .set({
+        latestRevisionId: revisionId,
+        sizeBytes: writtenBytes,
+        updatedAt: now,
+      })
+      .where(eq(conversationArtifactFiles.id, record.file.id));
+
+    await tx
+      .update(conversationArtifacts)
+      .set({ updatedAt: now })
+      .where(eq(conversationArtifacts.id, input.artifactId));
+
+    return revisionRow;
+  });
+
+  return revision === undefined
+    ? null
+    : toConversationArtifactFileRevision(revision);
 }
 
 export async function createConversationArtifactAction(
@@ -2100,6 +2423,164 @@ export async function createConversationArtifactAction(
       workspacePath: run.workspacePath,
     },
   };
+}
+
+export async function publishSiteArtifactForUser(
+  db: Db,
+  input: {
+    artifactId: string;
+    ownerUserId: string;
+    publicApiBaseUrl?: string;
+    storageRoot: string;
+    userId: string;
+  },
+): Promise<{
+  action: ConversationArtifactAction;
+  deployment?: ConversationDeployment;
+} | null> {
+  const [record] = await db
+    .select({
+      artifact: conversationArtifacts,
+      run: runs,
+    })
+    .from(conversationArtifacts)
+    .innerJoin(runs, eq(conversationArtifacts.runId, runs.id))
+    .where(
+      and(
+        eq(conversationArtifacts.id, input.artifactId),
+        eq(conversationArtifacts.ownerUserId, input.ownerUserId),
+        eq(conversationArtifacts.kind, "site"),
+      ),
+    )
+    .limit(1);
+
+  if (
+    record === undefined ||
+    record.artifact.entrypoint === null ||
+    record.artifact.runId === null ||
+    record.artifact.creatorAgentId === null
+  ) {
+    return null;
+  }
+
+  const now = new Date();
+  const [queuedAction] = await db
+    .insert(conversationArtifactActions)
+    .values({
+      artifactId: input.artifactId,
+      ownerUserId: input.ownerUserId,
+      conversationId: record.artifact.conversationId,
+      type: "publish",
+      status: "running",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (queuedAction === undefined) {
+    return null;
+  }
+
+  try {
+    const fileRows = await db
+      .select({
+        file: conversationArtifactFiles,
+        revision: conversationArtifactFileRevisions,
+      })
+      .from(conversationArtifactFiles)
+      .leftJoin(
+        conversationArtifactFileRevisions,
+        eq(conversationArtifactFiles.latestRevisionId, conversationArtifactFileRevisions.id),
+      )
+      .where(eq(conversationArtifactFiles.artifactId, input.artifactId))
+      .orderBy(asc(conversationArtifactFiles.path));
+
+    if (fileRows.length === 0) {
+      throw new Error("Site artifact has no files to publish.");
+    }
+
+    const deploymentId = randomUUID();
+    const storagePrefix = conversationDeploymentStoragePrefix({
+      conversationId: record.artifact.conversationId,
+      deploymentId,
+    });
+
+    for (const row of fileRows) {
+      const content = await readArtifactContent({
+        storageKey: row.revision?.storageKey ?? row.file.storageKey,
+        storageRoot: input.storageRoot,
+      });
+      await writeArtifactBuffer({
+        content,
+        storageKey: conversationDeploymentFileStorageKey({
+          storagePrefix,
+          filePath: row.file.path,
+        }),
+        storageRoot: input.storageRoot,
+      });
+    }
+
+    const [deploymentRow] = await db
+      .insert(conversationDeployments)
+      .values({
+        id: deploymentId,
+        ownerUserId: record.artifact.ownerUserId,
+        conversationId: record.artifact.conversationId,
+        goalId: record.artifact.goalId,
+        taskIndex: record.artifact.taskIndex,
+        runId: record.artifact.runId,
+        creatorAgentId: record.artifact.creatorAgentId,
+        sourceArtifactId: record.artifact.id,
+        publishedByUserId: input.userId,
+        publishedFrom: "user",
+        title: record.artifact.title,
+        entrypoint: record.artifact.entrypoint,
+        status: "ready",
+        storagePrefix,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    if (deploymentRow === undefined) {
+      throw new Error("Deployment could not be created.");
+    }
+
+    const deployment = toConversationDeployment(deploymentRow, {
+      publicApiBaseUrl: input.publicApiBaseUrl,
+    });
+    const [actionRow] = await db
+      .update(conversationArtifactActions)
+      .set({
+        status: "succeeded",
+        result: {
+          deploymentId: deployment.id,
+          url: deployment.url,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(conversationArtifactActions.id, queuedAction.id))
+      .returning();
+
+    return {
+      action: toConversationArtifactAction(actionRow ?? queuedAction),
+      deployment,
+    };
+  } catch (error) {
+    const [actionRow] = await db
+      .update(conversationArtifactActions)
+      .set({
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        updatedAt: new Date(),
+      })
+      .where(eq(conversationArtifactActions.id, queuedAction.id))
+      .returning();
+
+    return {
+      action: toConversationArtifactAction(actionRow ?? queuedAction),
+    };
+  }
 }
 
 export async function getArtifactActionAssignment(
@@ -2283,44 +2764,128 @@ export async function persistConversationArtifactUpload(
   }
 
   const artifactId = randomUUID();
+  const kind = input.kind ?? "file";
   const filename = sanitizeArtifactFilename(input.filename);
   const storageKey = conversationArtifactStorageKey({
     artifactId,
     conversationId: artifactConversationId,
     filename,
   });
-  const writtenBytes = await writeArtifactContent({
-    contentBase64: input.contentBase64,
-    storageKey,
-    storageRoot: input.storageRoot,
-  });
+  const siteFiles = kind === "site" ? input.files ?? [] : [];
+  const normalizedEntrypoint = kind === "site"
+    ? normalizeDeploymentFilePath(input.entrypoint ?? "index.html")
+    : undefined;
+  const normalizedSiteFiles = siteFiles.map((file) => ({
+    ...file,
+    path: normalizeDeploymentFilePath(file.path),
+  }));
 
-  if (writtenBytes !== input.sizeBytes) {
-    throw new Error("Artifact content size did not match upload size.");
+  if (kind === "site") {
+    if (normalizedSiteFiles.length === 0) {
+      throw new Error("Site artifact upload did not include files.");
+    }
+
+    if (
+      normalizedEntrypoint === undefined ||
+      !normalizedSiteFiles.some((file) => file.path === normalizedEntrypoint)
+    ) {
+      throw new Error("Site artifact entrypoint was not included.");
+    }
+  }
+
+  let writtenBytes = 0;
+  if (kind === "site") {
+    writtenBytes = normalizedSiteFiles.reduce((sum, file) => sum + file.sizeBytes, 0);
+    await writeArtifactTextContent({
+      content: JSON.stringify({
+        entrypoint: normalizedEntrypoint,
+        files: normalizedSiteFiles.map((file) => ({
+          path: file.path,
+          sizeBytes: file.sizeBytes,
+        })),
+      }, null, 2),
+      storageKey,
+      storageRoot: input.storageRoot,
+    });
+  } else {
+    writtenBytes = await writeArtifactContent({
+      contentBase64: input.contentBase64,
+      storageKey,
+      storageRoot: input.storageRoot,
+    });
+
+    if (writtenBytes !== input.sizeBytes) {
+      throw new Error("Artifact content size did not match upload size.");
+    }
   }
 
   const now = new Date();
-  const [artifact] = await db
-    .insert(conversationArtifacts)
-    .values({
-      id: artifactId,
-      ownerUserId: run.ownerUserId,
-      conversationId: artifactConversationId,
-      goalId: input.goalId,
-      goalTaskId,
-      taskIndex: input.taskIndex,
-      runId: input.runId,
-      creatorAgentId: run.agentId,
-      status: "ready",
-      title: input.title.trim(),
-      filename,
-      sourcePath: input.sourcePath,
-      sizeBytes: writtenBytes,
-      storageKey,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
+  const artifact = await db.transaction(async (tx) => {
+    const [artifactRow] = await tx
+      .insert(conversationArtifacts)
+      .values({
+        id: artifactId,
+        ownerUserId: run.ownerUserId,
+        conversationId: artifactConversationId,
+        kind,
+        goalId: input.goalId,
+        goalTaskId,
+        taskIndex: input.taskIndex,
+        runId: input.runId,
+        creatorAgentId: run.agentId,
+        status: "ready",
+        title: input.title.trim(),
+        filename,
+        entrypoint: normalizedEntrypoint,
+        fileCount: kind === "site" ? normalizedSiteFiles.length : undefined,
+        sourcePath: input.sourcePath,
+        sizeBytes: writtenBytes,
+        storageKey,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    if (artifactRow === undefined) {
+      return undefined;
+    }
+
+    if (kind === "site") {
+      const fileRows = [];
+      for (const file of normalizedSiteFiles) {
+        const fileStorageKey = conversationArtifactSiteFileStorageKey({
+          artifactId,
+          conversationId: artifactConversationId,
+          filePath: file.path,
+        });
+        const fileBytes = await writeArtifactContent({
+          contentBase64: file.contentBase64,
+          storageKey: fileStorageKey,
+          storageRoot: input.storageRoot,
+        });
+
+        if (fileBytes !== file.sizeBytes) {
+          throw new Error(`Site artifact file size did not match: ${file.path}`);
+        }
+
+        fileRows.push({
+          artifactId,
+          ownerUserId: run.ownerUserId,
+          conversationId: artifactConversationId,
+          path: file.path,
+          mimeType: inferArtifactFileInfo({ filename: file.path }).mimeType,
+          sizeBytes: fileBytes,
+          storageKey: fileStorageKey,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      await tx.insert(conversationArtifactFiles).values(fileRows);
+    }
+
+    return artifactRow;
+  });
 
   if (artifact === undefined) {
     throw new Error("Artifact upload could not be persisted.");
@@ -3747,7 +4312,7 @@ export function buildAssignedTaskPrompt(input: {
     "Create the requested report or result file in your current workspace.",
     "You can inspect prior group workspace artifacts with list_artifacts and read_artifact before producing your result.",
     "Use the exact Goal ID and Task Index above when calling AgentHub MCP upload_artifact and complete_task.",
-    "If the result is a report, screenshot, zip, or source package, upload it with upload_artifact. If the result is a runnable static HTML/CSS/JavaScript website, deploy it with deploy_static_site using the exact Goal ID and Task Index above, then include the returned deployment URL in your summary or visible message.",
+    "If the result is a report, screenshot, zip, or source package, upload it with upload_artifact. If the result is a runnable static HTML/CSS/JavaScript website that the user should review, edit, and publish, upload the site directory with upload_artifact using kind=site and entrypoint=index.html. Use deploy_static_site only for quick temporary deployment previews, not as the primary editable deliverable.",
     "After uploading/deploying, call complete_task with a concise summary and any uploaded artifact ids.",
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
@@ -3775,7 +4340,7 @@ function buildAssignedTaskInstructions(input: {
       scenario: "assigned task",
     }),
     `You are working inside AgentHub group #${input.conversationTitle}.`,
-    "Visible task updates must be sent with send_message. Completed files must be reported with upload_artifact; runnable static websites should be deployed with deploy_static_site. Always finish assigned work with complete_task.",
+    "Visible task updates must be sent with send_message. Completed files must be reported with upload_artifact. Editable static websites should be uploaded with upload_artifact kind=site so the user can edit and publish them in AgentHub. Use deploy_static_site only for quick temporary deployment previews. Always finish assigned work with complete_task.",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
@@ -4188,6 +4753,10 @@ export function toConversationDeployment(
     taskIndex: row.taskIndex ?? undefined,
     runId: row.runId,
     creatorAgentId: row.creatorAgentId,
+    sourceArtifactId: optionalString(row.sourceArtifactId),
+    sourceRevisionId: optionalString(row.sourceRevisionId),
+    publishedByUserId: optionalString(row.publishedByUserId),
+    publishedFrom: row.publishedFrom as ConversationDeployment["publishedFrom"],
     title: row.title,
     entrypoint: row.entrypoint,
     status: row.status as ConversationDeployment["status"],

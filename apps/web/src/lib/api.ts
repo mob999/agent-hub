@@ -159,6 +159,7 @@ export type ConversationGoalTaskStatus =
   | 'cancelled'
   | 'blocked'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
+export type ConversationArtifactKind = 'file' | 'site'
 export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
 export type ConversationArtifactActionStatus =
   | 'queued'
@@ -229,6 +230,7 @@ export interface ConversationArtifact {
   id: string
   ownerUserId: string
   conversationId: string
+  kind: ConversationArtifactKind
   goalId?: string
   goalTaskId?: string
   taskIndex?: number
@@ -239,6 +241,8 @@ export interface ConversationArtifact {
   status: ConversationArtifactStatus
   title: string
   filename: string
+  entrypoint?: string
+  fileCount?: number
   sizeBytes: number
   downloadUrl?: string
   editorUrl?: string
@@ -253,6 +257,32 @@ export interface ConversationArtifactRevision {
   ownerUserId: string
   conversationId: string
   runId?: string
+  editorUserId?: string
+  contentHash: string
+  summary?: string
+  createdAt: string
+}
+
+export interface ConversationArtifactFile {
+  id: string
+  artifactId: string
+  ownerUserId: string
+  conversationId: string
+  path: string
+  mimeType: string
+  sizeBytes: number
+  latestRevisionId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationArtifactFileRevision {
+  id: string
+  artifactFileId: string
+  artifactId: string
+  ownerUserId: string
+  conversationId: string
+  path: string
   editorUserId?: string
   contentHash: string
   summary?: string
@@ -280,6 +310,10 @@ export interface ConversationDeployment {
   taskIndex?: number
   runId: string
   creatorAgentId: string
+  sourceArtifactId?: string
+  sourceRevisionId?: string
+  publishedByUserId?: string
+  publishedFrom: 'agent' | 'user'
   title: string
   entrypoint: string
   status: 'ready' | 'failed' | 'deleted'
@@ -291,6 +325,7 @@ export interface ConversationDeployment {
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact
   latestRevision?: ConversationArtifactRevision
+  files?: ConversationArtifactFile[]
   actions: ConversationArtifactAction[]
   availableActions: ConversationArtifactActionType[]
 }
@@ -300,12 +335,23 @@ export interface GetConversationArtifactContentResponse {
   revision?: ConversationArtifactRevision
 }
 
+export interface GetConversationArtifactFileContentResponse {
+  content: string
+  file: ConversationArtifactFile
+  revision?: ConversationArtifactFileRevision
+}
+
+export interface CreateConversationArtifactFileRevisionResponse {
+  revision: ConversationArtifactFileRevision
+}
+
 export interface CreateConversationArtifactRevisionResponse {
   revision: ConversationArtifactRevision
 }
 
 export interface CreateConversationArtifactActionResponse {
   action: ConversationArtifactAction
+  deployment?: ConversationDeployment
 }
 
 export interface ConversationMessage {

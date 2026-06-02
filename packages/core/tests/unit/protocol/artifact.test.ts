@@ -4,7 +4,7 @@ import { inferArtifactFileInfo } from "../../../src/protocol";
 
 describe("artifact file inference", () => {
   it.each([
-    ["index.html", "html", "HTML", "text/html; charset=utf-8", true, false],
+    ["index.html", "html", "HTML", "text/html; charset=utf-8", true, true],
     ["report.md", "markdown", "Markdown", "text/markdown; charset=utf-8", true, true],
     ["changes.patch", "diff", "Diff", "text/x-diff; charset=utf-8", true, false],
     ["screen.png", "image", "Image", "image/png", true, false],

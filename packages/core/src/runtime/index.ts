@@ -20,6 +20,11 @@ export interface AgentRunArtifactUpload
   goalId?: AgentHubUploadArtifactToolInput["goalId"];
   taskIndex?: AgentHubUploadArtifactToolInput["taskIndex"];
   filename: string;
+  files?: Array<{
+    path: string;
+    sizeBytes: number;
+    contentBase64: string;
+  }>;
   sourcePath?: string;
   sizeBytes: number;
   contentBase64: string;

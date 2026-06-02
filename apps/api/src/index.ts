@@ -41,6 +41,8 @@ import {
   createUserMessageAndRun,
   createUserMessageAndRuns,
   createRealtimeEvent,
+  deleteArchivedAgentForUser,
+  deleteArchivedGroupConversationForUser,
   enqueueAgentProvisioningJob,
   enqueueArtifactActionJob,
   enqueueRunJob,
@@ -1413,6 +1415,53 @@ app.patch("/agents/:agentId/restore", async (c) => {
   return c.json({ agent: result.agent });
 });
 
+app.delete("/agents/:agentId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await deleteArchivedAgentForUser(db, {
+    agentId: c.req.param("agentId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_FOUND",
+          message: "Agent was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "not-archived") {
+    return c.json(
+      {
+        error: {
+          code: "AGENT_NOT_ARCHIVED",
+          message: "Only archived agents can be permanently deleted.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json({ ok: true });
+});
+
 app.use("/search", requireAuth);
 app.get("/search", async (c) => {
   const user = c.get("user");
@@ -1856,6 +1905,65 @@ app.patch("/conversations/groups/:conversationId/restore", async (c) => {
   }
 
   return c.json({ conversation: result.conversation });
+});
+
+app.delete("/conversations/groups/:conversationId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await deleteArchivedGroupConversationForUser(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "reserved-key") {
+    return c.json(
+      {
+        error: {
+          code: "RESERVED_GROUP_KEY",
+          message: "The all group cannot be permanently deleted.",
+        },
+      },
+      409,
+    );
+  }
+
+  if (result.status === "not-archived") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_ARCHIVED",
+          message: "Only archived groups can be permanently deleted.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json({ ok: true });
 });
 
 app.patch("/conversations/:conversationId/orchestrator", async (c) => {

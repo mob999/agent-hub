@@ -1552,6 +1552,27 @@ export function WorkspacePage({
       }
     }
   }
+  const deleteArchivedGroup = async (conversationId: string) => {
+    setRunError(null)
+
+    try {
+      await apiRequest<{ ok: boolean }>(
+        `/conversations/groups/${conversationId}`,
+        { method: 'DELETE' },
+      )
+
+      setArchivedConversations((current) =>
+        current.filter((item) => item.id !== conversationId),
+      )
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to permanently delete the group. Try again in a moment.')
+      }
+    }
+  }
   const createAgent = async (input: {
     name: string
     description?: string
@@ -1708,6 +1729,29 @@ export function WorkspacePage({
       }
     }
   }
+  const deleteArchivedAgent = async (agentId: string) => {
+    setRunError(null)
+
+    try {
+      await apiRequest<{ ok: boolean }>(
+        `/agents/${agentId}`,
+        { method: 'DELETE' },
+      )
+
+      setArchivedAgents((current) => current.filter((item) => item.agent.id !== agentId))
+      setArchivedConversations((current) =>
+        current.filter((conversation) => conversation.directAgentId !== agentId),
+      )
+      void loadArchivedAgents()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to permanently delete the agent. Try again in a moment.')
+      }
+    }
+  }
 
   const updateSearchFilters = (input: {
     channelId?: string
@@ -1801,6 +1845,12 @@ export function WorkspacePage({
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
             onOpenActivity={() => navigateToView('runs')}
+            onDeleteAgent={(agentId) => {
+              void deleteArchivedAgent(agentId)
+            }}
+            onDeleteGroup={(conversationId) => {
+              void deleteArchivedGroup(conversationId)
+            }}
             onRestoreAgent={(agentId) => {
               void restoreAgent(agentId)
             }}

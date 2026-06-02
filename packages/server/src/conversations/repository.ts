@@ -145,6 +145,12 @@ export type RestoreGroupConversationResult =
   | { status: "not-found" }
   | { status: "reserved-key" };
 
+export type DeleteArchivedGroupConversationResult =
+  | { status: "deleted" }
+  | { status: "not-found" }
+  | { status: "reserved-key" }
+  | { status: "not-archived" };
+
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
   memoryAppendJobs: MemoryAppendQueueJob[];
@@ -1461,6 +1467,47 @@ export async function restoreGroupConversationForUser(
       status: "restored" as const,
       conversation: toConversation(updated, agentIds),
     };
+  });
+
+  return result;
+}
+
+export async function deleteArchivedGroupConversationForUser(
+  db: Db,
+  input: { conversationId: ConversationId; ownerUserId: string },
+): Promise<DeleteArchivedGroupConversationResult> {
+  const result = await db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select({
+        id: conversations.id,
+        key: conversations.key,
+        status: conversations.status,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "group"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    if (conversation.key === defaultGroupConversationKey) {
+      return { status: "reserved-key" as const };
+    }
+
+    if (conversation.status !== "archived") {
+      return { status: "not-archived" as const };
+    }
+
+    await tx.delete(conversations).where(eq(conversations.id, input.conversationId));
+
+    return { status: "deleted" as const };
   });
 
   return result;

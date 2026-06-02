@@ -1,5 +1,6 @@
-import { Activity, Add, Bookmark, ChatBot, Search } from '@carbon/react/icons'
+import { Activity, Add, Bookmark, ChatBot, Checkmark, Search, TrashCan, Undo } from '@carbon/react/icons'
 import { Tag } from '@carbon/react'
+import { useState } from 'react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
 
@@ -16,6 +17,8 @@ interface ChatSidebarProps {
   onCreateGroup: () => void
   onOpenSearch: () => void
   onOpenActivity: () => void
+  onDeleteAgent: (agentId: string) => void
+  onDeleteGroup: (conversationId: string) => void
   onRestoreAgent: (agentId: string) => void
   onRestoreGroup: (conversationId: string) => void
   onToggleSaved: () => void
@@ -35,6 +38,14 @@ const agentAvatarFrame =
   'grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]'
 const unreadBadge =
   'inline-grid min-w-5 place-items-center rounded-full bg-[var(--cds-support-error)] px-1.5 text-xs font-semibold leading-5 text-[var(--cds-text-on-color)]'
+const archivedActionButton =
+  'grid h-7 w-7 place-items-center border-0 bg-transparent p-0 hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const archivedRestoreButton =
+  `${archivedActionButton} text-[var(--cds-support-success)] hover:text-[var(--cds-support-success)]`
+const archivedDeleteButton =
+  `${archivedActionButton} text-[var(--cds-support-error)] hover:text-[var(--cds-support-error)]`
+const archivedConfirmDeleteButton =
+  'grid h-7 w-7 place-items-center border border-[var(--cds-support-error)] bg-[var(--cds-support-error)] p-0 text-[var(--cds-text-on-color)] hover:bg-[var(--cds-support-error)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) {
@@ -61,12 +72,15 @@ export function ChatSidebar({
   onCreateGroup,
   onOpenSearch,
   onOpenActivity,
+  onDeleteAgent,
+  onDeleteGroup,
   onRestoreAgent,
   onRestoreGroup,
   onToggleSaved,
   selectGroup,
   selectAgent,
 }: ChatSidebarProps) {
+  const [confirmingDeleteKey, setConfirmingDeleteKey] = useState<string | null>(null)
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null
   const defaultGroupConversation = conversations.find(
     (conversation) => conversation.type === 'group' && conversation.key === 'all',
@@ -141,48 +155,122 @@ export function ChatSidebar({
               <p className="px-1 py-2 text-sm text-[var(--cds-text-secondary)]">No archived items.</p>
             ) : (
               <>
-                {archivedGroupConversations.map((conversation) => (
-                  <div
-                    className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
-                    key={conversation.id}
-                  >
-                    <span aria-hidden="true">#</span>
-                    <span className="min-w-0 truncate">{conversation.title}</span>
-                    <button
-                      className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                      type="button"
-                      onClick={() => onRestoreGroup(conversation.id)}
+                {archivedGroupConversations.map((conversation) => {
+                  const deleteKey = `group:${conversation.id}`
+                  const confirmingDelete = confirmingDeleteKey === deleteKey
+
+                  return (
+                    <div
+                      className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                      key={conversation.id}
                     >
-                      Restore
-                    </button>
-                  </div>
-                ))}
-                {archivedAgents.map((agent) => (
-                  <div
-                    className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
-                    key={agent.agent.id}
-                  >
-                    <span className={agentAvatarFrame} aria-hidden="true">
-                      {agent.agent.avatar ? (
-                        <img
-                          src={agent.agent.avatar}
-                          alt=""
-                          className="h-7 w-7 object-cover"
-                        />
-                      ) : (
-                        <ChatBot size={16} />
-                      )}
-                    </span>
-                    <span className="min-w-0 truncate">{agent.agent.name}</span>
-                    <button
-                      className="border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--cds-link-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                      type="button"
-                      onClick={() => onRestoreAgent(agent.agent.id)}
+                      <span aria-hidden="true">#</span>
+                      <span className="min-w-0 truncate">{conversation.title}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <button
+                          className={archivedRestoreButton}
+                          type="button"
+                          title={`Restore ${conversation.title}`}
+                          aria-label={`Restore ${conversation.title}`}
+                          onClick={() => {
+                            setConfirmingDeleteKey(null)
+                            onRestoreGroup(conversation.id)
+                          }}
+                        >
+                          <Undo size={16} />
+                        </button>
+                        <button
+                          className={confirmingDelete ? archivedConfirmDeleteButton : archivedDeleteButton}
+                          type="button"
+                          title={
+                            confirmingDelete
+                              ? `Confirm permanent delete ${conversation.title}`
+                              : `Permanently delete ${conversation.title}`
+                          }
+                          aria-label={
+                            confirmingDelete
+                              ? `Confirm permanent delete ${conversation.title}`
+                              : `Permanently delete ${conversation.title}`
+                          }
+                          onClick={() => {
+                            if (!confirmingDelete) {
+                              setConfirmingDeleteKey(deleteKey)
+                              return
+                            }
+
+                            setConfirmingDeleteKey(null)
+                            onDeleteGroup(conversation.id)
+                          }}
+                        >
+                          {confirmingDelete ? <Checkmark size={16} /> : <TrashCan size={16} />}
+                        </button>
+                      </span>
+                    </div>
+                  )
+                })}
+                {archivedAgents.map((agent) => {
+                  const deleteKey = `agent:${agent.agent.id}`
+                  const confirmingDelete = confirmingDeleteKey === deleteKey
+
+                  return (
+                    <div
+                      className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                      key={agent.agent.id}
                     >
-                      Restore
-                    </button>
-                  </div>
-                ))}
+                      <span className={agentAvatarFrame} aria-hidden="true">
+                        {agent.agent.avatar ? (
+                          <img
+                            src={agent.agent.avatar}
+                            alt=""
+                            className="h-7 w-7 object-cover"
+                          />
+                        ) : (
+                          <ChatBot size={16} />
+                        )}
+                      </span>
+                      <span className="min-w-0 truncate">{agent.agent.name}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <button
+                          className={archivedRestoreButton}
+                          type="button"
+                          title={`Restore ${agent.agent.name}`}
+                          aria-label={`Restore ${agent.agent.name}`}
+                          onClick={() => {
+                            setConfirmingDeleteKey(null)
+                            onRestoreAgent(agent.agent.id)
+                          }}
+                        >
+                          <Undo size={16} />
+                        </button>
+                        <button
+                          className={confirmingDelete ? archivedConfirmDeleteButton : archivedDeleteButton}
+                          type="button"
+                          title={
+                            confirmingDelete
+                              ? `Confirm permanent delete ${agent.agent.name}`
+                              : `Permanently delete ${agent.agent.name}`
+                          }
+                          aria-label={
+                            confirmingDelete
+                              ? `Confirm permanent delete ${agent.agent.name}`
+                              : `Permanently delete ${agent.agent.name}`
+                          }
+                          onClick={() => {
+                            if (!confirmingDelete) {
+                              setConfirmingDeleteKey(deleteKey)
+                              return
+                            }
+
+                            setConfirmingDeleteKey(null)
+                            onDeleteAgent(agent.agent.id)
+                          }}
+                        >
+                          {confirmingDelete ? <Checkmark size={16} /> : <TrashCan size={16} />}
+                        </button>
+                      </span>
+                    </div>
+                  )
+                })}
               </>
             )}
           </div>

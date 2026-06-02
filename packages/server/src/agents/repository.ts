@@ -51,6 +51,11 @@ export type RestoreAgentResult =
   | { status: "restored"; agent: AgentDetails }
   | { status: "not-found" };
 
+export type DeleteArchivedAgentResult =
+  | { status: "deleted" }
+  | { status: "not-found" }
+  | { status: "not-archived" };
+
 type AgentRow = typeof agents.$inferSelect;
 type BindingRow = typeof agentRuntimeBindings.$inferSelect;
 type WorkspaceRow = typeof agentWorkspaces.$inferSelect;
@@ -407,6 +412,45 @@ export async function restoreAgentForUser(
   }
 
   return { status: "restored", agent };
+}
+
+export async function deleteArchivedAgentForUser(
+  db: Db,
+  input: { agentId: string; ownerUserId: string },
+): Promise<DeleteArchivedAgentResult> {
+  return db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select({ status: agents.status })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (agent === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    if (agent.status !== "archived") {
+      return { status: "not-archived" as const };
+    }
+
+    await tx
+      .delete(conversations)
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.directAgentId, input.agentId),
+        ),
+      );
+
+    await tx.delete(agents).where(eq(agents.id, input.agentId));
+
+    return { status: "deleted" as const };
+  });
 }
 
 export async function getAgentForUser(

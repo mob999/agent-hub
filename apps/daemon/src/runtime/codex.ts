@@ -1,5 +1,6 @@
 import { spawn as spawnChildProcess } from "node:child_process";
 import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -78,6 +79,19 @@ export interface AgentHubMcpRelayLike {
     runId: RunId;
     workspacePath: string;
   }): AgentHubMcpSessionHandle;
+}
+
+function resolveTsxLoaderSpecifier(): string {
+  const currentFile = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFile);
+  const repoRoot = path.resolve(currentDir, "../../../..");
+  const workspaceLoaderPath = path.resolve(repoRoot, "node_modules/tsx/dist/loader.mjs");
+
+  if (existsSync(workspaceLoaderPath)) {
+    return workspaceLoaderPath;
+  }
+
+  return "tsx";
 }
 
 interface AsyncQueueItem<T> {
@@ -357,7 +371,7 @@ function createCodexDeveloperInstructionsConfig(
   return `developer_instructions=${JSON.stringify(trimmedInstructions)}`;
 }
 
-function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
+export function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
   const currentFile = fileURLToPath(import.meta.url);
   const currentDir = path.dirname(currentFile);
   const isTypeScriptSource = currentFile.endsWith(".ts");
@@ -367,7 +381,7 @@ function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
       command: process.execPath,
       args: [
         "--import",
-        "tsx",
+        resolveTsxLoaderSpecifier(),
         path.resolve(currentDir, "../mcp/stdio-server.ts"),
       ],
       cwd: path.resolve(currentDir, "../../../.."),

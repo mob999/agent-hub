@@ -155,6 +155,40 @@ describe("ClaudeCodeAdapter", () => {
     await eventsPromise;
   });
 
+  it("resumes an existing Claude session when the run dispatch mode is resume", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new ClaudeCodeAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({
+        run: {
+          id: "run_2",
+          agentId: "agent_1",
+          daemonDeviceId: "device_1",
+          status: "running",
+          runtimeSessionId: "claude-session-1",
+          dispatchMode: "resume",
+          createdAt: "2026-05-21T00:00:00.000Z",
+          updatedAt: "2026-05-21T00:00:00.000Z",
+        },
+      })),
+    );
+
+    expect(calls[0].args).toEqual([
+      "-p",
+      "--resume",
+      "claude-session-1",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--permission-mode",
+      "bypassPermissions",
+    ]);
+    expect(calls[0].process.stdinText).toBe("hello claude");
+
+    calls[0].process.close(0);
+    await eventsPromise;
+  });
+
   it("injects AgentHub MCP config through Claude mcp-config", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const { handles, relay } = createMcpRelayMock();
@@ -275,6 +309,11 @@ describe("ClaudeCodeAdapter", () => {
           }),
         }),
         expect.objectContaining({
+          type: "runtime.session.started",
+          runtimeKind: "claude-code",
+          sessionId: "session_1",
+        }),
+        expect.objectContaining({
           type: "message.delta",
           content: "hello-agenthub",
           raw: expect.objectContaining({
@@ -302,6 +341,89 @@ describe("ClaudeCodeAdapter", () => {
     );
   });
 
+  it("emits a single runtime session event from the first Claude session id", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new ClaudeCodeAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(adapter.run(createRunInput()));
+
+    calls[0].process.stdout.write(
+      `${JSON.stringify({
+        type: "assistant",
+        session_id: "session_from_assistant",
+        message: {
+          id: "message_1",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "hello" }],
+        },
+      })}\n`,
+    );
+    calls[0].process.stdout.write(
+      `${JSON.stringify({
+        type: "result",
+        session_id: "session_from_result",
+        result: "hello",
+      })}\n`,
+    );
+    calls[0].process.close(0);
+
+    const events = await eventsPromise;
+    const sessionEvents = events.filter((event) =>
+      typeof event === "object" &&
+      event !== null &&
+      "type" in event &&
+      event.type === "runtime.session.started"
+    );
+
+    expect(sessionEvents).toEqual([
+      expect.objectContaining({
+        sessionId: "session_from_assistant",
+      }),
+    ]);
+  });
+
+  it("completes as interrupted when Claude is aborted by run preemption", async () => {
+    const abortController = new AbortController();
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new ClaudeCodeAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ abortSignal: abortController.signal })),
+    );
+
+    abortController.abort("interrupted");
+
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.completed",
+          status: "interrupted",
+        }),
+      ]),
+    );
+    expect(calls[0].process.killedWith).toBe("SIGTERM");
+  });
+
+  it("completes as cancelled when Claude is aborted without preemption", async () => {
+    const abortController = new AbortController();
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new ClaudeCodeAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ abortSignal: abortController.signal })),
+    );
+
+    abortController.abort("cancelled");
+
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.completed",
+          status: "cancelled",
+        }),
+      ]),
+    );
+    expect(calls[0].process.killedWith).toBe("SIGTERM");
+  });
+
   it("detects Claude through --version", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({
@@ -317,6 +439,9 @@ describe("ClaudeCodeAdapter", () => {
       runtimeKind: "claude-code",
       executablePath: "claude-cc-deepseek",
       runtimeVersion: "2.1.132 (Claude Code)",
+      capabilities: expect.arrayContaining([
+        { name: "resume-session", enabled: true },
+      ]),
       status: "ready",
     });
     expect(calls[0].process.stdin.writableEnded).toBe(true);

@@ -83,7 +83,23 @@ function readString(value: Record<string, unknown>, key: string): string | undef
   return typeof value[key] === "string" ? (value[key] as string) : undefined;
 }
 
-function mapClaudeJsonEvents(value: unknown, runId: RunId): RunEvent[] {
+function readClaudeSessionId(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const sessionId = readString(value, "session_id");
+
+  return sessionId === undefined || sessionId.length === 0
+    ? undefined
+    : sessionId;
+}
+
+function mapClaudeJsonEvents(
+  value: unknown,
+  runId: RunId,
+  options: { emitRuntimeSessionStarted?: boolean } = {},
+): RunEvent[] {
   const createdAt = nowIsoDateTime();
 
   if (!isRecord(value)) {
@@ -93,6 +109,17 @@ function mapClaudeJsonEvents(value: unknown, runId: RunId): RunEvent[] {
   const nativeType = readString(value, "type");
   const raw = createClaudeRawEvent(value, nativeType);
   const events: RunEvent[] = [createRuntimeEvent(runId, raw, createdAt)];
+  const sessionId = readClaudeSessionId(value);
+
+  if (options.emitRuntimeSessionStarted === true && sessionId !== undefined) {
+    events.push({
+      type: "runtime.session.started",
+      runId,
+      runtimeKind: "claude-code",
+      sessionId,
+      createdAt,
+    });
+  }
 
   if (nativeType === "assistant" && isRecord(value.message)) {
     const message = value.message;
@@ -260,6 +287,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         { name: "stream-json", enabled: true },
         { name: "print-mode", enabled: true },
         { name: "agenthub-mcp", enabled: this.#mcpRelay !== undefined },
+        { name: "resume-session", enabled: true },
       ],
       status: "ready",
       lastSeenAt: nowIsoDateTime(),
@@ -353,8 +381,13 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           ),
           "--strict-mcp-config",
         ];
+    const resumeSessionId =
+      input.run.dispatchMode === "resume"
+        ? input.run.runtimeSessionId
+        : undefined;
     const args = [
       "-p",
+      ...(resumeSessionId === undefined ? [] : ["--resume", resumeSessionId]),
       "--verbose",
       "--output-format",
       "stream-json",
@@ -378,6 +411,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
+    let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
+      "cancelled";
+    let runtimeSessionStarted = false;
 
     const complete = (
       status: Extract<RunEvent, { type: "run.completed" }>["status"],
@@ -408,7 +444,17 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         return;
       }
 
-      for (const event of mapClaudeJsonEvents(parsed.value, input.run.id)) {
+      const sessionId = readClaudeSessionId(parsed.value);
+      const emitRuntimeSessionStarted =
+        !runtimeSessionStarted && sessionId !== undefined;
+
+      if (emitRuntimeSessionStarted) {
+        runtimeSessionStarted = true;
+      }
+
+      for (const event of mapClaudeJsonEvents(parsed.value, input.run.id, {
+        emitRuntimeSessionStarted,
+      })) {
         queue.push(event);
       }
     };
@@ -444,7 +490,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     });
     childProcess.once("close", (exitCode) => {
       if (aborted) {
-        complete("cancelled");
+        complete(abortStatus);
         return;
       }
 
@@ -458,6 +504,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       "abort",
       () => {
         aborted = true;
+        abortStatus = input.abortSignal?.reason === "interrupted"
+          ? "interrupted"
+          : "cancelled";
         childProcess.kill("SIGTERM");
       },
       { once: true },

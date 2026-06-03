@@ -1329,7 +1329,7 @@ export function ChannelWorkspace({
             }
           >
             <div
-              className="inline-flex h-8 w-fit overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+              className="inline-flex h-8 w-fit items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
               role="group"
               aria-label="Task aggregation"
             >
@@ -1339,10 +1339,10 @@ export function ChannelWorkspace({
                 return (
                   <button
                     key={mode}
-                    className={`min-w-16 cursor-pointer border-0 px-3 text-sm font-semibold capitalize focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                    className={`flex h-7 min-w-16 cursor-pointer items-center justify-center rounded-full border-0 px-3 text-sm font-semibold capitalize leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                       selected
-                        ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-                        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                        ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                        : 'bg-transparent text-[#69707d] hover:text-[#161616]'
                     }`}
                     type="button"
                     aria-pressed={selected}
@@ -1724,7 +1724,7 @@ export function ChannelWorkspace({
             </div>
             {showComposerModeSwitch && (
               <div
-                className="ml-1 inline-flex h-8 overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+                className="ml-1 inline-flex h-8 items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
                 role="group"
                 aria-label="Message mode"
               >
@@ -1733,10 +1733,10 @@ export function ChannelWorkspace({
 
                   return (
                     <button
-                      className={`min-w-14 cursor-pointer border-0 px-3 text-sm font-semibold capitalize focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                      className={`flex h-7 min-w-14 cursor-pointer items-center justify-center rounded-full border-0 px-3 text-sm font-semibold capitalize leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                         selected
-                          ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-                          : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                          ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                          : 'bg-transparent text-[#69707d] hover:text-[#161616]'
                       }`}
                       type="button"
                       key={mode}

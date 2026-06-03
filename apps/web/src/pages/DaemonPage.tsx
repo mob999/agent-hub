@@ -22,17 +22,17 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
   return (
     <section
       id="main-content"
-      className="grid h-screen min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
       aria-label="Daemon management"
     >
       <aside
-        className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[671px]:hidden"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171] max-[671px]:hidden"
         aria-label="Daemon list"
       >
-        <header className="grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--cds-border-subtle-01)] px-4">
-          <h1 className="truncate text-base font-semibold leading-snug">Daemon</h1>
+        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[#eef0f3] px-4">
+          <h1 className="truncate text-base font-semibold leading-snug text-[#161616]">Daemon</h1>
           <button
-            className="grid h-7 w-7 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-text-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+            className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Add daemon"
           >
@@ -41,29 +41,29 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
         </header>
 
         {devices.length === 0 ? (
-          <p className="p-4 text-[var(--cds-text-secondary)]">No daemon connected.</p>
+          <p className="p-4 text-[#69707d]">No daemon connected.</p>
         ) : (
-          <div className="grid gap-2 p-3">
+          <div className="grid gap-1 p-3">
             {devices.map((device) => (
               <button
-                className={`grid min-h-16 w-full cursor-pointer grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border p-2.5 text-left text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selectedDevice?.id === device.id
-                    ? 'border-[var(--cds-border-interactive)] bg-[var(--cds-layer-selected-01)]'
-                    : 'border-transparent bg-transparent'
+                    ? 'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+                    : 'bg-transparent text-[#596171] hover:bg-[#eef0f4] hover:text-[#161616]'
                 }`}
                 key={device.id}
                 type="button"
                 onClick={() => setSelectedDeviceId(device.id)}
               >
                 <span
-                  className="grid h-10 w-10 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
                   aria-hidden="true"
                 >
                   <Devices size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
                   <strong className="truncate">{device.id}</strong>
-                  <small className="truncate text-[var(--cds-text-secondary)]">
+                  <small className="truncate font-normal text-[#69707d]">
                     daemon {device.status}
                   </small>
                 </span>
@@ -74,7 +74,7 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
         )}
       </aside>
 
-      <section className="h-screen min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Daemon detail">
+      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Daemon detail">
         <header className="flex min-h-18 items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[671px]:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <span

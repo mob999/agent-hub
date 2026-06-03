@@ -124,47 +124,47 @@ export function RunsPage({
   return (
     <section
       id="main-content"
-      className="grid h-screen min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
       aria-label="Runs management"
     >
       <aside
-        className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[671px]:h-auto max-[671px]:max-h-72"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171] max-[671px]:h-auto max-[671px]:max-h-72"
         aria-label="Run list"
       >
-        <header className="grid min-h-18 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--cds-border-subtle-01)] px-4">
-          <h1 className="truncate text-base font-semibold leading-snug">Runs</h1>
-          <Tag type={activeRunCount > 0 ? 'blue' : 'gray'} size="sm">
+        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[#eef0f3] px-4">
+          <h1 className="truncate text-base font-semibold leading-snug text-[#161616]">Runs</h1>
+          <span className="rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
             {activeRunCount} active
-          </Tag>
+          </span>
         </header>
 
         {runs.length === 0 ? (
-          <div className="grid gap-3 p-4 text-[var(--cds-text-secondary)]">
+          <div className="grid gap-3 p-4 text-[#69707d]">
             <JobRun size={24} />
             <p>No runs yet. Send a message in Chat to create one.</p>
           </div>
         ) : (
-          <div className="grid gap-2 p-3">
+          <div className="grid gap-1 p-3">
             {runs.map((localRun) => (
               <button
-                className={`grid min-h-16 w-full cursor-pointer grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border p-2.5 text-left text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selectedRun?.run.id === localRun.run.id
-                    ? 'border-[var(--cds-border-interactive)] bg-[var(--cds-layer-selected-01)]'
-                    : 'border-transparent bg-transparent'
+                    ? 'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+                    : 'bg-transparent text-[#596171] hover:bg-[#eef0f4] hover:text-[#161616]'
                 }`}
                 key={localRun.run.id}
                 type="button"
                 onClick={() => selectRun(localRun.run.id)}
               >
                 <span
-                  className="grid h-10 w-10 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
                   aria-hidden="true"
                 >
                   <JobRun size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
                   <strong className="truncate">{runDisplayTitle(localRun)}</strong>
-                  <small className="truncate text-[var(--cds-text-secondary)]">
+                  <small className="truncate font-normal text-[#69707d]">
                     Run {localRun.run.id.slice(0, 8)} · {formatTime(localRun.run.createdAt)}
                   </small>
                 </span>
@@ -175,7 +175,7 @@ export function RunsPage({
         )}
       </aside>
 
-      <section className="h-screen min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Run detail">
+      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Run detail">
         <header className="flex min-h-18 items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[671px]:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <span

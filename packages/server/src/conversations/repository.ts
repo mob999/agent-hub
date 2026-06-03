@@ -88,6 +88,7 @@ import { createRealtimeEvent } from "../realtime/index.js";
 import {
   applyRunDispatchPreparation,
   prepareRunDispatch,
+  type RunDispatchTaskContext,
 } from "../runs/dispatch.js";
 
 export const defaultGroupConversationKey = "all";
@@ -124,7 +125,10 @@ async function prepareConversationRunJobDispatch(
     ownerUserId: string;
     realtimeEvents?: RealtimeEvent[];
   },
-): Promise<RunQueueJob> {
+): Promise<{
+  handedOffTaskContexts: RunDispatchTaskContext[];
+  job: RunQueueJob;
+}> {
   const preparation = await prepareRunDispatch(db, {
     agentId: job.run.agentId,
     conversationId: input.conversationId,
@@ -137,7 +141,10 @@ async function prepareConversationRunJobDispatch(
 
   input.realtimeEvents?.push(...preparation.realtimeEvents);
 
-  return applyRunDispatchPreparation(job, preparation);
+  return {
+    handedOffTaskContexts: preparation.handedOffTaskContexts,
+    job: applyRunDispatchPreparation(job, preparation),
+  };
 }
 
 export interface UserMessageAttachmentUpload {
@@ -4582,6 +4589,7 @@ async function resolveConversationAgentReference(
 export function buildAssignedTaskPrompt(input: {
   agentGroupsPrompt?: string;
   conversationTitle: string;
+  continuationMessage?: string;
   goalId: string;
   goalTitle: string;
   taskId: string;
@@ -4601,6 +4609,15 @@ export function buildAssignedTaskPrompt(input: {
     input.taskDescription ? `Description: ${input.taskDescription}` : undefined,
     "",
     "You were assigned this task by the group orchestrator.",
+    input.continuationMessage === undefined
+      ? undefined
+      : "You are continuing the same assigned task after the previous run was interrupted by a newer run.",
+    input.continuationMessage === undefined
+      ? undefined
+      : "Do not restart from scratch if useful artifacts or partial progress already exist. Use list_artifacts, read_artifact, and download_artifact to inspect previous output.",
+    input.continuationMessage === undefined
+      ? undefined
+      : `Latest mention or handoff message: ${input.continuationMessage}`,
     "Create the requested report or result file in your current workspace.",
     "You can inspect prior group workspace artifacts before producing your result. Use list_artifacts to find ids, read_artifact for small text snippets, and download_artifact to save images, zip files, source packages, site artifacts, large files, or binary resources into your current workspace.",
     "Do not use curl/wget against artifact downloadUrl or editorUrl for internal resource access; those links are user-facing and require browser authentication.",
@@ -4933,13 +4950,44 @@ async function createMentionedGroupChatRuns(
       },
       runtime: runAgent.runtime,
     };
-    let job = await prepareConversationRunJobDispatch(db, initialJob, {
+    const preparedJob = await prepareConversationRunJobDispatch(db, initialJob, {
       conversationId: input.conversation.id,
       createdAt: input.createdAt,
       ownerUserId: input.ownerUserId,
       realtimeEvents,
     });
-    if (job.runtimeSessionId !== undefined) {
+    const handedOffTask = preparedJob.handedOffTaskContexts[0];
+    let job = preparedJob.job;
+    if (handedOffTask !== undefined) {
+      const refreshedGoals =
+        (await listConversationGoalsForUser(db, {
+          conversationId: input.conversation.id,
+          ownerUserId: input.ownerUserId,
+        })) ?? agentHubMcpGoals;
+
+      job = {
+        ...job,
+        prompt: buildAssignedTaskPrompt({
+          agentGroupsPrompt,
+          continuationMessage: input.content,
+          conversationTitle: input.conversation.title,
+          dispatchMessage: input.content,
+          goalId: handedOffTask.goalId,
+          goalTitle: handedOffTask.goalTitle,
+          taskDescription: handedOffTask.taskDescription,
+          taskId: handedOffTask.taskId,
+          taskIndex: handedOffTask.taskIndex,
+          taskTitle: handedOffTask.taskTitle,
+        }),
+        agentInstructions: buildAssignedTaskInstructions({
+          agentName: runAgent.agent.name,
+          agentDescription: runAgent.agent.description,
+          conversationTitle: input.conversation.title,
+        }),
+        agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
+        agentHubMcpGoals: refreshedGoals,
+      };
+    } else if (job.runtimeSessionId !== undefined) {
       job = {
         ...job,
         prompt: buildMentionedGroupChatRunPrompt({
@@ -5446,12 +5494,13 @@ async function maybeCreateCheckpointRunForTask(
       return;
     }
 
-    job = await prepareConversationRunJobDispatch(tx as unknown as Db, job, {
+    const preparedJob = await prepareConversationRunJobDispatch(tx as unknown as Db, job, {
       conversationId: conversation.id,
       createdAt: input.createdAt,
       ownerUserId: goal.ownerUserId,
       realtimeEvents: input.realtimeEvents,
     });
+    job = preparedJob.job;
 
     await tx.insert(runs).values({
       id: runId,
@@ -6205,13 +6254,14 @@ export async function appendRunEventToConversationMessage(
       }
 
       if (job !== null) {
-        job = await prepareConversationRunJobDispatch(db, job, {
+        const preparedJob = await prepareConversationRunJobDispatch(db, job, {
           conversationId: conversation.id,
           createdAt,
           handoffActiveTaskRuns: false,
           ownerUserId: run.ownerUserId,
           realtimeEvents,
         });
+        job = preparedJob.job;
       }
 
       const assigneeRunId = isSelfAssigned
@@ -6513,13 +6563,14 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
-      job = await prepareConversationRunJobDispatch(db, job, {
+      const preparedJob = await prepareConversationRunJobDispatch(db, job, {
         conversationId: context.conversation.id,
         createdAt: updatedAt,
         handoffActiveTaskRuns: false,
         ownerUserId: context.run.ownerUserId,
         realtimeEvents,
       });
+      job = preparedJob.job;
 
       const queuedEvent: RunEvent = {
         type: "run.queued",

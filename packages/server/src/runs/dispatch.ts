@@ -19,10 +19,20 @@ import { createRealtimeEvent } from "../realtime/index.js";
 
 export interface RunDispatchPreparation {
   dispatchMode: RunDispatchMode;
+  handedOffTaskContexts: RunDispatchTaskContext[];
   parentRunId?: RunId;
   preemptRunIds: RunId[];
   realtimeEvents: RealtimeEvent[];
   runtimeSessionId?: string;
+}
+
+export interface RunDispatchTaskContext {
+  goalId: string;
+  goalTitle: string;
+  taskDescription?: string;
+  taskId: string;
+  taskIndex: number;
+  taskTitle: string;
 }
 
 function toDispatchAgentRun(row: typeof runs.$inferSelect): AgentRun {
@@ -55,6 +65,7 @@ export async function prepareRunDispatch(
   if (input.conversationId === undefined) {
     return {
       dispatchMode: "new",
+      handedOffTaskContexts: [],
       preemptRunIds: [],
       realtimeEvents: [],
     };
@@ -84,6 +95,7 @@ export async function prepareRunDispatch(
   const realtimeEvents: RealtimeEvent[] = [];
   const interruptedAt = input.createdAt.toISOString();
   const activeRunIds = activeRuns.map((run) => run.id);
+  const handedOffTaskContexts: RunDispatchTaskContext[] = [];
 
   if (input.handoffActiveTaskRuns !== false && activeRunIds.length > 0) {
     const handedOffTasks = await db
@@ -95,8 +107,11 @@ export async function prepareRunDispatch(
       })
       .where(inArray(conversationGoalTasks.assigneeRunId, activeRunIds))
       .returning({
+        description: conversationGoalTasks.description,
         goalId: conversationGoalTasks.goalId,
         id: conversationGoalTasks.id,
+        index: conversationGoalTasks.index,
+        title: conversationGoalTasks.title,
       });
     const handedOffGoals = handedOffTasks.length === 0
       ? []
@@ -105,11 +120,31 @@ export async function prepareRunDispatch(
             conversationId: conversationGoals.conversationId,
             id: conversationGoals.id,
             ownerUserId: conversationGoals.ownerUserId,
+            title: conversationGoals.title,
           })
           .from(conversationGoals)
           .where(inArray(conversationGoals.id, handedOffTasks.map((task) => task.goalId)));
     const handedOffGoalsById = new Map(
       handedOffGoals.map((goal) => [goal.id, goal]),
+    );
+
+    handedOffTaskContexts.push(
+      ...handedOffTasks.flatMap((task) => {
+        const goal = handedOffGoalsById.get(task.goalId);
+
+        return goal === undefined
+          ? []
+          : [
+              {
+                goalId: task.goalId,
+                goalTitle: goal.title,
+                taskDescription: task.description ?? undefined,
+                taskId: task.id,
+                taskIndex: task.index,
+                taskTitle: task.title,
+              },
+            ];
+      }),
     );
 
     realtimeEvents.push(
@@ -128,32 +163,52 @@ export async function prepareRunDispatch(
             ];
       }),
     );
+  } else if (activeRunIds.length > 0) {
+    const interruptedTasks = await db
+      .update(conversationGoalTasks)
+      .set({
+        status: "interrupted",
+        blockedReason: "Interrupted by a newer run for this agent.",
+        updatedAt: input.createdAt,
+      })
+      .where(inArray(conversationGoalTasks.assigneeRunId, activeRunIds))
+      .returning({
+        goalId: conversationGoalTasks.goalId,
+        id: conversationGoalTasks.id,
+      });
+    const interruptedGoals = interruptedTasks.length === 0
+      ? []
+      : await db
+          .select({
+            conversationId: conversationGoals.conversationId,
+            id: conversationGoals.id,
+            ownerUserId: conversationGoals.ownerUserId,
+          })
+          .from(conversationGoals)
+          .where(inArray(conversationGoals.id, interruptedTasks.map((task) => task.goalId)));
+    const interruptedGoalsById = new Map(
+      interruptedGoals.map((goal) => [goal.id, goal]),
+    );
+
+    realtimeEvents.push(
+      ...interruptedTasks.flatMap((task) => {
+        const goal = interruptedGoalsById.get(task.goalId);
+
+        return goal === undefined
+          ? []
+          : [
+              createRealtimeEvent({
+                conversationId: goal.conversationId,
+                ownerUserId: goal.ownerUserId,
+                taskId: task.id,
+                type: "task.updated" as const,
+              }),
+            ];
+      }),
+    );
   }
 
   for (const activeRun of activeRuns) {
-    if (activeRun.status === "running") {
-      const [updatedRun] = await db
-        .update(runs)
-        .set({
-          preemptedByRunId: input.newRunId,
-          updatedAt: input.createdAt,
-        })
-        .where(eq(runs.id, activeRun.id))
-        .returning();
-
-      if (updatedRun !== undefined) {
-        realtimeEvents.push(
-          createRealtimeEvent({
-            conversationId: updatedRun.conversationId ?? undefined,
-            ownerUserId: updatedRun.ownerUserId,
-            run: toDispatchAgentRun(updatedRun),
-            type: "run.updated",
-          }),
-        );
-      }
-      continue;
-    }
-
     const interruptedEvent: RunEvent = {
       type: "run.completed",
       runId: activeRun.id,
@@ -199,6 +254,7 @@ export async function prepareRunDispatch(
 
   return {
     dispatchMode: runtimeSessionId === undefined ? "new" : "resume",
+    handedOffTaskContexts,
     parentRunId,
     preemptRunIds,
     realtimeEvents,

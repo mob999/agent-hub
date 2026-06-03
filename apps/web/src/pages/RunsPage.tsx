@@ -1,5 +1,5 @@
 import { InlineNotification, Tag } from '@carbon/react'
-import { JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
 import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
 import {
@@ -239,12 +239,13 @@ export function RunsPage({
                   }))
                 }}
               >
-                <summary className="flex cursor-pointer items-center justify-between gap-4 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]">
-                  <span className="font-semibold text-[var(--cds-text-primary)]">
-                    Prompt
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-3 py-2.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] [&::-webkit-details-marker]:hidden">
+                  <span className="min-w-0 truncate text-sm text-[#69707d]">
+                    {promptLength.toLocaleString()} characters
                   </span>
-                  <span className="shrink-0 text-xs text-[var(--cds-text-secondary)]">
-                    {promptLength.toLocaleString()} chars · {promptExpanded ? 'Hide' : 'Show'}
+                  <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-[#dde1e6] bg-white px-2.5 text-xs font-semibold text-[#3f4551] shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
+                    {promptExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {promptExpanded ? 'Hide prompt' : 'Show prompt'}
                   </span>
                 </summary>
                 <div className="border-t border-[#e1e5ea] p-3">

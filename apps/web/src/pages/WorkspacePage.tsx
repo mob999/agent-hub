@@ -1966,9 +1966,7 @@ export function WorkspacePage({
       ) : activeView === 'daemon' ? (
         <DaemonPage
           devices={devices}
-          agents={agents}
           deviceError={deviceError}
-          openCreateAgent={openCreateAgent}
         />
       ) : (
         <RunsPage

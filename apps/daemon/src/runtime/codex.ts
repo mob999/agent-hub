@@ -3,7 +3,7 @@ import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_p
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type {
   AgentRunArtifactUpload,
@@ -88,7 +88,7 @@ function resolveTsxLoaderSpecifier(): string {
   const workspaceLoaderPath = path.resolve(repoRoot, "node_modules/tsx/dist/loader.mjs");
 
   if (existsSync(workspaceLoaderPath)) {
-    return workspaceLoaderPath;
+    return pathToFileURL(workspaceLoaderPath).href;
   }
 
   return "tsx";

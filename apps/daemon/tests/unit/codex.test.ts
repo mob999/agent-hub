@@ -113,13 +113,14 @@ async function collectEvents(
 }
 
 describe("CodexAdapter", () => {
-  it("builds the development MCP server command with an absolute tsx loader path", () => {
+  it("builds the development MCP server command with a loadable tsx loader URL", () => {
     const command = createAgentHubMcpServerCommand();
 
     expect(command.command).toBe(process.execPath);
     expect(command.args[0]).toBe("--import");
     expect(command.args[1]).toContain("tsx");
     expect(command.args[1]).not.toBe("tsx");
+    expect(command.args[1]).toMatch(/^file:\/\//);
     expect(command.args[2]).toMatch(/stdio-server\.ts$|stdio-server\.js$/);
   });
 

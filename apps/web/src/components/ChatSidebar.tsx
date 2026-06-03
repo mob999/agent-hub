@@ -119,7 +119,7 @@ export function ChatSidebar({
 
   return (
     <aside
-      className="flex h-screen min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
       aria-label="Chat navigation"
     >
       <header className="flex min-h-18 items-center justify-between border-b border-[var(--cds-border-subtle-01)] px-4">

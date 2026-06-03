@@ -35,7 +35,7 @@ export function AppRail({
     <Theme
       theme="g100"
       as="aside"
-      className="relative grid h-screen grid-rows-[auto_minmax(0,1fr)_auto] justify-items-center border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] py-2"
+      className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] justify-items-center border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] py-2"
       aria-label="Primary workspace tools"
     >
       <a

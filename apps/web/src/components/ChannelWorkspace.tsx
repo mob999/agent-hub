@@ -112,6 +112,54 @@ function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
   }
 }
 
+function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
+  column: string
+  dot: string
+  count: string
+} {
+  switch (status) {
+    case 'ready':
+      return {
+        column: 'border-[#d8e6ff] bg-[#f3f7ff]',
+        dot: 'border-[#0f62fe] bg-[#0f62fe]',
+        count: 'bg-[#d8e6ff] text-[#0f3f9c]',
+      }
+    case 'running':
+      return {
+        column: 'border-[#f0dfb4] bg-[#fffaf0]',
+        dot: 'border-[#d89400] bg-[#d89400]',
+        count: 'bg-[#f9e8b8] text-[#6f5200]',
+      }
+    case 'succeeded':
+      return {
+        column: 'border-[#d7eadc] bg-[#f2faf5]',
+        dot: 'border-[#24a148] bg-[#24a148]',
+        count: 'bg-[#d7eadc] text-[#0e6027]',
+      }
+    case 'failed':
+      return {
+        column: 'border-[#f4d4d4] bg-[#fff5f5]',
+        dot: 'border-[#da1e28] bg-[#da1e28]',
+        count: 'bg-[#f4d4d4] text-[#8a1118]',
+      }
+    case 'blocked':
+      return {
+        column: 'border-[#efd6e4] bg-[#fff6fb]',
+        dot: 'border-[#d02670] bg-[#d02670]',
+        count: 'bg-[#efd6e4] text-[#7f1743]',
+      }
+    case 'waiting':
+    case 'assigned':
+    case 'cancelled':
+    case 'interrupted':
+      return {
+        column: 'border-[#e5e5e5] bg-[#f8f8f8]',
+        dot: 'border-[#8d8d8d] bg-white',
+        count: 'bg-[#e8e8e8] text-[#525252]',
+      }
+  }
+}
+
 function mentionSearchTerm(value: string): string | null {
   const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(value)
 
@@ -717,23 +765,18 @@ export function ChannelWorkspace({
       return (
         <button
           key={`${goal.id}:${task.id}`}
-          className="grid cursor-pointer gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-2 text-left text-sm text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          className="grid cursor-pointer gap-2 rounded-lg border border-[#e0e0e0] bg-white p-3 text-left text-sm text-[var(--cds-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-[box-shadow,transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-[#c6c6c6] hover:shadow-[0_6px_16px_rgba(0,0,0,0.10)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
           type="button"
           onClick={() => openGoalRoute(goal.id, task.index)}
         >
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <Tag className="m-0 uppercase" type={taskStatusTagType(task.status)} size="sm">
-              {task.status}
-            </Tag>
-            <span className="w-fit border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-text-secondary)]">
+          <span className="w-fit rounded-md border border-[#e5e5e5] bg-[#fafafa] px-2 py-1 text-xs font-semibold text-[var(--cds-text-secondary)]">
               Goal: {goal.id.slice(0, 8)} #{task.index}
-            </span>
           </span>
-          <h4 className="min-w-0 break-words text-sm font-semibold leading-5">
+          <h4 className="min-w-0 overflow-hidden text-sm font-semibold leading-5 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
             {task.title}
           </h4>
           {options.showGoal && (
-            <p className="truncate text-xs text-[var(--cds-text-secondary)]">
+            <p className="truncate text-xs leading-4 text-[var(--cds-text-secondary)]">
               {goal.title}
             </p>
           )}
@@ -949,30 +992,32 @@ export function ChannelWorkspace({
   )
 
   const renderStatusBoardView = () => (
-    <div className="min-h-0 overflow-x-auto pb-2">
-      <div className="grid h-full min-w-[72rem] grid-cols-8 gap-2">
+    <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-3">
+      <div className="grid h-full min-h-0 grid-flow-col auto-cols-[17rem] gap-4 pr-2">
         {taskStatusOrder.map((status) => {
           const statusTasks = goalTasksByStatus.get(status) ?? []
+          const style = taskStatusBoardStyle(status)
 
           return (
             <section
               key={status}
-              className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2"
+              className={`grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-2xl border p-4 ${style.column}`}
             >
-              <div className="flex items-center justify-between gap-2 border-b border-[var(--cds-border-subtle-01)] pb-2">
-                <h3 className="truncate text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
-                  {status}
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--cds-text-primary)]">
+                  <span className={`h-3 w-3 shrink-0 rounded-full border-2 ${style.dot}`} aria-hidden="true" />
+                  <span className="truncate capitalize">{status}</span>
                 </h3>
-                <span className="text-xs font-semibold text-[var(--cds-text-secondary)]">
+                <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${style.count}`}>
                   {statusTasks.length}
                 </span>
               </div>
               {statusTasks.length === 0 ? (
-                <div className="grid min-h-0 place-items-center text-xs text-[var(--cds-text-placeholder)]">
+                <div className="grid min-h-0 place-items-center rounded-xl text-sm text-[var(--cds-text-placeholder)]">
                   No tasks
                 </div>
               ) : (
-                <div className="grid min-h-0 content-start gap-2 overflow-y-auto pr-1">
+                <div className="grid min-h-0 content-start gap-3 overflow-y-auto overscroll-contain pr-1">
                   {statusTasks.map(({ goal, task }) =>
                     renderGoalTaskCard(goal, task, { compact: true, showGoal: true }),
                   )}
@@ -1052,7 +1097,7 @@ export function ChannelWorkspace({
   return (
     <section
       id="main-content"
-      className="grid h-screen min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--cds-background)]"
+      className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--cds-background)]"
       aria-label={chatAriaLabel}
     >
       <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
@@ -1195,7 +1240,9 @@ export function ChannelWorkspace({
       <div
         ref={scrollContainerRef}
         className={`min-h-0 p-2 ${
-          showFiles ? 'overflow-hidden' : 'overflow-y-auto'
+          showFiles || (showWorkspacePage && showTasks && taskAggregationMode === 'status')
+            ? 'overflow-hidden'
+            : 'overflow-y-auto'
         }`}
         aria-live="polite"
       >

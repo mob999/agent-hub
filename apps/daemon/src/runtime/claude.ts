@@ -1,19 +1,11 @@
 import { spawn as spawnChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import type {
-  AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
 } from "@agent-hub/core/runtime";
 import type {
-  AgentHubListGoalsToolResult,
-  AgentHubMcpToolInput,
   AgentHubMcpToolName,
-  AgentHubMcpToolResult,
-  AgentHubUploadArtifactToolResult,
   DaemonRuntime,
   RunEvent,
   RunId,
@@ -22,20 +14,28 @@ import type {
 
 import type { AgentHubMcpSessionHandle } from "../mcp/relay";
 import { LineDecoder, parseJsonLine } from "./jsonl";
+import { buildPromptWithRuntimeMemory } from "./memory-context";
+import {
+  createAgentHubMcpServerCommand,
+  createAgentHubMcpSession,
+  type AgentHubMcpRelayLike,
+  type AgentHubMcpServerCommand,
+} from "./mcp";
 import {
   AsyncEventQueue,
+  attachJsonLineRuntimeOutput,
   createLogLineEvent,
   createRuntimeEvent,
   createRuntimeSpawnOptions,
+  mapAbortReasonToRunStatus,
   nowIsoDateTime,
   type SpawnRuntimeProcess,
 } from "./common";
-import type {
-  AgentHubMcpRelayLike,
-  AgentHubMcpServerCommand,
-} from "./codex";
+import { RuntimeTempFiles } from "./temp-files";
 
 export interface ClaudeCodeAdapterOptions {
+  dailyMemoryRefreshIntervalMs?: number;
+  dailyMemoryRefreshTranscriptMaxBytes?: number;
   executablePath?: string;
   mcpRelay?: AgentHubMcpRelayLike;
   mcpServerCommand?: AgentHubMcpServerCommand;
@@ -226,18 +226,109 @@ function createClaudeAllowedToolsArg(
   ];
 }
 
+async function runHiddenClaudePrompt(input: {
+  agentInstructions?: string;
+  executablePath: string;
+  prompt: string;
+  spawnProcess: SpawnRuntimeProcess;
+  workspacePath: string;
+}): Promise<string> {
+  const safeRunId = "memory_compaction";
+  const tempFiles = new RuntimeTempFiles(`agenthub-claude-${safeRunId}-`);
+  const appendSystemPrompt = createClaudeAppendSystemPrompt(
+    input.agentInstructions,
+    undefined,
+  );
+  const childProcess = input.spawnProcess(input.executablePath, [
+    "-p",
+    "--verbose",
+    "--output-format",
+    "stream-json",
+    "--permission-mode",
+    "bypassPermissions",
+    ...(appendSystemPrompt === undefined
+      ? []
+      : [
+          "--append-system-prompt-file",
+          tempFiles.write("append-system-prompt.txt", appendSystemPrompt),
+        ]),
+  ], {
+    ...createRuntimeSpawnOptions({
+      cwd: input.workspacePath,
+      stdio: "pipe",
+    }),
+  });
+  const stdout = new LineDecoder();
+  const stderr = new LineDecoder();
+  const output: string[] = [];
+  const errors: string[] = [];
+
+  childProcess.stdout.on("data", (chunk) => {
+    for (const line of stdout.push(chunk)) {
+      const parsed = parseJsonLine(line);
+
+      if (!parsed.ok) {
+        output.push(parsed.line);
+        continue;
+      }
+
+      for (const event of mapClaudeJsonEvents(parsed.value, "memory_compaction")) {
+        if (event.type === "message.delta") {
+          output.push(event.content);
+        }
+      }
+    }
+  });
+  childProcess.stderr.on("data", (chunk) => errors.push(...stderr.push(chunk)));
+
+  childProcess.stdin.write(input.prompt);
+  childProcess.stdin.end();
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    childProcess.once("error", reject);
+    childProcess.once("close", resolve);
+  });
+
+  const lastStdout = stdout.flush();
+  const lastStderr = stderr.flush();
+  tempFiles.cleanup();
+
+  if (lastStdout !== undefined) {
+    output.push(lastStdout);
+  }
+
+  if (lastStderr !== undefined) {
+    errors.push(lastStderr);
+  }
+
+  if (exitCode !== 0) {
+    throw new Error(
+      errors.join("\n") || `Claude Code compaction exited with code ${exitCode}`,
+    );
+  }
+
+  return output.join("\n").trim();
+}
+
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly runtimeKind = "claude-code" as const;
 
+  #dailyMemoryRefreshIntervalMs: number;
+  #dailyMemoryRefreshTranscriptMaxBytes: number;
   #executablePath: string;
   #mcpRelay: AgentHubMcpRelayLike | undefined;
-  #mcpServerCommand: AgentHubMcpServerCommand | undefined;
+  #mcpServerCommand: AgentHubMcpServerCommand;
   #spawnProcess: SpawnRuntimeProcess;
 
   constructor(options: ClaudeCodeAdapterOptions = {}) {
+    this.#dailyMemoryRefreshIntervalMs =
+      options.dailyMemoryRefreshIntervalMs ?? 4 * 60 * 60 * 1000;
+    this.#dailyMemoryRefreshTranscriptMaxBytes =
+      options.dailyMemoryRefreshTranscriptMaxBytes ?? 60 * 1024;
     this.#executablePath = options.executablePath ?? "claude";
     this.#mcpRelay = options.mcpRelay;
-    this.#mcpServerCommand = options.mcpServerCommand;
+    this.#mcpServerCommand =
+      options.mcpServerCommand ?? createAgentHubMcpServerCommand();
     this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
   }
 
@@ -297,63 +388,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   run(input: AgentRunInput): AsyncIterable<RunEvent> {
     const queue = new AsyncEventQueue<RunEvent>();
     const safeRunId = input.run.id.replace(/[^a-zA-Z0-9_-]/g, "_");
-    let runtimeTempDir: string | undefined;
-    const writeRuntimeFile = (filename: string, content: string): string => {
-      runtimeTempDir ??= mkdtempSync(join(tmpdir(), `agenthub-claude-${safeRunId}-`));
-      const filePath = join(runtimeTempDir, filename);
-
-      writeFileSync(filePath, content, "utf8");
-
-      return filePath;
-    };
-    const cleanupRuntimeFiles = () => {
-      if (runtimeTempDir === undefined) {
-        return;
-      }
-
-      rmSync(runtimeTempDir, { force: true, recursive: true });
-      runtimeTempDir = undefined;
-    };
-    const mcpGoals: AgentHubListGoalsToolResult["goals"] = [
-      ...(input.agentHubMcpGoals ?? []),
-    ];
-    const mcpSession = this.#mcpRelay?.createSession({
-      enabledTools: input.agentHubMcpTools ?? [],
-      runId: input.run.id,
-      workspacePath: input.workspacePath,
-      onArtifactUpload: input.uploadArtifact,
-      onToolCall: async (call) => {
-        if (input.callAgentHubMcpTool !== undefined) {
-          return input.callAgentHubMcpTool(call);
-        }
-
-        queue.push({
-          type: "agenthub.tool.call",
-          runId: call.runId,
-          toolCallId: call.toolCallId,
-          name: call.name,
-          input: call.input,
-          createdAt: call.createdAt,
-        });
-
-        if (call.name === "list_goals") {
-          const status = "status" in call.input &&
-            typeof call.input.status === "string"
-            ? call.input.status
-            : undefined;
-
-          return {
-            accepted: true,
-            goals: status === undefined
-              ? mcpGoals.map((goal) => ({ ...goal }))
-              : mcpGoals
-                  .filter((goal) => goal.status === status)
-                  .map((goal) => ({ ...goal })),
-          };
-        }
-
-        return { accepted: true };
-      },
+    const tempFiles = new RuntimeTempFiles(`agenthub-claude-${safeRunId}-`);
+    const mcpSession = createAgentHubMcpSession({
+      eventSink: queue,
+      relay: this.#mcpRelay,
+      runInput: input,
     });
     const appendSystemPrompt = createClaudeAppendSystemPrompt(
       input.agentInstructions,
@@ -363,19 +402,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       ? []
       : [
           "--append-system-prompt-file",
-          writeRuntimeFile("append-system-prompt.txt", appendSystemPrompt),
+          tempFiles.write("append-system-prompt.txt", appendSystemPrompt),
         ];
     const mcpConfigArgs = mcpSession === undefined
       ? []
       : [
           "--mcp-config",
-          writeRuntimeFile(
+          tempFiles.write(
             "mcp-config.json",
             createClaudeMcpConfig({
-              command: this.#mcpServerCommand ?? {
-                command: process.execPath,
-                args: [],
-              },
+              command: this.#mcpServerCommand,
               session: mcpSession,
             }),
           ),
@@ -405,10 +441,6 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         stdio: "pipe",
       }),
     });
-    childProcess.stdin.write(input.prompt);
-    childProcess.stdin.end();
-    const stdout = new LineDecoder();
-    const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
     let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
@@ -425,7 +457,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
       completed = true;
       mcpSession?.close();
-      cleanupRuntimeFiles();
+      tempFiles.cleanup();
       queue.push({
         type: "run.completed",
         runId: input.run.id,
@@ -436,53 +468,23 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       queue.end();
     };
 
-    const handleStdoutLine = (line: string) => {
-      const parsed = parseJsonLine(line);
+    attachJsonLineRuntimeOutput({
+      eventSink: queue,
+      mapJsonValue: (value) => {
+        const sessionId = readClaudeSessionId(value);
+        const emitRuntimeSessionStarted =
+          !runtimeSessionStarted && sessionId !== undefined;
 
-      if (!parsed.ok) {
-        queue.push(createLogLineEvent(input.run.id, "stdout", parsed.line));
-        return;
-      }
+        if (emitRuntimeSessionStarted) {
+          runtimeSessionStarted = true;
+        }
 
-      const sessionId = readClaudeSessionId(parsed.value);
-      const emitRuntimeSessionStarted =
-        !runtimeSessionStarted && sessionId !== undefined;
-
-      if (emitRuntimeSessionStarted) {
-        runtimeSessionStarted = true;
-      }
-
-      for (const event of mapClaudeJsonEvents(parsed.value, input.run.id, {
-        emitRuntimeSessionStarted,
-      })) {
-        queue.push(event);
-      }
-    };
-
-    childProcess.stdout.on("data", (chunk) => {
-      for (const line of stdout.push(chunk)) {
-        handleStdoutLine(line);
-      }
-    });
-    childProcess.stdout.on("end", () => {
-      const line = stdout.flush();
-
-      if (line !== undefined) {
-        handleStdoutLine(line);
-      }
-    });
-
-    childProcess.stderr.on("data", (chunk) => {
-      for (const line of stderr.push(chunk)) {
-        queue.push(createLogLineEvent(input.run.id, "stderr", line));
-      }
-    });
-    childProcess.stderr.on("end", () => {
-      const line = stderr.flush();
-
-      if (line !== undefined) {
-        queue.push(createLogLineEvent(input.run.id, "stderr", line));
-      }
+        return mapClaudeJsonEvents(value, input.run.id, {
+          emitRuntimeSessionStarted,
+        });
+      },
+      process: childProcess,
+      runId: input.run.id,
     });
 
     childProcess.once("error", (error) => {
@@ -504,9 +506,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       "abort",
       () => {
         aborted = true;
-        abortStatus = input.abortSignal?.reason === "interrupted"
-          ? "interrupted"
-          : "cancelled";
+        abortStatus = mapAbortReasonToRunStatus(input.abortSignal?.reason);
         childProcess.kill("SIGTERM");
       },
       { once: true },
@@ -518,6 +518,47 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       workspacePath: input.workspacePath,
       createdAt: nowIsoDateTime(),
     });
+
+    void (async () => {
+      try {
+        const runPrompt = await buildPromptWithRuntimeMemory({
+          agentInstructions: input.agentInstructions,
+          basePrompt: input.prompt,
+          contextCompression: input.contextCompression,
+          eventSink: queue,
+          hiddenPrompt: (hiddenInput) => runHiddenClaudePrompt({
+            agentInstructions: hiddenInput.agentInstructions,
+            executablePath: this.#executablePath,
+            prompt: hiddenInput.prompt,
+            spawnProcess: this.#spawnProcess,
+            workspacePath: hiddenInput.workspacePath,
+          }),
+          memoryOptions: {
+            dailyMemoryRefreshIntervalMs: this.#dailyMemoryRefreshIntervalMs,
+            dailyMemoryRefreshTranscriptMaxBytes:
+              this.#dailyMemoryRefreshTranscriptMaxBytes,
+          },
+          runId: input.run.id,
+          runtimeKind: "claude-code",
+          workspacePath: input.workspacePath,
+        });
+
+        childProcess.stdin.write(runPrompt);
+        childProcess.stdin.end();
+      } catch (error) {
+        childProcess.stdin.write(input.prompt);
+        childProcess.stdin.end();
+        queue.push(
+          createLogLineEvent(
+            input.run.id,
+            "stderr",
+            `Memory prompt/compaction failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        );
+      }
+    })();
 
     return queue;
   }

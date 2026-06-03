@@ -2,12 +2,14 @@ export * from "./codex";
 export * from "./claude";
 export * from "./jsonl";
 export * from "./common";
+export * from "./mcp";
 
 import type { RuntimeKind } from "@agent-hub/core";
 import type { AgentAdapter } from "@agent-hub/core/runtime";
 
 import { ClaudeCodeAdapter } from "./claude";
-import { CodexAdapter, type AgentHubMcpRelayLike, type AgentHubMcpServerCommand } from "./codex";
+import { CodexAdapter } from "./codex";
+import type { AgentHubMcpRelayLike, AgentHubMcpServerCommand } from "./mcp";
 
 export interface RuntimeAdapterRegistryOptions {
   dailyMemoryRefreshIntervalMs?: number;

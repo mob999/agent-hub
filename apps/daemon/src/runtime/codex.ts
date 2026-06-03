@@ -1,49 +1,42 @@
 import { spawn as spawnChildProcess } from "node:child_process";
-import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import type { Readable, Writable } from "node:stream";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import type { SpawnOptionsWithoutStdio } from "node:child_process";
 
 import type {
-  AgentRunArtifactUpload,
   AgentAdapter,
   AgentRunInput,
-  AgentRunStaticSiteDeploy,
 } from "@agent-hub/core/runtime";
 import type {
-  AgentHubMcpToolInput,
-  AgentHubMcpToolResult,
-  AgentHubListGoalsToolResult,
-  AgentHubUploadArtifactToolResult,
-  AgentHubDeployStaticSiteToolResult,
-  AgentHubMcpToolName,
-  AgentRuntimeConfig,
   DaemonRuntime,
   RunEvent,
   RunId,
   RuntimeRawEvent,
 } from "@agent-hub/core/protocol";
 
+import { LineDecoder, parseJsonLine } from "./jsonl";
+import { buildPromptWithRuntimeMemory } from "./memory-context";
+import {
+  createAgentHubMcpServerCommand,
+  createAgentHubMcpSession,
+  type AgentHubMcpRelayLike,
+  type AgentHubMcpServerCommand,
+} from "./mcp";
 import type { AgentHubMcpSessionHandle } from "../mcp/relay";
 import {
-  appendMemory,
-  buildMemoryPrompt,
-  hasDailyMemoryDedupeKey,
-  readTranscriptForDailyMemoryRefresh,
-} from "../memory";
-import { LineDecoder, parseJsonLine } from "./jsonl";
-
-type SpawnedProcess = Pick<
-  ChildProcessByStdio<Writable, Readable, Readable>,
-  "kill" | "once" | "stderr" | "stdin" | "stdout"
->;
+  AsyncEventQueue,
+  attachJsonLineRuntimeOutput,
+  createLogLineEvent,
+  createRuntimeEvent,
+  createRuntimeSpawnOptions,
+  mapAbortReasonToRunStatus,
+  nowIsoDateTime,
+  type RuntimeChildProcess,
+} from "./common";
 
 export type SpawnCodexProcess = (
   command: string,
   args: string[],
   options: SpawnOptionsWithoutStdio,
-) => SpawnedProcess;
+) => RuntimeChildProcess;
 
 export interface CodexAdapterOptions {
   dailyMemoryRefreshIntervalMs?: number;
@@ -52,111 +45,6 @@ export interface CodexAdapterOptions {
   mcpRelay?: AgentHubMcpRelayLike;
   mcpServerCommand?: AgentHubMcpServerCommand;
   spawnProcess?: SpawnCodexProcess;
-}
-
-export interface AgentHubMcpServerCommand {
-  args: string[];
-  command: string;
-  cwd?: string;
-}
-
-export interface AgentHubMcpRelayLike {
-  createSession(input: {
-    enabledTools: AgentHubMcpToolName[];
-    onArtifactUpload?(
-      upload: AgentRunArtifactUpload,
-    ): Promise<AgentHubUploadArtifactToolResult>;
-    onStaticSiteDeploy?(
-      deployment: AgentRunStaticSiteDeploy,
-    ): Promise<AgentHubDeployStaticSiteToolResult>;
-    onToolCall(call: {
-      createdAt: string;
-      input: AgentHubMcpToolInput;
-      name: AgentHubMcpToolName;
-      runId: RunId;
-      toolCallId: string;
-    }): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
-    runId: RunId;
-    workspacePath: string;
-  }): AgentHubMcpSessionHandle;
-}
-
-function resolveTsxLoaderSpecifier(): string {
-  const currentFile = fileURLToPath(import.meta.url);
-  const currentDir = path.dirname(currentFile);
-  const repoRoot = path.resolve(currentDir, "../../../..");
-  const workspaceLoaderPath = path.resolve(repoRoot, "node_modules/tsx/dist/loader.mjs");
-
-  if (existsSync(workspaceLoaderPath)) {
-    return pathToFileURL(workspaceLoaderPath).href;
-  }
-
-  return "tsx";
-}
-
-interface AsyncQueueItem<T> {
-  done: boolean;
-  value?: T;
-}
-
-class AsyncEventQueue<T> implements AsyncIterable<T> {
-  #ended = false;
-  #items: T[] = [];
-  #resolvers: Array<(item: AsyncQueueItem<T>) => void> = [];
-
-  push(item: T): void {
-    if (this.#ended) {
-      return;
-    }
-
-    const resolve = this.#resolvers.shift();
-
-    if (resolve === undefined) {
-      this.#items.push(item);
-      return;
-    }
-
-    resolve({ done: false, value: item });
-  }
-
-  end(): void {
-    if (this.#ended) {
-      return;
-    }
-
-    this.#ended = true;
-
-    for (const resolve of this.#resolvers.splice(0)) {
-      resolve({ done: true });
-    }
-  }
-
-  async *[Symbol.asyncIterator](): AsyncIterator<T> {
-    while (true) {
-      if (this.#items.length > 0) {
-        yield this.#items.shift() as T;
-        continue;
-      }
-
-      if (this.#ended) {
-        return;
-      }
-
-      const item = await new Promise<AsyncQueueItem<T>>((resolve) => {
-        this.#resolvers.push(resolve);
-      });
-
-      if (item.done) {
-        return;
-      }
-
-      yield item.value as T;
-    }
-  }
-}
-
-function nowIsoDateTime(): string {
-  return new Date().toISOString();
 }
 
 function toText(value: unknown): string | undefined {
@@ -208,19 +96,6 @@ function createCodexRawEvent(
   };
 }
 
-function createCodexRuntimeEvent(
-  runId: RunId,
-  raw: RuntimeRawEvent,
-  createdAt: string,
-): RunEvent {
-  return {
-    type: "runtime.event",
-    runId,
-    raw,
-    createdAt,
-  };
-}
-
 function mapCodexCommandStatus(
   item: Record<string, unknown>,
 ): Extract<RunEvent, { type: "tool.call.completed" }>["status"] {
@@ -239,13 +114,13 @@ function mapCodexJsonEvents(value: unknown, runId: RunId): RunEvent[] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     const raw = createCodexRawEvent(value, undefined);
 
-    return [createCodexRuntimeEvent(runId, raw, createdAt)];
+    return [createRuntimeEvent(runId, raw, createdAt)];
   }
 
   const record = value as Record<string, unknown>;
   const nativeType = readStringProperty(record, ["type"]);
   const raw = createCodexRawEvent(record, nativeType);
-  const events: RunEvent[] = [createCodexRuntimeEvent(runId, raw, createdAt)];
+  const events: RunEvent[] = [createRuntimeEvent(runId, raw, createdAt)];
   const threadId = readStringProperty(record, ["thread_id", "threadId"]);
 
   if (nativeType === "thread.started" && threadId !== undefined) {
@@ -334,31 +209,6 @@ function mapCodexJsonEvents(value: unknown, runId: RunId): RunEvent[] {
   return events;
 }
 
-function createLogLineEvent(
-  runId: RunId,
-  stream: "stdout" | "stderr",
-  line: string,
-): RunEvent {
-  return {
-    type: "log.line",
-    runId,
-    stream,
-    line,
-    createdAt: nowIsoDateTime(),
-  };
-}
-
-function createCodexSpawnOptions(
-  options: SpawnOptionsWithoutStdio,
-): SpawnOptionsWithoutStdio {
-  return process.platform === "win32"
-    ? {
-        ...options,
-        shell: true,
-      }
-    : options;
-}
-
 function createCodexDeveloperInstructionsConfig(
   agentInstructions: string | undefined,
 ): string | undefined {
@@ -369,30 +219,6 @@ function createCodexDeveloperInstructionsConfig(
   }
 
   return `developer_instructions=${JSON.stringify(trimmedInstructions)}`;
-}
-
-export function createAgentHubMcpServerCommand(): AgentHubMcpServerCommand {
-  const currentFile = fileURLToPath(import.meta.url);
-  const currentDir = path.dirname(currentFile);
-  const isTypeScriptSource = currentFile.endsWith(".ts");
-
-  if (isTypeScriptSource) {
-    return {
-      command: process.execPath,
-      args: [
-        "--import",
-        resolveTsxLoaderSpecifier(),
-        path.resolve(currentDir, "../mcp/stdio-server.ts"),
-      ],
-      cwd: path.resolve(currentDir, "../../../.."),
-    };
-  }
-
-  return {
-    command: process.execPath,
-    args: [path.resolve(currentDir, "../mcp/stdio-server.js")],
-    cwd: path.resolve(currentDir, ".."),
-  };
 }
 
 function toTomlLiteral(value: string): string {
@@ -456,7 +282,7 @@ async function runHiddenCodexPrompt(input: {
       : ["-c", developerInstructionsConfig]),
     "-",
   ], {
-    ...createCodexSpawnOptions({
+    ...createRuntimeSpawnOptions({
       cwd: input.workspacePath,
       stdio: "pipe",
     }),
@@ -510,109 +336,6 @@ async function runHiddenCodexPrompt(input: {
   return output.join("\n").trim();
 }
 
-function periodicDailyMemoryDedupeKey(input: {
-  date: string;
-  intervalMs: number;
-  now: Date;
-}): string {
-  const bucket = Math.floor(input.now.getTime() / input.intervalMs);
-
-  return `periodic-daily-memory:${input.date}:${bucket}`;
-}
-
-async function maybeRefreshDailyMemory(input: {
-  agentInstructions?: string;
-  executablePath: string;
-  intervalMs: number;
-  maxTranscriptBytes: number;
-  spawnProcess: SpawnCodexProcess;
-  workspacePath: string;
-}): Promise<
-  | {
-      refreshed: false;
-    }
-  | {
-      refreshed: true;
-      date: string;
-      summary: string;
-      sourceChars: number;
-      transcriptFile: string;
-      truncated: boolean;
-    }
-> {
-  if (input.intervalMs <= 0) {
-    return { refreshed: false };
-  }
-
-  const now = new Date();
-  const transcript = await readTranscriptForDailyMemoryRefresh({
-    workspacePath: input.workspacePath,
-    maxBytes: input.maxTranscriptBytes,
-  });
-
-  if (transcript.content.length === 0) {
-    return { refreshed: false };
-  }
-
-  const dedupeKey = periodicDailyMemoryDedupeKey({
-    date: transcript.date,
-    intervalMs: input.intervalMs,
-    now,
-  });
-
-  if (
-    await hasDailyMemoryDedupeKey(input.workspacePath, {
-      date: transcript.date,
-      dedupeKey,
-    })
-  ) {
-    return { refreshed: false };
-  }
-
-  const summary = await runHiddenCodexPrompt({
-    agentInstructions: [
-      input.agentInstructions,
-      [
-        "You are updating this AgentHub agent's daily memory from its local transcript.",
-        "Return concise Markdown notes for durable context from today.",
-        "Preserve user goals, decisions, side effects, task/artifact/deployment references, open questions, and follow-ups.",
-        "Ignore routine chatter and do not produce a visible chat reply.",
-        "Keep the memory entry under 6000 characters.",
-      ].join("\n"),
-    ].filter((line): line is string => line !== undefined).join("\n\n"),
-    executablePath: input.executablePath,
-    prompt: [
-      `<transcript file="${transcript.file}" date="${transcript.date}" truncated="${transcript.truncated ? "true" : "false"}">`,
-      transcript.content,
-      "</transcript>",
-    ].join("\n"),
-    spawnProcess: input.spawnProcess,
-    workspacePath: input.workspacePath,
-  });
-
-  if (summary.trim().length === 0) {
-    return { refreshed: false };
-  }
-
-  await appendMemory({
-    workspacePath: input.workspacePath,
-    kind: "daily",
-    title: "Periodic daily memory update",
-    content: summary,
-    tags: ["daily-memory", "periodic-summary"],
-    dedupeKey,
-  });
-
-  return {
-    refreshed: true,
-    date: transcript.date,
-    summary,
-    sourceChars: transcript.content.length,
-    transcriptFile: transcript.file,
-    truncated: transcript.truncated,
-  };
-}
-
 export class CodexAdapter implements AgentAdapter {
   readonly runtimeKind = "codex" as const;
 
@@ -637,7 +360,7 @@ export class CodexAdapter implements AgentAdapter {
 
   async detect(): Promise<DaemonRuntime> {
     const process = this.#spawnProcess(this.#executablePath, ["--version"], {
-      ...createCodexSpawnOptions({
+      ...createRuntimeSpawnOptions({
         stdio: "pipe",
       }),
     });
@@ -692,47 +415,10 @@ export class CodexAdapter implements AgentAdapter {
     const developerInstructionsConfig = createCodexDeveloperInstructionsConfig(
       input.agentInstructions,
     );
-    const mcpGoals: AgentHubListGoalsToolResult["goals"] = [
-      ...(input.agentHubMcpGoals ?? []),
-    ];
-    const mcpSession = this.#mcpRelay?.createSession({
-      enabledTools: input.agentHubMcpTools ?? [],
-      runId: input.run.id,
-      workspacePath: input.workspacePath,
-      onArtifactUpload: input.uploadArtifact,
-      onStaticSiteDeploy: input.deployStaticSite,
-      onToolCall: async (call) => {
-        if (input.callAgentHubMcpTool !== undefined) {
-          return input.callAgentHubMcpTool(call);
-        }
-
-        queue.push({
-          type: "agenthub.tool.call",
-          runId: call.runId,
-          toolCallId: call.toolCallId,
-          name: call.name,
-          input: call.input,
-          createdAt: call.createdAt,
-        });
-
-        if (call.name === "list_goals") {
-          const status = "status" in call.input &&
-            typeof call.input.status === "string"
-            ? call.input.status
-            : undefined;
-
-          return {
-            accepted: true,
-            goals: status === undefined
-              ? mcpGoals.map((goal) => ({ ...goal }))
-              : mcpGoals
-                  .filter((goal) => goal.status === status)
-                  .map((goal) => ({ ...goal })),
-          };
-        }
-
-        return { accepted: true };
-      },
+    const mcpSession = createAgentHubMcpSession({
+      eventSink: queue,
+      relay: this.#mcpRelay,
+      runInput: input,
     });
     const resumeSessionId =
       input.run.dispatchMode === "resume"
@@ -757,13 +443,11 @@ export class CodexAdapter implements AgentAdapter {
       "-",
     ];
     const process = this.#spawnProcess(this.#executablePath, args, {
-      ...createCodexSpawnOptions({
+      ...createRuntimeSpawnOptions({
         cwd: input.workspacePath,
         stdio: "pipe",
       }),
     });
-    const stdout = new LineDecoder();
-    const stderr = new LineDecoder();
     let completed = false;
     let aborted = false;
     let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
@@ -808,43 +492,11 @@ export class CodexAdapter implements AgentAdapter {
       }
     };
 
-    const handleStdoutLine = (line: string) => {
-      const parsed = parseJsonLine(line);
-
-      if (!parsed.ok) {
-        queue.push(createLogLineEvent(input.run.id, "stdout", parsed.line));
-        return;
-      }
-
-      for (const event of mapCodexJsonEvents(parsed.value, input.run.id)) {
-        queue.push(event);
-      }
-    };
-
-    process.stdout.on("data", (chunk) => {
-      for (const line of stdout.push(chunk)) {
-        handleStdoutLine(line);
-      }
-    });
-    process.stdout.on("end", () => {
-      const line = stdout.flush();
-
-      if (line !== undefined) {
-        handleStdoutLine(line);
-      }
-    });
-
-    process.stderr.on("data", (chunk) => {
-      for (const line of stderr.push(chunk)) {
-        queue.push(createLogLineEvent(input.run.id, "stderr", line));
-      }
-    });
-    process.stderr.on("end", () => {
-      const line = stderr.flush();
-
-      if (line !== undefined) {
-        queue.push(createLogLineEvent(input.run.id, "stderr", line));
-      }
+    attachJsonLineRuntimeOutput({
+      eventSink: queue,
+      mapJsonValue: (value) => mapCodexJsonEvents(value, input.run.id),
+      process,
+      runId: input.run.id,
     });
 
     process.once("error", (error) => {
@@ -863,9 +515,7 @@ export class CodexAdapter implements AgentAdapter {
       "abort",
       () => {
         aborted = true;
-        abortStatus = input.abortSignal?.reason === "interrupted"
-          ? "interrupted"
-          : "cancelled";
+        abortStatus = mapAbortReasonToRunStatus(input.abortSignal?.reason);
         process.kill("SIGTERM");
       },
       { once: true },
@@ -879,87 +529,29 @@ export class CodexAdapter implements AgentAdapter {
     });
     void (async () => {
       try {
-        let runPrompt = input.prompt;
-        let contextCompacted = false;
-
-        if (
-          input.contextCompression !== undefined &&
-          input.contextCompression.compressibleText.length >=
-            input.contextCompression.thresholdChars
-        ) {
-          const compressedContext = await runHiddenCodexPrompt({
-            agentInstructions: [
-              input.agentInstructions,
-              "You are compacting older AgentHub conversation context. Return a concise factual Markdown summary. Do not include visible chat replies.",
-            ].filter((line): line is string => line !== undefined).join("\n\n"),
+        const runPrompt = await buildPromptWithRuntimeMemory({
+          agentInstructions: input.agentInstructions,
+          basePrompt: input.prompt,
+          contextCompression: input.contextCompression,
+          eventSink: queue,
+          hiddenPrompt: (hiddenInput) => runHiddenCodexPrompt({
+            agentInstructions: hiddenInput.agentInstructions,
             executablePath: this.#executablePath,
-            prompt: input.contextCompression.compressibleText,
+            prompt: hiddenInput.prompt,
             spawnProcess: this.#spawnProcess,
-            workspacePath: input.workspacePath,
-          });
-          await appendMemory({
-            workspacePath: input.workspacePath,
-            kind: "daily",
-            title: "Context compression",
-            content: compressedContext,
-            tags: ["context-compression"],
-            dedupeKey: `context-compression:${input.run.id}`,
-          });
-          contextCompacted = true;
-          queue.push({
-            type: "runtime.event",
-            runId: input.run.id,
-            raw: {
-              runtimeKind: "codex",
-              nativeType: "memory.compacted",
-              payload: {
-                compressedChars: compressedContext.length,
-                sourceChars: input.contextCompression.compressibleText.length,
-              },
-            },
-            createdAt: nowIsoDateTime(),
-          });
-          runPrompt = input.contextCompression.promptTemplate.replace(
-            "{{compressed_context}}",
-            compressedContext,
-          );
-        }
-
-        if (!contextCompacted) {
-          const periodicRefresh = await maybeRefreshDailyMemory({
-            agentInstructions: input.agentInstructions,
-            executablePath: this.#executablePath,
-            intervalMs: this.#dailyMemoryRefreshIntervalMs,
-            maxTranscriptBytes: this.#dailyMemoryRefreshTranscriptMaxBytes,
-            spawnProcess: this.#spawnProcess,
-            workspacePath: input.workspacePath,
-          });
-
-          if (periodicRefresh.refreshed) {
-            queue.push({
-              type: "runtime.event",
-              runId: input.run.id,
-              raw: {
-                runtimeKind: "codex",
-                nativeType: "memory.periodic_refreshed",
-                payload: {
-                  date: periodicRefresh.date,
-                  summaryChars: periodicRefresh.summary.length,
-                  sourceChars: periodicRefresh.sourceChars,
-                  transcriptFile: periodicRefresh.transcriptFile,
-                  truncated: periodicRefresh.truncated,
-                },
-              },
-              createdAt: nowIsoDateTime(),
-            });
-          }
-        }
-
-        const memoryPrompt = await buildMemoryPrompt({
+            workspacePath: hiddenInput.workspacePath,
+          }),
+          memoryOptions: {
+            dailyMemoryRefreshIntervalMs: this.#dailyMemoryRefreshIntervalMs,
+            dailyMemoryRefreshTranscriptMaxBytes:
+              this.#dailyMemoryRefreshTranscriptMaxBytes,
+          },
+          runId: input.run.id,
+          runtimeKind: "codex",
           workspacePath: input.workspacePath,
         });
 
-        process.stdin.write([memoryPrompt, runPrompt].join("\n\n"));
+        process.stdin.write(runPrompt);
         process.stdin.end();
         markStdinInitialized();
       } catch (error) {

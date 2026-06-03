@@ -118,14 +118,28 @@ async function collectEvents(
   return collected;
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  message: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(message);
+}
+
 describe("ClaudeCodeAdapter", () => {
   it("spawns claude print mode with stream-json output and bypass permissions", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
-
-    calls[0].process.close(0);
-    await eventsPromise;
 
     expect(calls[0].command).toBe("claude");
     expect(calls[0].args).toEqual([
@@ -136,11 +150,19 @@ describe("ClaudeCodeAdapter", () => {
       "--permission-mode",
       "bypassPermissions",
     ]);
-    expect(calls[0].process.stdinText).toBe("hello claude");
     expect(calls[0].options).toMatchObject({
       cwd: "/tmp/agent-workspace",
       stdio: "pipe",
     });
+
+    await waitFor(
+      () => calls[0].process.stdinText.includes("hello claude"),
+      "Expected Claude prompt to be written to stdin.",
+    );
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
+    calls[0].process.close(0);
+    await eventsPromise;
   });
 
   it("writes the prompt to stdin and closes stdin", async () => {
@@ -148,7 +170,12 @@ describe("ClaudeCodeAdapter", () => {
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
 
-    expect(calls[0].process.stdinText).toBe("hello claude");
+    await waitFor(
+      () => calls[0].process.stdinText.includes("hello claude"),
+      "Expected Claude prompt to be written to stdin.",
+    );
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
     expect(calls[0].process.stdin.writableEnded).toBe(true);
 
     calls[0].process.close(0);
@@ -183,7 +210,12 @@ describe("ClaudeCodeAdapter", () => {
       "--permission-mode",
       "bypassPermissions",
     ]);
-    expect(calls[0].process.stdinText).toBe("hello claude");
+    await waitFor(
+      () => calls[0].process.stdinText.includes("hello claude"),
+      "Expected Claude prompt to be written to stdin.",
+    );
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
 
     calls[0].process.close(0);
     await eventsPromise;
@@ -238,7 +270,12 @@ describe("ClaudeCodeAdapter", () => {
         "Do not call the bare tool names directly in Claude Code.",
       ].join("\n"),
     );
-    expect(calls[0].process.stdinText).toBe("hello claude");
+    await waitFor(
+      () => calls[0].process.stdinText.includes("hello claude"),
+      "Expected Claude prompt to be written to stdin.",
+    );
+    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
+    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
 
     calls[0].process.close(0);
     await eventsPromise;

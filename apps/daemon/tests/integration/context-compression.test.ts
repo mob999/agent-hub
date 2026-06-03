@@ -9,7 +9,7 @@ import type { AgentRunInput, RunEvent } from "@agent-hub/core";
 import { describe, expect, it } from "vitest";
 
 import { appendMemory } from "../../src/memory";
-import { CodexAdapter, type SpawnCodexProcess } from "../../src/runtime";
+import { ClaudeCodeAdapter, CodexAdapter, type SpawnCodexProcess } from "../../src/runtime";
 
 class MockCodexProcess extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -105,7 +105,7 @@ async function waitFor(
   throw new Error(message);
 }
 
-describe("Codex context compression integration", () => {
+describe("runtime context compression integration", () => {
   it("runs hidden compaction, writes daily memory, and injects the summary into the normal run", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-context-compression-"));
     const { calls, spawnProcess } = createSpawnMock();
@@ -187,6 +187,97 @@ describe("Codex context compression integration", () => {
       expect(dailyMemory).toContain("Context compression");
       expect(dailyMemory).toContain(compressedSummary);
       expect(dailyMemory).toContain("[Full conversation transcript](./transcripts/");
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("runs Claude hidden compaction through the same memory wrapper", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-claude-context-compression-"));
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new ClaudeCodeAdapter({ spawnProcess });
+    const compressedSummary = "Compressed by Claude: user wants task handoff and deployment links.";
+    const compressibleText = [
+      "Older message 1: long context about Claude adapter parity.",
+      "Older message 2: old context that should be summarized.",
+    ].join("\n");
+    const eventsPromise = collectEvents(
+      adapter.run(
+        createRunInput(workspacePath, {
+          prompt: "this prompt will be replaced after compression",
+          runtime: {
+            runtimeKind: "claude-code",
+            capabilities: [],
+            updatedAt: "2026-06-01T00:00:00.000Z",
+          },
+          contextCompression: {
+            compressibleText,
+            promptTemplate: [
+              "Before latest request.",
+              "<compressed_older_context>",
+              "{{compressed_context}}",
+              "</compressed_older_context>",
+              "Latest request: please continue with Claude.",
+            ].join("\n"),
+            thresholdChars: 1,
+          },
+        }),
+      ),
+    );
+
+    try {
+      await waitFor(() => calls.length === 2, "Expected hidden Claude compaction process to spawn.");
+      const normalRun = calls[0]?.process;
+      const hiddenCompaction = calls[1]?.process;
+
+      expect(normalRun).toBeDefined();
+      expect(hiddenCompaction).toBeDefined();
+      expect(calls[1]?.args).toContain("--append-system-prompt-file");
+      expect(hiddenCompaction?.stdinText).toBe(compressibleText);
+
+      hiddenCompaction?.stdout.write(
+        `${JSON.stringify({
+          type: "assistant",
+          message: {
+            id: "message_1",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: compressedSummary }],
+          },
+        })}\n`,
+      );
+      hiddenCompaction?.close(0);
+
+      await waitFor(
+        () => normalRun?.stdinText.includes(compressedSummary) === true,
+        "Expected normal Claude run prompt to contain compressed context.",
+      );
+
+      expect(normalRun?.stdinText).toContain("<agenthub_memory>");
+      expect(normalRun?.stdinText).toContain(compressedSummary);
+      expect(normalRun?.stdinText).toContain("Latest request: please continue with Claude.");
+      expect(normalRun?.stdinText).not.toContain("{{compressed_context}}");
+      expect(normalRun?.stdinText).not.toContain("old context that should be summarized");
+
+      normalRun?.close(0);
+      const events = await eventsPromise;
+      const compactedEvent = events.find(
+        (event) =>
+          event.type === "runtime.event" &&
+          event.raw.nativeType === "memory.compacted",
+      );
+      const dailyMemory = await readFile(
+        path.join(
+          workspacePath,
+          "memory",
+          `${new Date().toISOString().slice(0, 10)}.md`,
+        ),
+        "utf8",
+      );
+
+      expect(compactedEvent).toBeDefined();
+      expect(dailyMemory).toContain("Context compression");
+      expect(dailyMemory).toContain(compressedSummary);
     } finally {
       await rm(workspacePath, { recursive: true, force: true });
     }

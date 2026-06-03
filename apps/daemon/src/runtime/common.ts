@@ -2,8 +2,9 @@ import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_p
 import type { Readable, Writable } from "node:stream";
 
 import type { RunEvent, RunId, RuntimeRawEvent } from "@agent-hub/core/protocol";
+import { LineDecoder, parseJsonLine } from "./jsonl";
 
-type SpawnedProcess = Pick<
+export type RuntimeChildProcess = Pick<
   ChildProcessByStdio<Writable, Readable, Readable>,
   "kill" | "once" | "stderr" | "stdin" | "stdout"
 >;
@@ -12,7 +13,11 @@ export type SpawnRuntimeProcess = (
   command: string,
   args: string[],
   options: SpawnOptionsWithoutStdio,
-) => SpawnedProcess;
+) => RuntimeChildProcess;
+
+export interface RuntimeEventSink {
+  push(event: RunEvent): void;
+}
 
 interface AsyncQueueItem<T> {
   done: boolean;
@@ -115,4 +120,59 @@ export function createRuntimeEvent(
     raw,
     createdAt,
   };
+}
+
+export function mapAbortReasonToRunStatus(
+  reason: unknown,
+): Extract<RunEvent, { type: "run.completed" }>["status"] {
+  return reason === "interrupted" ? "interrupted" : "cancelled";
+}
+
+export function attachJsonLineRuntimeOutput(input: {
+  eventSink: RuntimeEventSink;
+  mapJsonValue(value: unknown): RunEvent[];
+  process: RuntimeChildProcess;
+  runId: RunId;
+}): void {
+  const stdout = new LineDecoder();
+  const stderr = new LineDecoder();
+
+  const handleStdoutLine = (line: string) => {
+    const parsed = parseJsonLine(line);
+
+    if (!parsed.ok) {
+      input.eventSink.push(createLogLineEvent(input.runId, "stdout", parsed.line));
+      return;
+    }
+
+    for (const event of input.mapJsonValue(parsed.value)) {
+      input.eventSink.push(event);
+    }
+  };
+
+  input.process.stdout.on("data", (chunk) => {
+    for (const line of stdout.push(chunk)) {
+      handleStdoutLine(line);
+    }
+  });
+  input.process.stdout.on("end", () => {
+    const line = stdout.flush();
+
+    if (line !== undefined) {
+      handleStdoutLine(line);
+    }
+  });
+
+  input.process.stderr.on("data", (chunk) => {
+    for (const line of stderr.push(chunk)) {
+      input.eventSink.push(createLogLineEvent(input.runId, "stderr", line));
+    }
+  });
+  input.process.stderr.on("end", () => {
+    const line = stderr.flush();
+
+    if (line !== undefined) {
+      input.eventSink.push(createLogLineEvent(input.runId, "stderr", line));
+    }
+  });
 }

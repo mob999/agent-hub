@@ -1,7 +1,13 @@
 import { createServer } from "node:http";
 
 import { loadWorkerEnv } from "@agent-hub/config";
-import type { RealtimeEvent } from "@agent-hub/core";
+import type {
+  AgentHubMcpToolName,
+  AgentHubMcpToolResult,
+  RealtimeEvent,
+  RunEvent,
+  ToolCallStatus,
+} from "@agent-hub/core";
 import { createDb } from "@agent-hub/db";
 import {
   ackAgentProvisioningQueueMessage,
@@ -64,6 +70,45 @@ async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
     }),
   );
 }
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+async function processRunAppendResult(
+  result: Awaited<ReturnType<typeof appendRunEvent>>,
+): Promise<void> {
+  await publishRealtimeEvents(result.realtimeEvents);
+  await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
+  await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
+}
+
+async function appendAgentHubToolResultEvent(input: {
+  error?: string;
+  name?: AgentHubMcpToolName;
+  output?: AgentHubMcpToolResult;
+  runId: string;
+  status: ToolCallStatus;
+  toolCallId: string;
+}): Promise<void> {
+  const event: RunEvent = {
+    type: "agenthub.tool.result",
+    runId: input.runId,
+    toolCallId: input.toolCallId,
+    name: input.name,
+    status: input.status,
+    output: input.output,
+    error: input.error,
+    createdAt: new Date().toISOString(),
+  };
+  const result = await appendRunEvent(db, event, {
+    publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+    publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+    storageRoot: env.AGENTHUB_STORAGE_ROOT,
+  });
+  await processRunAppendResult(result);
+}
+
 const gateway = new DaemonGateway({
   daemonToken: env.AGENTHUB_DAEMON_TOKEN,
   logger,
@@ -98,32 +143,65 @@ const gateway = new DaemonGateway({
       publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
       storageRoot: env.AGENTHUB_STORAGE_ROOT,
     });
-    await publishRealtimeEvents(result.realtimeEvents);
-    await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
-    await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
+    await processRunAppendResult(result);
   },
   onAgentHubToolCall: async (message) => {
-    const result = await appendRunEvent(db, {
-      type: "agenthub.tool.call",
-      runId: message.call.runId,
-      toolCallId: message.call.toolCallId,
-      name: message.call.name,
-      input: message.call.input,
-      createdAt: message.call.createdAt,
-    }, {
-      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
-      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
-      storageRoot: env.AGENTHUB_STORAGE_ROOT,
-    });
-    await publishRealtimeEvents(result.realtimeEvents);
-    await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
-    await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
+    try {
+      const result = await appendRunEvent(db, {
+        type: "agenthub.tool.call",
+        runId: message.call.runId,
+        toolCallId: message.call.toolCallId,
+        name: message.call.name,
+        input: message.call.input,
+        createdAt: message.call.createdAt,
+      }, {
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+        storageRoot: env.AGENTHUB_STORAGE_ROOT,
+      });
+      await processRunAppendResult(result);
 
-    if (result.toolResult !== undefined) {
-      return result.toolResult;
+      if (result.toolResult !== undefined) {
+        await appendAgentHubToolResultEvent({
+          runId: message.call.runId,
+          toolCallId: message.call.toolCallId,
+          name: message.call.name,
+          status: "succeeded",
+          output: result.toolResult,
+        }).catch((error) => {
+          logger.warn(
+            {
+              err: toError(error),
+              runId: message.call.runId,
+              toolName: message.call.name,
+            },
+            "Failed to persist AgentHub MCP tool result",
+          );
+        });
+        return result.toolResult;
+      }
+
+      throw new Error(`AgentHub MCP tool call was not accepted: ${message.call.name}`);
+    } catch (error) {
+      const err = toError(error);
+      await appendAgentHubToolResultEvent({
+        runId: message.call.runId,
+        toolCallId: message.call.toolCallId,
+        name: message.call.name,
+        status: "failed",
+        error: err.message,
+      }).catch((appendError) => {
+        logger.warn(
+          {
+            err: toError(appendError),
+            runId: message.call.runId,
+            toolName: message.call.name,
+          },
+          "Failed to persist failed AgentHub MCP tool result",
+        );
+      });
+      throw err;
     }
-
-    throw new Error(`AgentHub MCP tool call was not accepted: ${message.call.name}`);
   },
   onArtifactUpload: async (message) => {
     const artifact = await persistConversationArtifactUpload(db, {

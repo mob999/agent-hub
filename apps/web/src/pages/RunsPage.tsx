@@ -1,6 +1,6 @@
 import { InlineNotification, Tag } from '@carbon/react'
 import { JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
 import {
   eventLogLine,
@@ -31,6 +31,41 @@ function formatEventJson(value: unknown): string {
   }
 
   return JSON.stringify(value, null, 2)
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+}
+
+function promptLineTitle(line: string): string {
+  return line
+    .replace(/<\/?[\w:-]+[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function runDisplayTitle(localRun: LocalRun): string {
+  const agentLabel = localRun.agentName ?? 'Agent'
+
+  for (const line of localRun.prompt.split(/\r?\n/)) {
+    const trimmed = line.trim()
+
+    if (
+      trimmed.length === 0 ||
+      /^<\/?[\w:-]+[^>]*>$/.test(trimmed) ||
+      trimmed.startsWith('```')
+    ) {
+      continue
+    }
+
+    const title = promptLineTitle(trimmed)
+
+    if (title.length > 0) {
+      return truncateText(`${agentLabel} · ${title}`, 80)
+    }
+  }
+
+  return localRun.agentName ?? `Run ${localRun.run.id.slice(0, 8)}`
 }
 
 function eventDetails(event: RunEvent): EventDetail[] {
@@ -71,12 +106,16 @@ export function RunsPage({
   selectRun,
 }: RunsPageProps) {
   const selectedRun = runs.find((localRun) => localRun.run.id === selectedRunId) ?? runs[0] ?? null
+  const [expandedPromptByRunId, setExpandedPromptByRunId] = useState<Record<string, boolean>>({})
   const selectedEvents = selectedRun ? eventsByRun[selectedRun.run.id] ?? [] : []
   const displayEvents = selectedEvents.filter(isDisplayRunEvent)
   const agentOutput = selectedEvents
     .map(eventMessageContent)
     .filter(Boolean)
     .join('')
+  const selectedRunTitle = selectedRun ? runDisplayTitle(selectedRun) : 'No run selected'
+  const promptLength = selectedRun?.prompt.length ?? 0
+  const promptExpanded = selectedRun ? expandedPromptByRunId[selectedRun.run.id] === true : false
 
   return (
     <section
@@ -120,9 +159,9 @@ export function RunsPage({
                   <JobRun size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
-                  <strong className="truncate">Run {localRun.run.id.slice(0, 8)}</strong>
+                  <strong className="truncate">{runDisplayTitle(localRun)}</strong>
                   <small className="truncate text-[var(--cds-text-secondary)]">
-                    {localRun.prompt}
+                    Run {localRun.run.id.slice(0, 8)} · {formatTime(localRun.run.createdAt)}
                   </small>
                 </span>
                 <StatusDot status={localRun.run.status} />
@@ -142,7 +181,7 @@ export function RunsPage({
               <JobRun size={18} />
             </span>
             <strong className="truncate">
-              {selectedRun ? `Run ${selectedRun.run.id.slice(0, 8)}` : 'No run selected'}
+              {selectedRunTitle}
             </strong>
           </div>
         </header>
@@ -161,14 +200,14 @@ export function RunsPage({
               </span>
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-semibold leading-snug">
-                  {selectedRun.prompt}
+                  {selectedRunTitle}
                 </h2>
                 <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
                   <StatusDot status={selectedRun.run.status} />
                   <span>{runStatusLabel(selectedRun.run.status)}</span>
                 </p>
                 <small className="mt-1 block truncate text-[var(--cds-text-secondary)]">
-                  {selectedRun.run.id}
+                  Run {selectedRun.run.id}
                 </small>
               </div>
               <Tag
@@ -181,13 +220,44 @@ export function RunsPage({
             </section>
 
             <DetailSection title="Prompt">
-              <p className="whitespace-pre-wrap break-words">{selectedRun.prompt}</p>
+              <details
+                className="border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+                open={promptExpanded}
+                onToggle={(event) => {
+                  if (selectedRun === null) {
+                    return
+                  }
+
+                  const open = event.currentTarget.open
+                  setExpandedPromptByRunId((current) => ({
+                    ...current,
+                    [selectedRun.run.id]: open,
+                  }))
+                }}
+              >
+                <summary className="flex cursor-pointer items-center justify-between gap-4 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]">
+                  <span className="font-semibold text-[var(--cds-text-primary)]">
+                    Prompt
+                  </span>
+                  <span className="shrink-0 text-xs text-[var(--cds-text-secondary)]">
+                    {promptLength.toLocaleString()} chars · {promptExpanded ? 'Hide' : 'Show'}
+                  </span>
+                </summary>
+                <p className="border-t border-[var(--cds-border-subtle-01)] p-3 whitespace-pre-wrap break-words text-sm leading-relaxed">
+                  {selectedRun.prompt}
+                </p>
+              </details>
             </DetailSection>
 
             <DetailSection title="Info">
               <div className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-3 max-[671px]:grid-cols-1">
                 <span className="text-[var(--cds-text-secondary)]">Agent</span>
-                <strong className="truncate">{selectedRun.run.agentId}</strong>
+                <span className="grid min-w-0 gap-0.5">
+                  <strong className="truncate">{selectedRun.agentName ?? selectedRun.run.agentId}</strong>
+                  {selectedRun.agentName && (
+                    <small className="truncate text-[var(--cds-text-secondary)]">{selectedRun.run.agentId}</small>
+                  )}
+                </span>
                 <span className="text-[var(--cds-text-secondary)]">Daemon</span>
                 <strong className="truncate">{selectedRun.run.daemonDeviceId}</strong>
                 <span className="text-[var(--cds-text-secondary)]">Created</span>
@@ -258,6 +328,8 @@ function EventRow({ event, index }: EventRowProps) {
   const details = eventDetails(event)
   const logLine = eventLogLine(event)
   const isErrorLog = event.type === 'log.line' && event.stream === 'stderr'
+  const isToolEvent = event.type.startsWith('tool.call') || event.type.startsWith('agenthub.tool')
+  const isFailedToolResult = event.type === 'agenthub.tool.result' && event.status === 'failed'
 
   return (
     <li className="grid min-w-0 gap-3 border-b border-[var(--cds-border-subtle-01)] px-4 py-3 last:border-b-0 max-[671px]:px-3">
@@ -265,7 +337,7 @@ function EventRow({ event, index }: EventRowProps) {
         <Tag
           className="min-w-0 max-w-full justify-self-start"
           size="sm"
-          type={isErrorLog ? 'red' : event.type.startsWith('tool.call') ? 'blue' : 'gray'}
+          type={isErrorLog || isFailedToolResult ? 'red' : isToolEvent ? 'blue' : 'gray'}
         >
           <span className="block max-w-[11rem] truncate">{event.type}</span>
         </Tag>

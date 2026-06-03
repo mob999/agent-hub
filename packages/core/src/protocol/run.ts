@@ -118,6 +118,16 @@ export type RunEvent =
       createdAt: IsoDateTime;
     }
   | {
+      type: "agenthub.tool.result";
+      runId: RunId;
+      toolCallId: string;
+      name?: AgentHubMcpToolName;
+      status: ToolCallStatus;
+      output?: unknown;
+      error?: string;
+      createdAt: IsoDateTime;
+    }
+  | {
       type: "artifact.created";
       runId: RunId;
       artifact: Artifact;

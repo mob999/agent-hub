@@ -395,6 +395,17 @@ export function WorkspacePage({
     try {
       const response = await apiRequest<{ agents: AgentDetails[] }>('/agents')
       setAgents(response.agents)
+      agentsRef.current = response.agents
+      setRuns((current) =>
+        current.map((localRun) => {
+          const runAgent = response.agents.find((agent) => agent.agent.id === localRun.run.agentId)
+
+          return {
+            ...localRun,
+            agentName: runAgent?.agent.name ?? localRun.agentName,
+          }
+        }),
+      )
       setAgentError(null)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -540,7 +551,7 @@ export function WorkspacePage({
   const loadRuns = useCallback(async () => {
     try {
       const response = await apiRequest<{ runs: AgentRunSummary[] }>('/runs')
-      const loadedRuns = response.runs.map((run) => toLocalRun(run))
+      const loadedRuns = response.runs.map((run) => toLocalRun(run, agentsRef.current))
 
       setRuns(loadedRuns)
       setSelectedRunId((current) => {

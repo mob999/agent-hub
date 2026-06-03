@@ -49,18 +49,20 @@ export function GroupOrchestratorModal({
             hideCloseButton
           />
         )}
-        <Select
-          id="all-group-orchestrator"
-          labelText="Orchestrator"
-          value={orchestratorAgentId}
-          disabled={isSaving}
-          onChange={(event) => setOrchestratorAgentId(event.target.value)}
-        >
-          <SelectItem value="" text="No orchestrator" />
-          {readyAgents.map((agent) => (
-            <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
-          ))}
-        </Select>
+        <div className="rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-3">
+          <Select
+            id="all-group-orchestrator"
+            labelText="Orchestrator"
+            value={orchestratorAgentId}
+            disabled={isSaving}
+            onChange={(event) => setOrchestratorAgentId(event.target.value)}
+          >
+            <SelectItem value="" text="No orchestrator" />
+            {readyAgents.map((agent) => (
+              <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
+            ))}
+          </Select>
+        </div>
         {readyAgents.length === 0 && (
           <InlineNotification
             kind="warning"

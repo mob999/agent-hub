@@ -235,7 +235,7 @@ export function ChatSidebar({
                           <img
                             src={agent.agent.avatar}
                             alt=""
-                            className="h-7 w-7 object-cover"
+                            className="h-6 w-6 rounded-sm object-cover"
                           />
                         ) : (
                           <ChatBot size={16} />
@@ -399,7 +399,7 @@ export function ChatSidebar({
                       <img
                         src={agent.agent.avatar}
                         alt=""
-                        className="h-7 w-7 object-cover"
+                        className="h-6 w-6 rounded-sm object-cover"
                       />
                     ) : (
                       <ChatBot size={16} />

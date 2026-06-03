@@ -123,10 +123,10 @@ export function GroupCreateModal({
           <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
             Agents
           </p>
-          <div className="grid max-h-64 overflow-y-auto border border-[var(--cds-border-subtle-01)]">
+          <div className="grid max-h-64 overflow-y-auto rounded-xl border border-[#d8dee6] bg-white">
             {agents.map((agent) => (
               <div
-                className="grid min-h-12 grid-cols-[minmax(0,1fr)_1.5rem] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] px-3 py-2 last:border-b-0"
+                className="grid min-h-12 grid-cols-[minmax(0,1fr)_1.5rem] items-center gap-3 border-b border-[#eef0f3] px-3 py-2 last:border-b-0 hover:bg-[#f7f8fa]"
                 key={agent.agent.id}
               >
                 <Checkbox

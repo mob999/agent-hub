@@ -116,17 +116,17 @@ function AgentEditModalContent({
   }, [loadMemoryFiles, open])
 
   const sectionButtonClass = (section: AgentSettingsSection) =>
-    `w-full cursor-pointer border-0 px-3 py-2 text-left text-sm font-semibold ${
+    `w-full cursor-pointer rounded-xl border-0 px-3 py-2 text-left text-sm font-semibold transition-colors ${
       selectedSection === section
-        ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+        ? 'bg-[#e9eaee] text-[#161616]'
+        : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
     }`
 
   const memoryTreeButtonClass = (filePath: string) =>
-    `flex w-full cursor-pointer items-center gap-2 border-0 px-2 py-1.5 text-left text-sm ${
+    `flex w-full cursor-pointer items-center gap-2 rounded-lg border-0 px-2 py-1.5 text-left text-sm transition-colors ${
       selectedMemoryFilePath === filePath
-        ? 'bg-[var(--cds-layer-selected-01)] font-semibold text-[var(--cds-text-primary)]'
-        : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+        ? 'bg-[#e9eaee] font-semibold text-[#161616]'
+        : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
     }`
 
   return (
@@ -161,7 +161,7 @@ function AgentEditModalContent({
             hideCloseButton
           />
         )}
-        <nav className="grid content-start gap-1 border-r border-[var(--cds-border-subtle-01)] pr-3" aria-label="Agent settings">
+        <nav className="grid content-start gap-1 rounded-2xl bg-[#f7f8fa] p-2" aria-label="Agent settings">
           <button className={sectionButtonClass('profile')} type="button" onClick={() => setSelectedSection('profile')}>
             Profile
           </button>
@@ -240,7 +240,7 @@ function AgentEditModalContent({
               )}
               {memoryFiles.length > 0 && (
                 <div className="grid min-h-80 gap-3 md:grid-cols-[14rem_minmax(0,1fr)]">
-                  <div className="grid content-start gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2">
+                  <div className="grid content-start gap-1 rounded-xl border border-[#d8dee6] bg-white p-2">
                     {longTermMemory && (
                       <button className={memoryTreeButtonClass(longTermMemory.file)} type="button" onClick={() => setSelectedMemoryFilePath(longTermMemory.file)}>
                         <Document size={16} />
@@ -248,7 +248,7 @@ function AgentEditModalContent({
                       </button>
                     )}
                     <div className="grid gap-1">
-                      <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-semibold text-[var(--cds-text-primary)]">
+                      <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-semibold text-[#161616]">
                         <Folder size={16} />
                         memory/
                       </div>
@@ -264,7 +264,7 @@ function AgentEditModalContent({
                   </div>
                   {selectedMemoryFile && (
                     <div className="grid min-w-0 gap-2">
-                      <pre className="h-[28rem] overflow-auto whitespace-pre-wrap border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-xs leading-5 text-[var(--cds-text-primary)]">
+                      <pre className="h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-3 text-xs leading-5 text-[var(--cds-text-primary)]">
                         {selectedMemoryFile.exists
                           ? selectedMemoryFile.content
                           : 'This memory file has not been created yet.'}
@@ -276,7 +276,7 @@ function AgentEditModalContent({
             </div>
           )}
           {selectedSection === 'danger' && (
-            <div className="grid gap-3">
+            <div className="grid gap-3 rounded-xl border border-[#ffd7d9] bg-[#fff1f1] p-3">
               <InlineNotification
                 kind="warning"
                 title="Archive agent"

@@ -695,10 +695,10 @@ export function ArtifactWorkspace({
         <div key={node.id}>
           <button
             type="button"
-            className={`grid w-full cursor-pointer grid-cols-[1.25rem_1.25rem_minmax(0,1fr)] items-center gap-1 border p-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+            className={`grid w-full cursor-pointer grid-cols-[1.25rem_1.25rem_minmax(0,1fr)] items-center gap-1 rounded-lg border-0 p-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
               selected
-                ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                : 'border-transparent bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                ? 'bg-[#e9eaee] text-[#161616]'
+                : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
             }`}
             style={{ paddingLeft: `${0.5 + depth * 0.875}rem` }}
             onClick={() => {
@@ -743,14 +743,14 @@ export function ArtifactWorkspace({
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[1055px]:border-b max-[1055px]:border-r-0">
-        <div className="border-b border-[var(--cds-border-subtle-01)] p-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
+    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[1055px]:grid-cols-1">
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[1055px]:border-b max-[1055px]:border-r-0">
+        <div className="border-b border-[#eef0f3] bg-white p-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[#596171]">
             Files ({artifacts.length})
           </h2>
         </div>
-        <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
+        <div className="grid content-start gap-0.5 overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
             const itemFileInfo = item.kind === 'site'
@@ -761,10 +761,10 @@ export function ArtifactWorkspace({
               <button
                 key={item.id}
                 type="button"
-                className={`grid cursor-pointer gap-1 border p-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                className={`grid cursor-pointer gap-0.5 rounded-md border-0 px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selected
-                    ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                    : 'border-transparent bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)]'
+                    ? 'bg-[#dde3ea] text-[#161616]'
+                    : 'bg-transparent text-[#5f6877] hover:bg-[#edf0f4] hover:text-[#161616]'
                 }`}
                 onClick={() => onActiveArtifactChange?.(item.id)}
               >
@@ -775,19 +775,19 @@ export function ArtifactWorkspace({
                   <span className="truncate font-semibold">{item.filename}</span>
                 </span>
                 {item.kind === 'site' && (
-                  <span className="truncate pl-7 text-xs">
+                  <span className="truncate pl-7 text-xs text-[#69707d]">
                     Site project · {item.fileCount ?? 0} files
                   </span>
                 )}
                 {item.title !== item.filename && (
-                  <span className="truncate pl-7 text-xs">{item.title}</span>
+                  <span className="truncate pl-7 text-xs text-[#69707d]">{item.title}</span>
                 )}
               </button>
             )
           })}
           {artifact?.kind === 'site' && siteFileTree.length > 0 && (
-            <div className="mt-3 border-t border-[var(--cds-border-subtle-01)] pt-3">
-              <h3 className="mb-2 px-2 text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">
+            <div className="mt-3 border-t border-[#e1e5ea] pt-3">
+              <h3 className="mb-2 px-2 text-xs font-semibold uppercase text-[#69707d]">
                 Site files
               </h3>
               <div className="grid gap-0.5">
@@ -796,10 +796,10 @@ export function ArtifactWorkspace({
             </div>
           )}
         </div>
-        <div className="grid self-end border-t border-[var(--cds-border-subtle-01)]">
+        <div className="grid self-end border-t border-[#eef0f3] bg-white">
           {leftInfoPanel === 'details' && (
-            <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3 text-sm">
-              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Details</h3>
+            <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[#eef0f3] p-3 text-sm">
+              <h3 className="text-xs font-semibold uppercase text-[#69707d]">Details</h3>
               <p className="truncate text-[var(--cds-text-primary)]">{artifact?.kind === 'site' ? 'Site' : fileInfo.label}</p>
               <p className="truncate text-[var(--cds-text-secondary)]">{artifact?.kind === 'site' ? activeSiteFilePath ?? artifact.filename : artifact?.filename}</p>
               {artifact?.kind === 'site' && (
@@ -812,14 +812,14 @@ export function ArtifactWorkspace({
             </section>
           )}
           {leftInfoPanel === 'history' && (
-            <section className="grid max-h-72 gap-2 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3">
-              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">History</h3>
+            <section className="grid max-h-72 gap-2 overflow-y-auto border-b border-[#eef0f3] p-3">
+              <h3 className="text-xs font-semibold uppercase text-[#69707d]">History</h3>
               {(details?.actions ?? []).length === 0 ? (
                 <p className="text-sm text-[var(--cds-text-secondary)]">No actions yet.</p>
               ) : (
                 <div className="grid gap-2">
                   {(details?.actions ?? []).map((action) => (
-                    <div key={action.id} className="grid gap-1 border border-[var(--cds-border-subtle-01)] p-2 text-xs">
+                    <div key={action.id} className="grid gap-1 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-2 text-xs">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{action.type}</span>
                         <span className="text-[var(--cds-text-secondary)]">{action.status}</span>
@@ -839,10 +839,10 @@ export function ArtifactWorkspace({
               <button
                 key={panel}
                 type="button"
-                className={`min-h-10 cursor-pointer border-0 border-r border-[var(--cds-border-subtle-01)] px-3 text-left text-xs font-semibold uppercase focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] last:border-r-0 ${
+                className={`min-h-10 cursor-pointer border-0 border-r border-[#eef0f3] px-3 text-left text-xs font-semibold uppercase focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] last:border-r-0 ${
                   leftInfoPanel === panel
-                    ? 'bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                    : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                    ? 'bg-[#e9eaee] text-[#161616]'
+                    : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
                 }`}
                 onClick={() =>
                   setLeftInfoPanel((current) => current === panel ? null : panel)
@@ -856,7 +856,7 @@ export function ArtifactWorkspace({
       </aside>
 
       <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]">
-        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] p-3">
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[#eef0f3] bg-white p-3">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-[var(--cds-text-primary)]">
               {artifact?.title ?? 'File'}
@@ -996,7 +996,7 @@ export function ArtifactWorkspace({
             )
           ) : fileInfo.category === 'image' ? (
             previewUrl || siteFileRawUrl ? (
-              <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[var(--cds-layer-01)] p-3">
+              <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[#f7f8fa] p-3">
                 <img
                   alt={artifact.kind === 'site' ? activeSiteFilePath ?? artifact.title : artifact.title}
                   className="max-h-full max-w-full object-contain"

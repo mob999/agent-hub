@@ -1115,7 +1115,7 @@ export function ChannelWorkspace({
         deployments.map((deployment) => (
           <article
             key={deployment.id}
-            className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4"
+            className="grid gap-2 rounded-2xl border border-[#e1e5ea] bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
           >
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1152,7 +1152,7 @@ export function ChannelWorkspace({
                 </p>
               </div>
               <a
-                className="inline-flex h-8 shrink-0 items-center gap-2 border border-[var(--cds-border-strong-01)] px-3 text-sm font-semibold text-[var(--cds-text-primary)] no-underline hover:bg-[var(--cds-layer-hover-01)]"
+                className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-[#dde1e6] bg-white px-3 text-sm font-semibold text-[#161616] no-underline shadow-[0_1px_1px_rgba(0,0,0,0.03)] hover:bg-[#eef0f4]"
                 href={deployment.url}
                 target="_blank"
                 rel="noreferrer"
@@ -1424,14 +1424,14 @@ export function ChannelWorkspace({
                   key={message.id}
                 >
                   <span
-                    className="grid h-10 w-10 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-sm font-semibold max-[671px]:h-9 max-[671px]:w-9"
+                    className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-white text-sm font-semibold shadow-[0_1px_1px_rgba(0,0,0,0.03)] max-[671px]:h-9 max-[671px]:w-9"
                     aria-hidden="true"
                   >
                     {senderAvatar ? (
                       <img
                         src={senderAvatar}
                         alt={senderName}
-                        className="h-full w-full object-cover"
+                        className="h-9 w-9 rounded-md object-cover max-[671px]:h-8 max-[671px]:w-8"
                       />
                     ) : (
                       avatarInitial

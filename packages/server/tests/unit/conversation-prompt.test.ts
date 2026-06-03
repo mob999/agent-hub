@@ -6,6 +6,7 @@ import {
   buildActiveRunsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  orchestratorParallelSerialTaskInstructions,
   artifactUserFacingLinkInstructions,
   formatArtifactPromptLines,
   buildMentionedGroupChatRunPrompt,
@@ -330,6 +331,18 @@ describe("conversation prompt builder", () => {
 
     expect(prompt).toContain("<agenthub_active_runs>");
     expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: queued");
+  });
+
+  it("documents orchestrator parallel and serial task planning rules", () => {
+    const prompt = orchestratorParallelSerialTaskInstructions.join("\n");
+
+    expect(prompt).toContain("Parallel task rule");
+    expect(prompt).toContain("different agents");
+    expect(prompt).toContain("deliverables are clearly separated");
+    expect(prompt).toContain("Serial task rule");
+    expect(prompt).toContain("same assignee");
+    expect(prompt).toContain("dependsOnTaskIndexes");
+    expect(prompt).toContain("integration, verification, publishing, and final-summary");
   });
 
   it("resolves text mentions by longest agent name first", () => {

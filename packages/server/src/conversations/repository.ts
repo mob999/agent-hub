@@ -92,6 +92,12 @@ import {
 
 export const defaultGroupConversationKey = "all";
 export const defaultGroupConversationTitle = "all";
+export const orchestratorParallelSerialTaskInstructions = [
+  "Parallel task rule: tasks may run in parallel only when they are assigned to different agents, each task has enough input to start, their deliverables are clearly separated, and neither task needs the other's report, code, screenshots, site artifact, decision, or verification result.",
+  "Serial task rule: tasks must be serial when they share the same assignee, when one task depends on another task's output, when multiple agents must edit or verify the same deliverable, or when integration, validation, publishing, or final summarization must happen after earlier work.",
+  "Planning pattern: create independent research, design, or separate-module tasks in parallel first; then create dependent integration, verification, publishing, and final-summary tasks with dependsOnTaskIndexes.",
+  "If you are not certain two tasks are independent, make them serial by adding dependsOnTaskIndexes.",
+];
 
 type ConversationRow = typeof conversations.$inferSelect;
 type ConversationMessageRow = typeof conversationMessages.$inferSelect;
@@ -5350,8 +5356,11 @@ async function maybeCreateCheckpointRunForTask(
     task.summary ? `Completed task summary: ${task.summary}` : undefined,
     "Review the completed task and decide how to continue the goal.",
     "Use approve_task for ready downstream tasks, create_task for new follow-up or recovery tasks, cancel_task for obsolete tasks, send_message for visible updates, and complete_goal only when the goal is done.",
+    ...orchestratorParallelSerialTaskInstructions,
     "Before approving or creating same-assignee follow-up work, inspect the task graph. Tasks for the same assignee within this Goal must remain serial.",
     "Do not approve a ready task if the same assignee has an earlier active task with status waiting, ready, assigned, or running in this Goal.",
+    "If a ready downstream task depends on multiple parallel tasks, approve it only after every dependency is succeeded.",
+    "If the completed task output is incomplete or needs rework, create a serial follow-up or recovery task instead of completing the goal.",
     "When creating more work for the same assignee, set dependsOnTaskIndexes to that assignee's previous task index.",
     "create_task and approve_task automatically create the visible assignment message and start the assignee run. Do not follow them with send_message that mentions the assignee; @AgentName and @all force ordinary chat runs and can duplicate the task.",
     "When using send_message for checkpoint updates, omit @AgentName/@all unless you intentionally want a separate ordinary chat reply run.",
@@ -5377,7 +5386,9 @@ async function maybeCreateCheckpointRunForTask(
         scenario: "task checkpoint",
       }),
       "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the goal using AgentHub MCP tools.",
+      ...orchestratorParallelSerialTaskInstructions,
       "Keep tasks for the same assignee serial within the Goal. Check list_goals/task_graph before approving same-assignee downstream work, and do not approve it while an earlier same-assignee task is active.",
+      "Approve downstream work only after all required dependency tasks are succeeded; use serial follow-up or recovery tasks when an output needs rework.",
       "Do not use send_message with @AgentName or @all to dispatch task work. Use create_task for new tasks and approve_task for ready downstream tasks; both tools dispatch automatically.",
       "When you send a user-facing summary that mentions artifacts, use the provided userFacingLink Markdown links. Prefer editor links and never leave deliverables as bare filenames.",
     ].join("\n\n"),

@@ -120,6 +120,12 @@ const runtimeKinds = new Set<RuntimeKind>([
   "opencode",
   "custom",
 ]);
+const orchestratorParallelSerialTaskInstructions = [
+  "Parallel task rule: tasks may run in parallel only when they are assigned to different agents, each task has enough input to start, their deliverables are clearly separated, and neither task needs the other's report, code, screenshots, site artifact, decision, or verification result.",
+  "Serial task rule: tasks must be serial when they share the same assignee, when one task depends on another task's output, when multiple agents must edit or verify the same deliverable, or when integration, validation, publishing, or final summarization must happen after earlier work.",
+  "Planning pattern: create independent research, design, or separate-module tasks in parallel first; then create dependent integration, verification, publishing, and final-summary tasks with dependsOnTaskIndexes.",
+  "If you are not certain two tasks are independent, make them serial by adding dependsOnTaskIndexes.",
+];
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -842,6 +848,7 @@ function buildGroupTaskOrchestratorInstructions(input: {
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
     "In Task mode, first create a goal for the user's objective with create_goal.",
     "Then create agent tasks under that goal with create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }).",
+    ...orchestratorParallelSerialTaskInstructions,
     "Within one Goal, tasks for the same assignee agent must be serial. Do not create multiple independent no-dependency tasks for the same assignee.",
     "If the same assignee needs multiple tasks, create an explicit chain: each later task must set dependsOnTaskIndexes to the previous task index for that assignee.",
     "If you are unsure whether same-assignee work can safely run in parallel, default to serial dependencies.",
@@ -895,6 +902,7 @@ function buildGroupTaskOrchestratorPrompt(input: {
     "Create tasks only for agents listed above.",
     "Start by calling create_goal({ title, description }) for the user's objective.",
     "Then call create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }) for each agent task. Tasks without dependencies start immediately because AgentHub automatically creates the visible assignment message and assignee run.",
+    ...orchestratorParallelSerialTaskInstructions,
     "Same-assignee tasks within one Goal must be serial. Never create multiple parallel no-dependency tasks for the same agent.",
     "For multiple tasks assigned to the same agent, use dependsOnTaskIndexes to point each later task to that agent's previous task index.",
     "When in doubt, make same-assignee tasks serial rather than parallel.",

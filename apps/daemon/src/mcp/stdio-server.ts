@@ -234,7 +234,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: listGoalsToolName,
               description:
-                "List goals in the current AgentHub group conversation, including each goal's tasks, assignees, statuses, dependencies, and task indexes. Use this before planning or approving work to keep tasks for the same assignee serial within one Goal.",
+                "List goals in the current AgentHub group conversation, including each goal's tasks, assignees, statuses, dependencies, and task indexes. Use this before planning or approving work to decide which tasks can run in parallel and which must remain serial. Parallel tasks should have different assignees, enough input to start, separate deliverables, and no dependency on each other's outputs; same-assignee or output-dependent tasks must be serial within one Goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -426,7 +426,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Dependent tasks wait for Orchestrator approval after dependencies succeed. For the same assignee within one Goal, create serial tasks by setting dependsOnTaskIndexes to that assignee's previous task index; do not create multiple parallel no-dependency tasks for the same assignee. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
+                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Omit dependsOnTaskIndexes only when the task is truly parallel-safe: different assignee, enough input to start, clear separate deliverable, and no dependency on another task's report, code, screenshots, site artifact, decision, or verification result. Dependent tasks wait for Orchestrator approval after dependencies succeed. For the same assignee within one Goal, create serial tasks by setting dependsOnTaskIndexes to that assignee's previous task index; do not create multiple parallel no-dependency tasks for the same assignee. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -468,7 +468,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: approveTaskToolName,
               description:
-                "Approve and dispatch a ready downstream task after reviewing a checkpoint. Before approving, use list_goals to ensure the same assignee has no earlier active task in this Goal. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
+                "Approve and dispatch a ready downstream task after reviewing a checkpoint. Before approving, use list_goals to ensure all dependencies are succeeded and the same assignee has no earlier active task in this Goal. If the task depends on multiple parallel tasks, approve it only after every dependency is succeeded. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,

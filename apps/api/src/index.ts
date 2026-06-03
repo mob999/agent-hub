@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { serve } from "@hono/node-server";
@@ -723,6 +723,34 @@ function applyContextCompressionToJob(
   };
 }
 
+async function listAgentDailyMemoryFiles(input: {
+  fallbackDate: string;
+  workspacePath: string;
+}): Promise<string[]> {
+  const memoryDirectory = path.join(input.workspacePath, "memory");
+
+  try {
+    const files = await readdir(memoryDirectory);
+    const dailyFiles = files
+      .filter((file) => /^\d{4}-\d{2}-\d{2}\.md$/.test(file))
+      .sort()
+      .reverse();
+
+    return dailyFiles.length === 0 ? [`${input.fallbackDate}.md`] : dailyFiles;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return [`${input.fallbackDate}.md`];
+    }
+
+    throw error;
+  }
+}
+
 async function prepareApiRunJobDispatch(
   job: RunQueueJob,
   input: {
@@ -1323,6 +1351,10 @@ app.get("/agents/:agentId/memory", async (c) => {
     });
   }
 
+  const dailyMemoryFiles = await listAgentDailyMemoryFiles({
+    fallbackDate: date,
+    workspacePath,
+  });
   const files = await Promise.all([
     readAgentMemoryFile({
       workspacePath,
@@ -1330,18 +1362,14 @@ app.get("/agents/:agentId/memory", async (c) => {
       label: "MEMORY.md",
       file: "MEMORY.md",
     }),
-    readAgentMemoryFile({
-      workspacePath,
-      scope: "daily",
-      label: `${date}.md`,
-      file: path.join("memory", `${date}.md`),
-    }),
-    readAgentMemoryFile({
-      workspacePath,
-      scope: "transcript",
-      label: `transcripts/${date}.md`,
-      file: path.join("memory", "transcripts", `${date}.md`),
-    }),
+    ...dailyMemoryFiles.map((file) =>
+      readAgentMemoryFile({
+        workspacePath,
+        scope: "daily",
+        label: file,
+        file: path.join("memory", file),
+      })
+    ),
   ]);
 
   return c.json({

@@ -1,5 +1,5 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Close, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -941,7 +941,32 @@ export function ArtifactWorkspace({
             />
           )}
           {actionNotice && (
-            <div>
+            actionNotice.url ? (
+              <div className="flex items-start justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-4 py-3 text-sm">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-semibold text-[var(--cds-text-primary)]">{actionNotice.title}</span>
+                    <a
+                      className="font-semibold text-[var(--cds-link-primary)] underline"
+                      href={actionNotice.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open deployment
+                    </a>
+                  </div>
+                  <p className="mt-1 text-[var(--cds-text-secondary)]">{actionNotice.subtitle}</p>
+                </div>
+                <button
+                  type="button"
+                  className="grid size-8 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-icon-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-icon-primary)]"
+                  aria-label="Dismiss notification"
+                  onClick={() => setActionNotice(null)}
+                >
+                  <Close size={16} />
+                </button>
+              </div>
+            ) : (
               <InlineNotification
                 kind={actionNotice.kind}
                 title={actionNotice.title}
@@ -949,19 +974,7 @@ export function ArtifactWorkspace({
                 lowContrast
                 onClose={() => setActionNotice(null)}
               />
-              {actionNotice.url && (
-                <div className="border-b border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-4 py-2 text-sm">
-                  <a
-                    className="font-semibold text-[var(--cds-link-primary)] underline"
-                    href={actionNotice.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open deployment
-                  </a>
-                </div>
-              )}
-            </div>
+            )
           )}
           {isLoading ? (
             <div className="grid h-full place-items-center">

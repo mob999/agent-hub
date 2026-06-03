@@ -9,7 +9,7 @@ import {
 } from '@carbon/react'
 import { Document, Folder, Renew } from '@carbon/react/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse, type AgentMemoryScope } from '../lib/api'
+import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
 
@@ -64,15 +64,18 @@ function AgentEditModalContent({
   const [memoryError, setMemoryError] = useState<string | null>(null)
   const [memoryLoading, setMemoryLoading] = useState(false)
   const [memoryWorkspaceReady, setMemoryWorkspaceReady] = useState(true)
-  const [selectedMemoryScope, setSelectedMemoryScope] = useState<AgentMemoryScope>('long_term')
+  const [selectedMemoryFilePath, setSelectedMemoryFilePath] = useState('MEMORY.md')
   const [selectedSection, setSelectedSection] = useState<AgentSettingsSection>('profile')
   const canSave = name.trim().length > 0 && !isSaving
   const selectedMemoryFile = useMemo(
-    () => memoryFiles.find((file) => file.scope === selectedMemoryScope) ?? memoryFiles[0] ?? null,
-    [memoryFiles, selectedMemoryScope],
+    () => memoryFiles.find((file) => file.file === selectedMemoryFilePath) ?? memoryFiles[0] ?? null,
+    [memoryFiles, selectedMemoryFilePath],
   )
   const longTermMemory = memoryFiles.find((file) => file.scope === 'long_term') ?? null
-  const dailyMemory = memoryFiles.find((file) => file.scope === 'daily') ?? null
+  const dailyMemories = useMemo(
+    () => memoryFiles.filter((file) => file.scope === 'daily').sort((first, second) => second.label.localeCompare(first.label)),
+    [memoryFiles],
+  )
 
   const loadMemoryFiles = useCallback(async () => {
     setMemoryLoading(true)
@@ -82,10 +85,10 @@ function AgentEditModalContent({
       const response = await apiRequest<AgentMemoryResponse>(`/agents/${agent.agent.id}/memory`)
       setMemoryFiles(response.files)
       setMemoryWorkspaceReady(response.workspaceReady)
-      setSelectedMemoryScope((current) =>
-        response.files.some((file) => file.scope === current)
+      setSelectedMemoryFilePath((current) =>
+        response.files.some((file) => file.file === current)
           ? current
-          : response.files[0]?.scope ?? 'long_term',
+          : response.files.find((file) => file.scope === 'long_term')?.file ?? response.files[0]?.file ?? 'MEMORY.md',
       )
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -119,9 +122,9 @@ function AgentEditModalContent({
         : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
     }`
 
-  const memoryTreeButtonClass = (scope: AgentMemoryScope) =>
+  const memoryTreeButtonClass = (filePath: string) =>
     `flex w-full cursor-pointer items-center gap-2 border-0 px-2 py-1.5 text-left text-sm ${
-      selectedMemoryScope === scope
+      selectedMemoryFilePath === filePath
         ? 'bg-[var(--cds-layer-selected-01)] font-semibold text-[var(--cds-text-primary)]'
         : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
     }`
@@ -239,7 +242,7 @@ function AgentEditModalContent({
                 <div className="grid min-h-80 gap-3 md:grid-cols-[14rem_minmax(0,1fr)]">
                   <div className="grid content-start gap-1 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2">
                     {longTermMemory && (
-                      <button className={memoryTreeButtonClass('long_term')} type="button" onClick={() => setSelectedMemoryScope('long_term')}>
+                      <button className={memoryTreeButtonClass(longTermMemory.file)} type="button" onClick={() => setSelectedMemoryFilePath(longTermMemory.file)}>
                         <Document size={16} />
                         MEMORY.md
                       </button>
@@ -250,12 +253,12 @@ function AgentEditModalContent({
                         memory/
                       </div>
                       <div className="grid gap-1 pl-5">
-                        {dailyMemory && (
-                          <button className={memoryTreeButtonClass('daily')} type="button" onClick={() => setSelectedMemoryScope('daily')}>
+                        {dailyMemories.map((dailyMemory) => (
+                          <button key={dailyMemory.file} className={memoryTreeButtonClass(dailyMemory.file)} type="button" onClick={() => setSelectedMemoryFilePath(dailyMemory.file)}>
                             <Document size={16} />
                             {dailyMemory.label}
                           </button>
-                        )}
+                        ))}
                       </div>
                     </div>
                   </div>

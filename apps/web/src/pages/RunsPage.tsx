@@ -11,6 +11,7 @@ import {
   runStatusLabel,
   runTagType,
 } from '../lib/format'
+import { parsePromptSections, type PromptSection } from '../lib/promptSections'
 
 interface RunsPageProps {
   runs: LocalRun[]
@@ -107,6 +108,7 @@ export function RunsPage({
 }: RunsPageProps) {
   const selectedRun = runs.find((localRun) => localRun.run.id === selectedRunId) ?? runs[0] ?? null
   const [expandedPromptByRunId, setExpandedPromptByRunId] = useState<Record<string, boolean>>({})
+  const [promptViewByRunId, setPromptViewByRunId] = useState<Record<string, 'structured' | 'raw'>>({})
   const selectedEvents = selectedRun ? eventsByRun[selectedRun.run.id] ?? [] : []
   const displayEvents = selectedEvents.filter(isDisplayRunEvent)
   const agentOutput = selectedEvents
@@ -116,6 +118,8 @@ export function RunsPage({
   const selectedRunTitle = selectedRun ? runDisplayTitle(selectedRun) : 'No run selected'
   const promptLength = selectedRun?.prompt.length ?? 0
   const promptExpanded = selectedRun ? expandedPromptByRunId[selectedRun.run.id] === true : false
+  const promptView = selectedRun ? promptViewByRunId[selectedRun.run.id] ?? 'structured' : 'structured'
+  const promptSections = selectedRun ? parsePromptSections(selectedRun.prompt) : []
 
   return (
     <section
@@ -243,9 +247,36 @@ export function RunsPage({
                     {promptLength.toLocaleString()} chars · {promptExpanded ? 'Hide' : 'Show'}
                   </span>
                 </summary>
-                <p className="border-t border-[var(--cds-border-subtle-01)] p-3 whitespace-pre-wrap break-words text-sm leading-relaxed">
-                  {selectedRun.prompt}
-                </p>
+                <div className="border-t border-[var(--cds-border-subtle-01)] p-3">
+                  <div className="mb-3 inline-grid grid-cols-2 border border-[var(--cds-border-subtle-01)]">
+                    {(['structured', 'raw'] as const).map((view) => (
+                      <button
+                        key={view}
+                        type="button"
+                        className={`min-h-8 cursor-pointer border-0 px-3 text-sm font-semibold ${
+                          promptView === view
+                            ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
+                            : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                        }`}
+                        onClick={() => {
+                          setPromptViewByRunId((current) => ({
+                            ...current,
+                            [selectedRun.run.id]: view,
+                          }))
+                        }}
+                      >
+                        {view === 'structured' ? 'Structured' : 'Raw'}
+                      </button>
+                    ))}
+                  </div>
+                  {promptView === 'structured' ? (
+                    <PromptSectionList key={selectedRun.run.id} sections={promptSections} />
+                  ) : (
+                    <pre className="min-w-0 whitespace-pre-wrap break-words border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-3 text-sm leading-relaxed text-[var(--cds-text-primary)]">
+                      {selectedRun.prompt}
+                    </pre>
+                  )}
+                </div>
               </details>
             </DetailSection>
 
@@ -322,6 +353,59 @@ export function RunsPage({
 interface EventRowProps {
   event: RunEvent
   index: number
+}
+
+interface PromptSectionListProps {
+  sections: PromptSection[]
+}
+
+function PromptSectionList({ sections }: PromptSectionListProps) {
+  const [openBySectionId, setOpenBySectionId] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      sections.map((section, index) => [
+        section.id,
+        sections.length === 1 || (index === 0 && section.content.length <= 1200),
+      ]),
+    ),
+  )
+
+  return (
+    <div className="grid gap-2">
+      {sections.map((section) => (
+          <details
+            key={section.id}
+            className="border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+            open={openBySectionId[section.id] === true}
+            onToggle={(event) => {
+              const open = event.currentTarget.open
+              setOpenBySectionId((current) => ({
+                ...current,
+                [section.id]: open,
+              }))
+            }}
+          >
+            <summary className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]">
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-[var(--cds-text-primary)]">
+                  {section.title}
+                </span>
+                {section.tagName && (
+                  <span className="block truncate text-xs text-[var(--cds-text-secondary)]">
+                    {section.tagName}
+                  </span>
+                )}
+              </span>
+              <span className="text-xs text-[var(--cds-text-secondary)]">
+                {section.content.length.toLocaleString()} chars
+              </span>
+            </summary>
+            <pre className="max-h-96 min-w-0 overflow-auto border-t border-[var(--cds-border-subtle-01)] p-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--cds-text-primary)]">
+              {section.content}
+            </pre>
+          </details>
+      ))}
+    </div>
+  )
 }
 
 function EventRow({ event, index }: EventRowProps) {

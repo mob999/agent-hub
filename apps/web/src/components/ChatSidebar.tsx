@@ -10,7 +10,6 @@ import {
   TrashCan,
   Undo,
 } from '@carbon/react/icons'
-import { Tag } from '@carbon/react'
 import { useState } from 'react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
@@ -38,27 +37,29 @@ interface ChatSidebarProps {
 }
 
 const sidebarButton =
-  'grid w-full cursor-pointer items-center border text-left text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'grid w-full cursor-pointer items-center rounded-xl border-0 text-left text-[#596171] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const transparentListItem =
-  'border-transparent bg-transparent hover:bg-[var(--cds-layer-hover-01)]'
+  'bg-transparent hover:bg-[#eef0f4] hover:text-[#161616]'
 const selectedListItem =
-  'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-hover-01)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-selected-hover-01)]'
-const inlineCount = 'font-semibold normal-case text-[var(--cds-text-primary)]'
+  'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+const inlineCount = 'font-semibold normal-case text-[#69707d]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 const agentAvatarFrame =
-  'grid h-8 w-8 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]'
+  'grid h-7 w-7 place-items-center overflow-hidden rounded-lg border border-[#dde1e6] bg-white'
 const unreadBadge =
   'inline-grid min-w-5 place-items-center rounded-full bg-[var(--cds-support-error)] px-1.5 text-xs font-semibold leading-5 text-[var(--cds-text-on-color)]'
 const archivedActionButton =
-  'grid h-7 w-7 place-items-center border-0 bg-transparent p-0 hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'grid h-7 w-7 place-items-center rounded-lg border-0 bg-transparent p-0 hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const archivedRestoreButton =
   `${archivedActionButton} text-[var(--cds-support-success)] hover:text-[var(--cds-support-success)]`
 const archivedDeleteButton =
   `${archivedActionButton} text-[var(--cds-support-error)] hover:text-[var(--cds-support-error)]`
 const archivedConfirmDeleteButton =
-  'grid h-7 w-7 place-items-center border border-[var(--cds-support-error)] bg-[var(--cds-support-error)] p-0 text-[var(--cds-text-on-color)] hover:bg-[var(--cds-support-error)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'grid h-7 w-7 place-items-center rounded-lg border border-[var(--cds-support-error)] bg-[var(--cds-support-error)] p-0 text-[var(--cds-text-on-color)] hover:bg-[var(--cds-support-error)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const sidebarSectionToggle =
-  'inline-grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 border-0 bg-transparent p-0 text-left text-[var(--cds-text-secondary)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'inline-grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 rounded-lg border-0 bg-transparent p-0 text-left text-[#69707d] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const shortcutBadge =
+  'rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]'
 
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) {
@@ -119,55 +120,52 @@ export function ChatSidebar({
 
   return (
     <aside
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171]"
       aria-label="Chat navigation"
     >
-      <header className="flex min-h-18 items-center justify-between border-b border-[var(--cds-border-subtle-01)] px-4">
-        <h2 className="cds--type-heading-compact-02">Chat</h2>
-        <Tag type="gray" size="sm">
-          beta
-        </Tag>
+      <header className="flex min-h-16 items-center border-b border-[#eef0f3] px-4">
+        <h2 className="min-w-0 truncate text-base font-semibold text-[#161616]">Chat</h2>
       </header>
 
-      <section className="grid gap-0.5 p-3" aria-label="Quick actions">
+      <section className="grid gap-1 px-3 pb-3 pt-2" aria-label="Quick actions">
         <button
-          className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          className={`${sidebarButton} ${transparentListItem} min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
           type="button"
           onClick={onOpenSearch}
         >
-          <Search size={16} />
-          <span>Search</span>
-          <kbd className="text-[var(--cds-text-secondary)]">Ctrl K</kbd>
+          <Search size={20} />
+          <span className="truncate text-base">Search</span>
+          <kbd className={shortcutBadge}>Ctrl K</kbd>
         </button>
         <button
-          className={`${sidebarButton} ${transparentListItem} grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          className={`${sidebarButton} ${transparentListItem} min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
           type="button"
           onClick={onOpenActivity}
         >
-          <Activity size={16} />
-          <span>Activity</span>
-          <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
+          <Activity size={20} />
+          <span className="truncate text-base">Activity</span>
+          <span className="grid min-w-6 justify-items-center text-xs font-semibold text-[#69707d]">
             {activeRunCount}
           </span>
         </button>
         <button
           className={`${sidebarButton} ${
             savedOpen ? selectedListItem : transparentListItem
-          } grid-cols-[1rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+          } min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
           type="button"
           aria-expanded={savedOpen}
           onClick={onToggleSaved}
         >
-          <Bookmark size={16} />
-          <span>Archived</span>
-          <span className="grid w-6 justify-items-center text-xs font-semibold text-[var(--cds-text-primary)]">
+          <Bookmark size={20} />
+          <span className="truncate text-base">Archived</span>
+          <span className="grid min-w-6 justify-items-center text-xs font-semibold text-[#69707d]">
             {archivedCount}
           </span>
         </button>
         {savedOpen && (
-          <div className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] p-2">
+          <div className="mx-1 mt-1 grid gap-1 rounded-xl bg-[#f1f3f6] p-2">
             {archivedCount === 0 ? (
-              <p className="px-1 py-2 text-sm text-[var(--cds-text-secondary)]">No archived items.</p>
+              <p className="px-2 py-2 text-sm text-[#69707d]">No archived items.</p>
             ) : (
               <>
                 {archivedGroupConversations.map((conversation) => {
@@ -176,7 +174,7 @@ export function ChatSidebar({
 
                   return (
                     <div
-                      className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                      className="grid min-h-9 grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2 py-1 text-sm text-[#3f4551]"
                       key={conversation.id}
                     >
                       <span aria-hidden="true">#</span>
@@ -229,7 +227,7 @@ export function ChatSidebar({
 
                   return (
                     <div
-                      className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-1 py-1 text-sm text-[var(--cds-text-primary)]"
+                      className="grid min-h-9 grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2 py-1 text-sm text-[#3f4551]"
                       key={agent.agent.id}
                     >
                       <span className={agentAvatarFrame} aria-hidden="true">
@@ -292,8 +290,8 @@ export function ChatSidebar({
         )}
       </section>
 
-      <section className="grid gap-1 p-3" aria-labelledby="groups-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
+      <section className="grid gap-1 px-3 py-2" aria-labelledby="groups-heading">
+        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
           <button
             className={sidebarSectionToggle}
             type="button"
@@ -302,12 +300,12 @@ export function ChatSidebar({
             onClick={() => setGroupsCollapsed((collapsed) => !collapsed)}
           >
             {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-            <span id="groups-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
+            <span id="groups-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
               Groups<span className={inlineCount}>({groupConversations.length})</span>
             </span>
           </button>
           <button
-            className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Add group"
             onClick={onCreateGroup}
@@ -324,19 +322,19 @@ export function ChatSidebar({
                 <button
                   className={`${sidebarButton} ${
                     groupChatSelected ? selectedListItem : transparentListItem
-                  } min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-2 px-3 py-2`}
+                  } min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
                   type="button"
                   key={conversation.id}
                   aria-current={groupChatSelected ? 'page' : undefined}
                   onClick={() => selectGroup(conversation.id)}
                 >
                   <span
-                    className="grid h-6 w-5 place-items-center text-base leading-5 text-[var(--cds-text-primary)]"
+                    className="grid h-6 w-5 place-items-center text-base leading-5 text-[#596171]"
                     aria-hidden="true"
                   >
                     #
                   </span>
-                  <span className="min-w-0 truncate text-base leading-5 text-[var(--cds-text-primary)]">
+                  <span className="min-w-0 truncate text-base leading-5">
                     {conversation.title}
                   </span>
                   <span className="flex min-w-6 justify-end">
@@ -349,8 +347,8 @@ export function ChatSidebar({
         )}
       </section>
 
-      <section className="grid gap-1 p-3" aria-labelledby="agents-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[var(--cds-text-secondary)]">
+      <section className="grid gap-1 px-3 py-2" aria-labelledby="agents-heading">
+        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
           <button
             className={sidebarSectionToggle}
             type="button"
@@ -359,12 +357,12 @@ export function ChatSidebar({
             onClick={() => setAgentsCollapsed((collapsed) => !collapsed)}
           >
             {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-            <span id="agents-heading" className={`${labelWithCount} truncate text-xs font-semibold uppercase`}>
+            <span id="agents-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
               Agents<span className={inlineCount}>({agents.length})</span>
             </span>
           </button>
           <button
-            className="flex h-6 w-6 items-center justify-center border-0 bg-transparent p-0 leading-none text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Create agent"
             onClick={onCreateAgent}
@@ -373,7 +371,7 @@ export function ChatSidebar({
           </button>
         </div>
         {!agentsCollapsed && (agents.length === 0 ? (
-          <p className="px-3 pb-3 pt-1 text-[var(--cds-text-secondary)]">
+          <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
             No agents yet.
           </p>
         ) : (
@@ -390,7 +388,7 @@ export function ChatSidebar({
                 <button
                   className={`${sidebarButton} ${
                     agentSelected ? selectedListItem : transparentListItem
-                  } min-h-11 grid-cols-[2rem_minmax(0,1fr)_auto] gap-2 px-3 py-2`}
+                  } min-h-10 grid-cols-[1.75rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
                   type="button"
                   key={agent.agent.id}
                   aria-current={agentSelected ? 'page' : undefined}

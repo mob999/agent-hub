@@ -1,5 +1,6 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, Close, Document, Folder, Image as ImageIcon, Launch, SendAltFilled, Settings, Task } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
+import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
@@ -25,7 +26,7 @@ const taskStatusOrder = [
 
 type TaskAggregationMode = 'goal' | 'status'
 type GoalTask = ConversationGoal['tasks'][number]
-type StatusTagType = 'blue' | 'cyan' | 'gray' | 'green' | 'magenta' | 'purple' | 'red' | 'teal'
+type StatusIconState = ConversationGoal['status'] | ConversationGoalTaskStatus
 
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
@@ -76,42 +77,6 @@ function displayNameInitial(name: string): string {
   return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
 }
 
-function goalStatusTagType(status: ConversationGoal['status']): StatusTagType {
-  switch (status) {
-    case 'active':
-      return 'blue'
-    case 'completed':
-      return 'green'
-    case 'failed':
-      return 'red'
-    case 'cancelled':
-      return 'gray'
-  }
-}
-
-function taskStatusTagType(status: ConversationGoalTaskStatus): StatusTagType {
-  switch (status) {
-    case 'waiting':
-      return 'gray'
-    case 'ready':
-      return 'cyan'
-    case 'assigned':
-      return 'purple'
-    case 'running':
-      return 'blue'
-    case 'succeeded':
-      return 'green'
-    case 'failed':
-      return 'red'
-    case 'cancelled':
-      return 'gray'
-    case 'interrupted':
-      return 'gray'
-    case 'blocked':
-      return 'magenta'
-  }
-}
-
 function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
   column: string
   dot: string
@@ -158,6 +123,104 @@ function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
         count: 'bg-[#e8e8e8] text-[#525252]',
       }
   }
+}
+
+function goalStatusPanelStyle(status: ConversationGoal['status']): {
+  panel: string
+  pill: string
+} {
+  switch (status) {
+    case 'active':
+      return {
+        panel: 'border-[#d8e6ff] bg-[#f8fbff]',
+        pill: 'bg-[#d8e6ff] text-[#0f3f9c]',
+      }
+    case 'completed':
+      return {
+        panel: 'border-[#d7eadc] bg-[#f8fcf9]',
+        pill: 'bg-[#d7eadc] text-[#0e6027]',
+      }
+    case 'failed':
+      return {
+        panel: 'border-[#f4d4d4] bg-[#fff8f8]',
+        pill: 'bg-[#f4d4d4] text-[#8a1118]',
+      }
+    case 'cancelled':
+      return {
+        panel: 'border-[#e5e5e5] bg-[#fafafa]',
+        pill: 'bg-[#e8e8e8] text-[#525252]',
+      }
+  }
+}
+
+function statusIconStyle(status: StatusIconState): {
+  color: string
+  Icon: CarbonIconType
+} {
+  switch (status) {
+    case 'completed':
+    case 'succeeded':
+      return {
+        color: 'text-[#24a148]',
+        Icon: CheckmarkFilled,
+      }
+    case 'active':
+    case 'ready':
+      return {
+        color: 'text-[#0f62fe]',
+        Icon: CircleFilled,
+      }
+    case 'running':
+      return {
+        color: 'text-[#d89400]',
+        Icon: InProgress,
+      }
+    case 'assigned':
+      return {
+        color: 'text-[#6929c4]',
+        Icon: CircleFilled,
+      }
+    case 'waiting':
+      return {
+        color: 'text-[#6f6f6f]',
+        Icon: CircleDash,
+      }
+    case 'failed':
+      return {
+        color: 'text-[#da1e28]',
+        Icon: IncompleteError,
+      }
+    case 'blocked':
+      return {
+        color: 'text-[#d02670]',
+        Icon: WarningSquare,
+      }
+    case 'interrupted':
+      return {
+        color: 'text-[#d89400]',
+        Icon: PauseOutline,
+      }
+    case 'cancelled':
+      return {
+        color: 'text-[#525252]',
+        Icon: StopFilled,
+      }
+  }
+}
+
+function StatusIcon({ status }: { status: StatusIconState }) {
+  const style = statusIconStyle(status)
+  const Icon = style.Icon
+
+  return (
+    <span
+      className={`grid h-5 w-5 shrink-0 place-items-center ${style.color}`}
+      title={status}
+      aria-label={status}
+    >
+      <Icon size={20} />
+    </span>
+  )
 }
 
 function mentionSearchTerm(value: string): string | null {
@@ -788,70 +851,67 @@ export function ChannelWorkspace({
       <section
         id={`goal-task-${goal.id}-${task.index}`}
         key={`${goal.id}:${task.id}`}
-        className={`grid gap-2 border bg-[var(--cds-background)] p-3 text-sm text-[var(--cds-text-primary)] ${
-          focused ? 'border-[var(--cds-border-strong-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]' : 'border-[var(--cds-border-subtle-01)]'
+        className={`grid gap-3 rounded-xl border bg-white p-3 text-sm text-[var(--cds-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.06)] ${
+          focused ? 'border-[var(--cds-border-strong-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]' : 'border-[#e0e0e0]'
         }`}
       >
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
-          <span className="border border-[var(--cds-border-subtle-01)] px-2 py-1 text-xs font-semibold">
-            #{task.index}
-          </span>
-          <div className="min-w-0">
-            <h4 className="truncate text-sm font-semibold">{task.title}</h4>
-            {options.showGoal && (
-              <p className="mt-0.5 truncate text-xs text-[var(--cds-text-secondary)]">
-                {goal.title}
-              </p>
-            )}
-            {task.description && (
-              <p className="mt-1 text-xs text-[var(--cds-text-secondary)]">
-                {task.description}
-              </p>
-            )}
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <span className="shrink-0 rounded-md border border-[#e5e5e5] bg-[#fafafa] px-2 py-1 text-xs font-semibold text-[var(--cds-text-secondary)]">
+              #{task.index}
+            </span>
+            <div className="min-w-0">
+              <h4 className="truncate text-sm font-semibold leading-5">{task.title}</h4>
+              {options.showGoal && (
+                <p className="mt-0.5 truncate text-xs text-[var(--cds-text-secondary)]">
+                  {goal.title}
+                </p>
+              )}
+              {task.description && (
+                <p className="mt-1 overflow-hidden text-xs leading-4 text-[var(--cds-text-secondary)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                  {task.description}
+                </p>
+              )}
+            </div>
           </div>
-          <Tag className="m-0 uppercase" type={taskStatusTagType(task.status)} size="sm">
-            {task.status}
-          </Tag>
+          <StatusIcon status={task.status} />
         </div>
-        <div className="grid gap-2 text-xs leading-4 text-[var(--cds-text-secondary)]">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="flex items-center gap-2">
-              <span className="font-semibold uppercase">Assigned to</span>
-              {assignee ? (
-                <button
-                  className="cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                  type="button"
-                  onClick={() => openAgentConversation(assignee.agent.id)}
-                >
-                  {assignee.agent.name}
-                </button>
-              ) : (
-                <span>{task.assigneeAgentId}</span>
-              )}
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="font-semibold uppercase">With run</span>
-              {task.assigneeRunId ? (
-                <button
-                  className="cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                  type="button"
-                  onClick={() => openRun(task.assigneeRunId as string)}
-                >
-                  {task.assigneeRunId.slice(0, 8)}
-                </button>
-              ) : (
-                <span>Not dispatched</span>
-              )}
-            </span>
-          </div>
+        <div className="grid gap-1.5 text-sm leading-5 text-[var(--cds-text-secondary)]">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Assignee</span>
+            {assignee ? (
+              <button
+                className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                type="button"
+                onClick={() => openAgentConversation(assignee.agent.id)}
+              >
+                {assignee.agent.name}
+              </button>
+            ) : (
+              <span>{task.assigneeAgentId}</span>
+            )}
+            <span aria-hidden="true">·</span>
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Run</span>
+            {task.assigneeRunId ? (
+              <button
+                className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                type="button"
+                onClick={() => openRun(task.assigneeRunId as string)}
+              >
+                {task.assigneeRunId.slice(0, 8)}
+              </button>
+            ) : (
+              <span>Not dispatched</span>
+            )}
+          </p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold uppercase">Depends on</span>
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Depends on</span>
             {task.dependsOnTaskIndexes && task.dependsOnTaskIndexes.length > 0 ? (
               <span className="flex flex-wrap gap-1">
                 {task.dependsOnTaskIndexes.map((index) => (
                   <button
                     key={index}
-                    className="cursor-pointer border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:bg-[var(--cds-layer-hover-01)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    className="cursor-pointer rounded-md border border-[#e5e5e5] bg-[#fafafa] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:bg-[var(--cds-layer-hover-01)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                     type="button"
                     onClick={() => openGoalRoute(goal.id, index)}
                   >
@@ -871,13 +931,13 @@ export function ChannelWorkspace({
           </div>
         )}
         {task.summary && (
-          <div>
+          <div className="rounded-lg bg-[#f8f8f8] p-3">
             <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h5>
             <MessageContent className="mt-1 block text-sm leading-5" content={task.summary} />
           </div>
         )}
         {task.artifacts && task.artifacts.length > 0 && (
-          <div className="grid gap-1">
+          <div className="grid gap-1 rounded-lg bg-[#f8f8f8] p-3">
             <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h5>
             {task.artifacts.map((artifact) => (
               <button
@@ -896,39 +956,48 @@ export function ChannelWorkspace({
   }
 
   const renderGoalListView = () => (
-    <div className="grid gap-2">
+    <div className="grid gap-3">
       {goals.map((goal) => {
         const orchestrator = agents.find((agent) => agent.agent.id === goal.orchestratorAgentId)
         const expanded = expandedGoalIdSet.has(goal.id)
         const focused = focusedGoalRoute?.goalId === goal.id
+        const goalStyle = goalStatusPanelStyle(goal.status)
 
         return (
           <article
             id={`goal-${goal.id}`}
             key={goal.id}
-            className={`grid border bg-[var(--cds-layer-01)] text-sm text-[var(--cds-text-primary)] ${
-              focused ? 'border-[var(--cds-border-strong-01)]' : 'border-[var(--cds-border-subtle-01)]'
+            className={`grid overflow-hidden rounded-2xl border text-sm text-[var(--cds-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${
+              focused ? 'border-[var(--cds-border-strong-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]' : goalStyle.panel
             }`}
           >
-            <button
-              className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-3 border-0 bg-transparent p-3 text-left text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]"
-              type="button"
+            <div
+              className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-4 p-4 text-left text-[var(--cds-text-primary)] transition-colors hover:bg-white/55 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]"
+              role="button"
+              tabIndex={0}
               aria-expanded={expanded}
               onClick={() => toggleGoalExpanded(goal.id)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) {
+                  return
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  toggleGoalExpanded(goal.id)
+                }
+              }}
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Tag className="m-0 uppercase" type={goalStatusTagType(goal.status)} size="sm">
-                    {goal.status}
-                  </Tag>
-                  <h3 className="truncate text-base font-semibold">{goal.title}</h3>
+                  <StatusIcon status={goal.status} />
+                  <h3 className="min-w-0 truncate text-base font-semibold leading-6">{goal.title}</h3>
                 </div>
                 {goal.description && (
-                  <p className="mt-1 truncate text-sm text-[var(--cds-text-secondary)]">
+                  <p className="mt-1 overflow-hidden text-sm leading-5 text-[var(--cds-text-secondary)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
                     {goal.description}
                   </p>
                 )}
-                <p className="mt-2 truncate text-sm text-[var(--cds-text-secondary)]">
+                <p className="mt-2 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-sm leading-5 text-[var(--cds-text-secondary)]">
                   Goal{' '}
                   <button
                     className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -958,26 +1027,31 @@ export function ChannelWorkspace({
                     </span>
                   )}
                   , with{' '}
-                  <span className="font-semibold text-[var(--cds-support-info)]">
+                  <span className="rounded-md bg-[#d8e6ff] px-1.5 py-0.5 text-xs font-semibold text-[#0f3f9c]">
                     {goal.tasks.length}
                   </span>{' '}
                   {goal.tasks.length === 1 ? 'task' : 'tasks'}
                 </p>
               </div>
-              <span className="self-start text-xl leading-none text-[var(--cds-text-secondary)]">
-                {expanded ? '-' : '+'}
+              <span className="flex items-center gap-2 self-start">
+                <span className="rounded-md bg-white/70 px-2.5 py-1 text-xs font-semibold text-[var(--cds-text-secondary)]">
+                  {goal.tasks.length} {goal.tasks.length === 1 ? 'task' : 'tasks'}
+                </span>
+                <span className="grid h-8 w-8 place-items-center rounded-lg border border-white/70 bg-white/80 text-[var(--cds-text-secondary)] shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+                  {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
               </span>
-            </button>
+            </div>
             {expanded && (
-              <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] p-3">
+              <div className="grid gap-3 border-t border-white/70 bg-white/55 p-4">
                 {goal.summary && (
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Goal summary</h4>
+                  <div className="rounded-xl border border-[#d8e6ff] bg-[#f3f7ff] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+                    <h4 className="text-xs font-semibold uppercase text-[#0f3f9c]">Goal summary</h4>
                     <MessageContent className="mt-1 block text-sm leading-5" content={goal.summary} />
                   </div>
                 )}
                 {goal.tasks.length === 0 ? (
-                  <p className="text-sm text-[var(--cds-text-secondary)]">No tasks</p>
+                  <p className="rounded-xl bg-white p-4 text-center text-sm text-[var(--cds-text-secondary)]">No tasks</p>
                 ) : (
                   <div className="grid gap-2">
                     {goal.tasks.map((task) => renderGoalTaskCard(goal, task))}

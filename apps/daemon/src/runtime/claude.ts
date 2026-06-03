@@ -1,4 +1,7 @@
 import { spawn as spawnChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type {
   AgentRunArtifactUpload,
@@ -152,18 +155,16 @@ function mapClaudeJsonEvents(value: unknown, runId: RunId): RunEvent[] {
   return events;
 }
 
-function createClaudeAppendSystemPromptArg(
+function createClaudeAppendSystemPrompt(
   agentInstructions: string | undefined,
   agentHubToolInstructions: string | undefined,
-): string[] {
+): string | undefined {
   const parts = [
     agentInstructions?.trim(),
     agentHubToolInstructions?.trim(),
   ].filter((value): value is string => value !== undefined && value.length > 0);
 
-  return parts.length === 0
-    ? []
-    : ["--append-system-prompt", parts.join("\n\n")];
+  return parts.length === 0 ? undefined : parts.join("\n\n");
 }
 
 function createClaudeAgentHubToolInstructions(
@@ -267,6 +268,24 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
   run(input: AgentRunInput): AsyncIterable<RunEvent> {
     const queue = new AsyncEventQueue<RunEvent>();
+    const safeRunId = input.run.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    let runtimeTempDir: string | undefined;
+    const writeRuntimeFile = (filename: string, content: string): string => {
+      runtimeTempDir ??= mkdtempSync(join(tmpdir(), `agenthub-claude-${safeRunId}-`));
+      const filePath = join(runtimeTempDir, filename);
+
+      writeFileSync(filePath, content, "utf8");
+
+      return filePath;
+    };
+    const cleanupRuntimeFiles = () => {
+      if (runtimeTempDir === undefined) {
+        return;
+      }
+
+      rmSync(runtimeTempDir, { force: true, recursive: true });
+      runtimeTempDir = undefined;
+    };
     const mcpGoals: AgentHubListGoalsToolResult["goals"] = [
       ...(input.agentHubMcpGoals ?? []),
     ];
@@ -308,6 +327,32 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         return { accepted: true };
       },
     });
+    const appendSystemPrompt = createClaudeAppendSystemPrompt(
+      input.agentInstructions,
+      createClaudeAgentHubToolInstructions(input.agentHubMcpTools),
+    );
+    const appendSystemPromptArgs = appendSystemPrompt === undefined
+      ? []
+      : [
+          "--append-system-prompt-file",
+          writeRuntimeFile("append-system-prompt.txt", appendSystemPrompt),
+        ];
+    const mcpConfigArgs = mcpSession === undefined
+      ? []
+      : [
+          "--mcp-config",
+          writeRuntimeFile(
+            "mcp-config.json",
+            createClaudeMcpConfig({
+              command: this.#mcpServerCommand ?? {
+                command: process.execPath,
+                args: [],
+              },
+              session: mcpSession,
+            }),
+          ),
+          "--strict-mcp-config",
+        ];
     const args = [
       "-p",
       "--verbose",
@@ -318,24 +363,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       ...(mcpSession === undefined
         ? []
         : createClaudeAllowedToolsArg(input.agentHubMcpTools)),
-      ...createClaudeAppendSystemPromptArg(
-        input.agentInstructions,
-        createClaudeAgentHubToolInstructions(input.agentHubMcpTools),
-      ),
-      ...(mcpSession === undefined
-        ? []
-        : [
-            "--mcp-config",
-            createClaudeMcpConfig({
-              command: this.#mcpServerCommand ?? {
-                command: process.execPath,
-                args: [],
-              },
-              session: mcpSession,
-            }),
-            "--strict-mcp-config",
-          ]),
-      input.prompt,
+      ...appendSystemPromptArgs,
+      ...mcpConfigArgs,
     ];
     const childProcess = this.#spawnProcess(this.#executablePath, args, {
       ...createRuntimeSpawnOptions({
@@ -343,6 +372,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         stdio: "pipe",
       }),
     });
+    childProcess.stdin.write(input.prompt);
     childProcess.stdin.end();
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();
@@ -359,6 +389,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
       completed = true;
       mcpSession?.close();
+      cleanupRuntimeFiles();
       queue.push({
         type: "run.completed",
         runId: input.run.id,

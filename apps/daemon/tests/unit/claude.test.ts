@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 
@@ -11,7 +12,19 @@ class MockClaudeProcess extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly stdin = new PassThrough();
+  readonly stdinChunks: Buffer[] = [];
   killedWith: NodeJS.Signals | string | undefined;
+
+  constructor() {
+    super();
+    this.stdin.on("data", (chunk) => {
+      this.stdinChunks.push(Buffer.from(chunk));
+    });
+  }
+
+  get stdinText(): string {
+    return Buffer.concat(this.stdinChunks).toString("utf8");
+  }
 
   kill(signal?: NodeJS.Signals | string): boolean {
     this.killedWith = signal;
@@ -122,19 +135,20 @@ describe("ClaudeCodeAdapter", () => {
       "stream-json",
       "--permission-mode",
       "bypassPermissions",
-      "hello claude",
     ]);
+    expect(calls[0].process.stdinText).toBe("hello claude");
     expect(calls[0].options).toMatchObject({
       cwd: "/tmp/agent-workspace",
       stdio: "pipe",
     });
   });
 
-  it("closes stdin immediately so Claude does not wait for piped input", async () => {
+  it("writes the prompt to stdin and closes stdin", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
 
+    expect(calls[0].process.stdinText).toBe("hello claude");
     expect(calls[0].process.stdin.writableEnded).toBe(true);
 
     calls[0].process.close(0);
@@ -161,26 +175,28 @@ describe("ClaudeCodeAdapter", () => {
     expect(calls[0].args).toContain("--strict-mcp-config");
     expect(calls[0].args).toContain("--allowedTools");
     expect(calls[0].args).toContain("mcp__agenthub__send_message");
-    expect(calls[0].args).toContain(
-      JSON.stringify({
-        mcpServers: {
-          agenthub: {
-            type: "stdio",
-            alwaysLoad: true,
-            command: "node",
-            args: ["agenthub-mcp.js"],
-            cwd: "/repo",
-            env: {
-              AGENTHUB_MCP_RELAY_URL: "http://127.0.0.1:4317",
-              AGENTHUB_MCP_SESSION_TOKEN: "session_1",
-              AGENTHUB_MCP_TOOLS: "send_message",
-            },
+    const mcpConfigPath = calls[0].args[calls[0].args.indexOf("--mcp-config") + 1];
+    expect(JSON.parse(readFileSync(mcpConfigPath, "utf8"))).toEqual({
+      mcpServers: {
+        agenthub: {
+          type: "stdio",
+          alwaysLoad: true,
+          command: "node",
+          args: ["agenthub-mcp.js"],
+          cwd: "/repo",
+          env: {
+            AGENTHUB_MCP_RELAY_URL: "http://127.0.0.1:4317",
+            AGENTHUB_MCP_SESSION_TOKEN: "session_1",
+            AGENTHUB_MCP_TOOLS: "send_message",
           },
         },
-      }),
-    );
-    expect(calls[0].args).toContain("--append-system-prompt");
-    expect(calls[0].args).toContain(
+      },
+    });
+    expect(calls[0].args).toContain("--append-system-prompt-file");
+    const appendSystemPromptPath = calls[0].args[
+      calls[0].args.indexOf("--append-system-prompt-file") + 1
+    ];
+    expect(readFileSync(appendSystemPromptPath, "utf8")).toBe(
       [
         "AgentHub MCP tool names in Claude Code are namespaced.",
         "Whenever prior instructions mention a bare AgentHub tool name, call the corresponding Claude tool name instead:",
@@ -188,6 +204,7 @@ describe("ClaudeCodeAdapter", () => {
         "Do not call the bare tool names directly in Claude Code.",
       ].join("\n"),
     );
+    expect(calls[0].process.stdinText).toBe("hello claude");
 
     calls[0].process.close(0);
     await eventsPromise;

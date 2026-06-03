@@ -669,6 +669,24 @@ function buildGoalTaskWebHref(input: {
     : new URL(path, input.publicWebBaseUrl).toString();
 }
 
+function buildTaskDispatchContent(input: {
+  action: "created" | "approved";
+  assigneeName: string;
+  goalHref: string;
+  goalTitle: string;
+  taskHref: string;
+  taskIndex: number;
+  taskTitle: string;
+}): string {
+  const actionText = input.action === "created" ? "已创建任务" : "已批准任务";
+
+  return [
+    `@${input.assigneeName} ${actionText}：`,
+    `Goal: [${input.goalTitle}](${input.goalHref})`,
+    `[Task #${input.taskIndex} ${input.taskTitle}](${input.taskHref})`,
+  ].join("\n");
+}
+
 function toMcpGoalListFromRows(input: {
   goals: ConversationGoalRow[];
   tasksByGoalId: Map<string, ConversationGoalTaskRow[]>;
@@ -6154,7 +6172,15 @@ export async function appendRunEventToConversationMessage(
         publicWebBaseUrl: options.publicWebBaseUrl,
         taskIndex,
       });
-      const dispatchContent = `@${assignee.name} 已创建任务：${input.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${taskIndex}](${taskHref})`;
+      const dispatchContent = buildTaskDispatchContent({
+        action: "created",
+        assigneeName: assignee.name,
+        goalHref,
+        goalTitle: goal.title,
+        taskHref,
+        taskIndex,
+        taskTitle: input.title,
+      });
       const shouldDispatch = taskStatus === "assigned";
       let job = shouldDispatch && !isSelfAssigned
         ? await createAssignedTaskRunJob(db, {
@@ -6426,7 +6452,15 @@ export async function appendRunEventToConversationMessage(
         publicWebBaseUrl: options.publicWebBaseUrl,
         taskIndex: task.index,
       });
-      const dispatchContent = `@${assignee?.name ?? task.assigneeAgentId} 已批准任务：${task.title}\nGoal ID: [${goal.id}](${goalHref})\n[Task #${task.index}](${taskHref})`;
+      const dispatchContent = buildTaskDispatchContent({
+        action: "approved",
+        assigneeName: assignee?.name ?? task.assigneeAgentId,
+        goalHref,
+        goalTitle: goal.title,
+        taskHref,
+        taskIndex: task.index,
+        taskTitle: task.title,
+      });
       const goalTasks = await listGoalTasks(db, goal.id);
       let job = await createAssignedTaskRunJob(db, {
         assigneeAgentId: task.assigneeAgentId,

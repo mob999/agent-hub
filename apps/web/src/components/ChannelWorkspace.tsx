@@ -1177,7 +1177,7 @@ export function ChannelWorkspace({
       <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-start gap-3">
           <span
-            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none"
+            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
             aria-hidden="true"
           >
             {!hasSelectedConversation ? (
@@ -1187,7 +1187,7 @@ export function ChannelWorkspace({
                 <img
                   src={selectedAgent.agent.avatar}
                   alt={selectedAgent.agent.name}
-                  className="h-full w-full object-cover"
+                  className="h-11 w-11 rounded-[3px] object-cover"
                 />
               ) : (
                 <ChatBot size={20} />
@@ -1424,14 +1424,14 @@ export function ChannelWorkspace({
                   key={message.id}
                 >
                   <span
-                    className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-white text-sm font-semibold shadow-[0_1px_1px_rgba(0,0,0,0.03)] max-[671px]:h-9 max-[671px]:w-9"
+                    className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white text-sm font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset] max-[671px]:h-9 max-[671px]:w-9"
                     aria-hidden="true"
                   >
                     {senderAvatar ? (
                       <img
                         src={senderAvatar}
                         alt={senderName}
-                        className="h-9 w-9 rounded-md object-cover max-[671px]:h-8 max-[671px]:w-8"
+                        className="h-9 w-9 rounded-[3px] object-cover max-[671px]:h-8 max-[671px]:w-8"
                       />
                     ) : (
                       avatarInitial
@@ -1605,12 +1605,12 @@ export function ChannelWorkspace({
                       }
                     }}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-[#dde1e6] bg-[#f7f8fa] text-xs font-semibold">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-xs font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]">
                       {agent.agent.avatar ? (
                         <img
                           src={agent.agent.avatar}
                           alt={agent.agent.name}
-                          className="h-full w-full object-cover"
+                          className="h-6 w-6 rounded-[3px] object-cover"
                         />
                       ) : (
                         displayNameInitial(agent.agent.name)

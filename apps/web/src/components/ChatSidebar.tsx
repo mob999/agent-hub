@@ -45,7 +45,7 @@ const selectedListItem =
 const inlineCount = 'font-semibold normal-case text-[#69707d]'
 const labelWithCount = 'inline-flex items-baseline gap-1'
 const agentAvatarFrame =
-  'grid h-7 w-7 place-items-center overflow-hidden rounded-lg border border-[#dde1e6] bg-white'
+  'grid h-7 w-7 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]'
 const unreadBadge =
   'inline-grid min-w-5 place-items-center rounded-full bg-[var(--cds-support-error)] px-1.5 text-xs font-semibold leading-5 text-[var(--cds-text-on-color)]'
 const archivedActionButton =
@@ -235,7 +235,7 @@ export function ChatSidebar({
                           <img
                             src={agent.agent.avatar}
                             alt=""
-                            className="h-6 w-6 rounded-sm object-cover"
+                            className="h-6 w-6 rounded-[3px] object-cover"
                           />
                         ) : (
                           <ChatBot size={16} />
@@ -399,7 +399,7 @@ export function ChatSidebar({
                       <img
                         src={agent.agent.avatar}
                         alt=""
-                        className="h-6 w-6 rounded-sm object-cover"
+                        className="h-6 w-6 rounded-[3px] object-cover"
                       />
                     ) : (
                       <ChatBot size={16} />

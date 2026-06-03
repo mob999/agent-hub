@@ -1171,13 +1171,13 @@ export function ChannelWorkspace({
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--cds-background)]"
+      className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[#f7f8fa]"
       aria-label={chatAriaLabel}
     >
-      <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
+      <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-start gap-3">
           <span
-            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] text-base font-semibold leading-none"
+            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none"
             aria-hidden="true"
           >
             {!hasSelectedConversation ? (
@@ -1313,7 +1313,7 @@ export function ChannelWorkspace({
 
       <div
         ref={scrollContainerRef}
-        className={`min-h-0 p-2 ${
+        className={`min-h-0 p-4 max-[671px]:p-2 ${
           showFiles || (showWorkspacePage && showTasks && taskAggregationMode === 'status')
             ? 'overflow-hidden'
             : 'overflow-y-auto'
@@ -1534,7 +1534,7 @@ export function ChannelWorkspace({
 
       {!showWorkspacePage && (
       <Form
-        className="grid gap-2 bg-[var(--cds-layer-01)] px-2 pb-3 pt-2"
+        className="grid gap-2 bg-[#f7f8fa] px-4 pb-4 pt-2 max-[671px]:px-2 max-[671px]:pb-3"
         aria-label="Create run"
         onSubmit={handleSubmit}
       >
@@ -1547,12 +1547,12 @@ export function ChannelWorkspace({
             hideCloseButton
           />
         )}
-        <div className="grid w-full overflow-hidden border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-[var(--cds-focus)]">
+        <div className="grid w-full overflow-hidden rounded-2xl border border-[#d8dee6] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.05)] focus-within:border-[#b9c3cf] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--cds-focus)]">
           <label className="sr-only" htmlFor="run-prompt">
             {`Message ${chatDisplayName}`}
           </label>
           {mentionSuggestions.length > 0 && (
-            <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] shadow-lg">
+            <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto rounded-xl border border-[#d8dee6] bg-white shadow-lg">
               {mentionSuggestions.map((suggestion) => {
                 if (suggestion.type === 'all') {
                   return (
@@ -1561,8 +1561,8 @@ export function ChannelWorkspace({
                       type="button"
                       className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
                         activeMentionSuggestion?.id === suggestion.id
-                          ? 'bg-[var(--cds-layer-selected-02)]'
-                          : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
+                          ? 'bg-[#eef0f4]'
+                          : 'bg-transparent hover:bg-[#f3f4f6]'
                       }`}
                       onClick={() => selectMention(suggestion)}
                       onMouseEnter={() => {
@@ -1572,7 +1572,7 @@ export function ChannelWorkspace({
                         }
                       }}
                     >
-                      <span className="grid h-7 w-7 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-[#dde1e6] bg-[#f7f8fa] text-xs font-semibold">
                         @
                       </span>
                       <span className="flex min-w-0 items-center gap-2">
@@ -1594,8 +1594,8 @@ export function ChannelWorkspace({
                     type="button"
                     className={`flex min-h-10 cursor-pointer items-center gap-2 border-0 px-3 text-left text-sm text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
                       activeMentionSuggestion?.id === suggestion.id
-                        ? 'bg-[var(--cds-layer-selected-02)]'
-                        : 'bg-transparent hover:bg-[var(--cds-layer-hover-02)]'
+                        ? 'bg-[#eef0f4]'
+                        : 'bg-transparent hover:bg-[#f3f4f6]'
                     }`}
                     onClick={() => selectMention(suggestion)}
                     onMouseEnter={() => {
@@ -1605,7 +1605,7 @@ export function ChannelWorkspace({
                       }
                     }}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-xs font-semibold">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg border border-[#dde1e6] bg-[#f7f8fa] text-xs font-semibold">
                       {agent.agent.avatar ? (
                         <img
                           src={agent.agent.avatar}
@@ -1651,16 +1651,16 @@ export function ChannelWorkspace({
                   {visiblePendingAttachments.map((attachment) => (
                     <div
                       key={attachment.id}
-                      className="flex max-w-72 items-center gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-2"
+                      className="flex max-w-72 items-center gap-2 rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-2"
                     >
                       {attachment.kind === 'image' && attachment.previewUrl !== undefined ? (
                         <img
                           src={attachment.previewUrl}
                           alt=""
-                          className="h-10 w-10 shrink-0 object-cover"
+                          className="h-10 w-10 shrink-0 rounded-lg object-cover"
                         />
                       ) : (
-                        <span className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[#dde1e6] bg-white">
                           <Document size={18} />
                         </span>
                       )}
@@ -1674,7 +1674,7 @@ export function ChannelWorkspace({
                       </span>
                       <button
                         type="button"
-                        className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                        className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[var(--cds-text-secondary)] hover:bg-[#eef0f4] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                         aria-label={`Remove ${attachment.file.name}`}
                         onClick={() => removePendingAttachment(attachment.id)}
                       >
@@ -1704,7 +1704,7 @@ export function ChannelWorkspace({
             />
             <div className="flex items-center gap-1.5" aria-label="Message tools">
               <button
-                className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+                className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-[#dde1e6] bg-white text-[var(--cds-text-primary)] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
                 type="button"
                 aria-label="Add image"
                 disabled={isCreatingRun || !selectedAgentReady}
@@ -1713,7 +1713,7 @@ export function ChannelWorkspace({
                 <ImageIcon size={16} />
               </button>
               <button
-                className="grid h-8 w-8 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+                className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-[#dde1e6] bg-white text-[var(--cds-text-primary)] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
                 type="button"
                 aria-label="Attach file"
                 disabled={isCreatingRun || !selectedAgentReady}

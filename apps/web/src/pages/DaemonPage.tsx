@@ -74,11 +74,11 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
         )}
       </aside>
 
-      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Daemon detail">
-        <header className="flex min-h-18 items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[671px]:px-4">
+      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[#f7f8fa]" aria-label="Daemon detail">
+        <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <span
-              className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
               aria-hidden="true"
             >
               <Devices size={18} />
@@ -101,11 +101,11 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
         {selectedDevice ? (
           <>
             <section
-              className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 py-5 max-[671px]:px-4"
+              className="mx-6 mt-6 grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:mx-4"
               aria-label="Selected daemon"
             >
               <span
-                className="grid h-16 w-16 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+                className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"
               >
                 <Devices size={28} />
@@ -141,10 +141,10 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
               {selectedDevice.runtimes.length === 0 ? (
                 <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
               ) : (
-                <div className="grid border border-[var(--cds-border-subtle-01)]">
+                <div className="grid overflow-hidden rounded-xl border border-[#e1e5ea] bg-white">
                   {selectedDevice.runtimes.map((runtime) => (
                     <div
-                      className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] p-3 last:border-b-0"
+                      className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-[#e1e5ea] p-3 last:border-b-0"
                       key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
                     >
                       <span className="min-w-0 truncate">
@@ -170,31 +170,26 @@ export function DaemonPage({ devices, agents, deviceError, openCreateAgent }: Da
             <DetailSection
               title="Agents on this daemon"
               aside={
-                <div className="flex items-center gap-2">
-                  <Button kind="ghost" size="sm">
-                    Select
-                  </Button>
-                  <Button
-                    kind="secondary"
-                    size="sm"
-                    renderIcon={Add}
-                    onClick={() => openCreateAgent(selectedDevice.id)}
-                  >
-                    Create
-                  </Button>
-                </div>
+                <button
+                  className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-[#dde1e6] bg-white px-3 text-sm font-semibold text-[#161616] shadow-[0_1px_1px_rgba(0,0,0,0.03)] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  onClick={() => openCreateAgent(selectedDevice.id)}
+                >
+                  <Add size={16} />
+                  Create
+                </button>
               }
             >
               {selectedDeviceAgents.length === 0 ? (
-                <div className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 border border-[var(--cds-border-subtle-01)] p-3 text-[var(--cds-text-secondary)]">
+                <div className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-3 text-[var(--cds-text-secondary)]">
                   <ChatBot size={20} />
                   <span>No agents created on this daemon yet.</span>
                 </div>
               ) : (
-                <div className="grid border border-[var(--cds-border-subtle-01)]">
+                <div className="grid overflow-hidden rounded-xl border border-[#e1e5ea] bg-white">
                   {selectedDeviceAgents.map((agent) => (
                     <div
-                      className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] p-3 last:border-b-0"
+                      className="grid min-h-12 grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-[#e1e5ea] p-3 last:border-b-0"
                       key={agent.agent.id}
                     >
                       <ChatBot size={20} />
@@ -230,7 +225,7 @@ interface DetailSectionProps {
 
 function DetailSection({ title, children, aside }: DetailSectionProps) {
   return (
-    <section className="grid gap-3 border-b border-[var(--cds-border-subtle-01)] px-6 py-5 max-[671px]:px-4">
+    <section className="mx-6 mt-4 grid gap-3 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] last:mb-6 max-[671px]:mx-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="text-xs font-semibold uppercase leading-snug text-[var(--cds-text-secondary)]">
           {title}

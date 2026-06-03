@@ -175,11 +175,11 @@ export function RunsPage({
         )}
       </aside>
 
-      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[var(--cds-background)]" aria-label="Run detail">
-        <header className="flex min-h-18 items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 max-[671px]:px-4">
+      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[#f7f8fa]" aria-label="Run detail">
+        <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <span
-              className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
               aria-hidden="true"
             >
               <JobRun size={18} />
@@ -193,11 +193,11 @@ export function RunsPage({
         {selectedRun ? (
           <>
             <section
-              className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--cds-border-subtle-01)] px-6 py-5 max-[671px]:grid-cols-[4rem_minmax(0,1fr)] max-[671px]:px-4"
+              className="mx-6 mt-6 grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-4 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:mx-4 max-[671px]:grid-cols-[4rem_minmax(0,1fr)]"
               aria-label="Selected run"
             >
               <span
-                className="grid h-16 w-16 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+                className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"
               >
                 <JobRun size={28} />
@@ -225,7 +225,7 @@ export function RunsPage({
 
             <DetailSection title="Prompt">
               <details
-                className="border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)]"
+                className="overflow-hidden rounded-xl border border-[#e1e5ea] bg-[#f7f8fa]"
                 open={promptExpanded}
                 onToggle={(event) => {
                   if (selectedRun === null) {
@@ -247,16 +247,16 @@ export function RunsPage({
                     {promptLength.toLocaleString()} chars · {promptExpanded ? 'Hide' : 'Show'}
                   </span>
                 </summary>
-                <div className="border-t border-[var(--cds-border-subtle-01)] p-3">
-                  <div className="mb-3 inline-grid grid-cols-2 border border-[var(--cds-border-subtle-01)]">
+                <div className="border-t border-[#e1e5ea] p-3">
+                  <div className="mb-3 inline-flex h-8 items-center gap-1 rounded-full bg-[#eef0f4] p-0.5">
                     {(['structured', 'raw'] as const).map((view) => (
                       <button
                         key={view}
                         type="button"
-                        className={`min-h-8 cursor-pointer border-0 px-3 text-sm font-semibold ${
+                        className={`flex h-7 min-w-24 cursor-pointer items-center justify-center rounded-full border-0 px-3 text-sm font-semibold ${
                           promptView === view
-                            ? 'bg-[var(--cds-text-primary)] text-[var(--cds-background)]'
-                            : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                            ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                            : 'bg-transparent text-[#69707d] hover:text-[#161616]'
                         }`}
                         onClick={() => {
                           setPromptViewByRunId((current) => ({
@@ -272,7 +272,7 @@ export function RunsPage({
                   {promptView === 'structured' ? (
                     <PromptSectionList key={selectedRun.run.id} sections={promptSections} />
                   ) : (
-                    <pre className="min-w-0 whitespace-pre-wrap break-words border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] p-3 text-sm leading-relaxed text-[var(--cds-text-primary)]">
+                    <pre className="min-w-0 whitespace-pre-wrap break-words rounded-xl border border-[#e1e5ea] bg-white p-3 text-sm leading-relaxed text-[var(--cds-text-primary)]">
                       {selectedRun.prompt}
                     </pre>
                   )}
@@ -311,7 +311,7 @@ export function RunsPage({
                   hideCloseButton
                 />
               ) : (
-                <ol className="grid overflow-hidden border border-[var(--cds-border-subtle-01)]">
+                <ol className="grid overflow-hidden rounded-xl border border-[#e1e5ea] bg-white">
                   {displayEvents.map((event, index) => (
                     <EventRow
                       event={event}
@@ -324,7 +324,7 @@ export function RunsPage({
             </DetailSection>
 
             <DetailSection title="Output">
-              <div className="grid min-h-20 grid-cols-[1.5rem_minmax(0,1fr)] gap-3 border border-[var(--cds-border-subtle-01)] p-3">
+              <div className="grid min-h-20 grid-cols-[1.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-3">
                 <Terminal size={20} />
                 {agentOutput ? (
                   <pre className="min-w-0 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
@@ -374,7 +374,7 @@ function PromptSectionList({ sections }: PromptSectionListProps) {
       {sections.map((section) => (
           <details
             key={section.id}
-            className="border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+            className="overflow-hidden rounded-xl border border-[#e1e5ea] bg-white"
             open={openBySectionId[section.id] === true}
             onToggle={(event) => {
               const open = event.currentTarget.open
@@ -399,7 +399,7 @@ function PromptSectionList({ sections }: PromptSectionListProps) {
                 {section.content.length.toLocaleString()} chars
               </span>
             </summary>
-            <pre className="max-h-96 min-w-0 overflow-auto border-t border-[var(--cds-border-subtle-01)] p-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--cds-text-primary)]">
+            <pre className="max-h-96 min-w-0 overflow-auto border-t border-[#e1e5ea] bg-[#f7f8fa] p-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--cds-text-primary)]">
               {section.content}
             </pre>
           </details>
@@ -416,7 +416,7 @@ function EventRow({ event, index }: EventRowProps) {
   const isFailedToolResult = event.type === 'agenthub.tool.result' && event.status === 'failed'
 
   return (
-    <li className="grid min-w-0 gap-3 border-b border-[var(--cds-border-subtle-01)] px-4 py-3 last:border-b-0 max-[671px]:px-3">
+    <li className="grid min-w-0 gap-3 border-b border-[#e1e5ea] px-4 py-3 last:border-b-0 max-[671px]:px-3">
       <div className="grid min-w-0 grid-cols-[minmax(9rem,13rem)_minmax(0,1fr)_4.5rem] items-start gap-4 max-[671px]:grid-cols-1 max-[671px]:gap-1.5">
         <Tag
           className="min-w-0 max-w-full justify-self-start"
@@ -462,7 +462,7 @@ function EventRow({ event, index }: EventRowProps) {
                 <h4 className="text-xs font-semibold uppercase leading-snug text-[var(--cds-text-secondary)]">
                   {detail.label}
                 </h4>
-                <pre className="max-h-72 min-w-0 overflow-auto border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-3 text-xs leading-relaxed text-[var(--cds-text-primary)]">
+                <pre className="max-h-72 min-w-0 overflow-auto rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-3 text-xs leading-relaxed text-[var(--cds-text-primary)]">
                   {formatEventJson(detail.value)}
                 </pre>
               </section>
@@ -482,7 +482,7 @@ interface DetailSectionProps {
 
 function DetailSection({ title, children, aside }: DetailSectionProps) {
   return (
-    <section className="grid gap-3 border-b border-[var(--cds-border-subtle-01)] px-6 py-5 max-[671px]:px-4">
+    <section className="mx-6 mt-4 grid gap-3 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] last:mb-6 max-[671px]:mx-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="text-xs font-semibold uppercase leading-snug text-[var(--cds-text-secondary)]">
           {title}

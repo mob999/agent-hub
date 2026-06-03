@@ -117,7 +117,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
               </div>
             </div>
 
-            <div className="border-t border-[#eef0f3] p-5">
+            <div className="px-5 pb-5">
               {selectedDevice.runtimes.length === 0 ? (
                 <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
               ) : (

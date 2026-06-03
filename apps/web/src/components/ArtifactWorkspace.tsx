@@ -942,24 +942,22 @@ export function ArtifactWorkspace({
           )}
           {actionNotice && (
             actionNotice.url ? (
-              <div className="flex items-start justify-between gap-4 border-b border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="font-semibold text-[var(--cds-text-primary)]">{actionNotice.title}</span>
-                    <a
-                      className="font-semibold text-[var(--cds-link-primary)] underline"
-                      href={actionNotice.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open deployment
-                    </a>
-                  </div>
-                  <p className="mt-1 text-[var(--cds-text-secondary)]">{actionNotice.subtitle}</p>
+              <div className="flex min-w-0 items-center justify-between gap-4 border-b border-[#24a148] bg-[#defbe6] px-4 py-3 text-sm text-[#161616]">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-semibold">{actionNotice.title}</span>
+                  <span className="truncate text-[#393939]">{actionNotice.subtitle}</span>
+                  <a
+                    className="font-semibold text-[#0f62fe] underline"
+                    href={actionNotice.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open deployment
+                  </a>
                 </div>
                 <button
                   type="button"
-                  className="grid size-8 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[var(--cds-icon-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-icon-primary)]"
+                  className="grid size-8 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[#393939] hover:bg-[#a7f0ba] hover:text-[#161616]"
                   aria-label="Dismiss notification"
                   onClick={() => setActionNotice(null)}
                 >

@@ -445,8 +445,7 @@ export function ChannelWorkspace({
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
     : hasSelectedConversation &&
-      readyMemberAgentCount > 0 &&
-      (!isProjectConversation || activeConversation.project?.cloneStatus === 'ready')
+      readyMemberAgentCount > 0
   const visiblePendingAttachments =
     pendingAttachmentConversationId === activeConversation?.id
       ? pendingAttachments
@@ -468,11 +467,7 @@ export function ChannelWorkspace({
     : isAgentDirectMessage
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
       : activeConversation.type === 'project'
-        ? activeConversation.project?.cloneStatus === 'ready'
-          ? activeConversation.description?.trim() || activeConversation.project.remoteUrl
-          : activeConversation.project?.cloneStatus === 'failed'
-            ? activeConversation.project.cloneError ?? 'Project clone failed'
-            : 'Cloning project repository...'
+        ? activeConversation.description?.trim() || activeConversation.project?.remoteUrl || 'Project conversation'
         : activeConversation.key === 'all'
           ? 'General channel for members and agent runs'
           : activeConversation.description?.trim() || 'Group channel for selected agents'
@@ -502,12 +497,12 @@ export function ChannelWorkspace({
               First, {createAgentLink}; then message #all to start a run.
             </>
           )
-  const warningTitle = isAgentDirectMessage ? 'Agent is not ready' : 'No ready agent available'
+  const warningTitle = isAgentDirectMessage
+    ? 'Agent is not ready'
+    : 'No ready agent available'
   const warningSubtitle = isAgentDirectMessage
     ? 'Wait for provisioning to finish, or choose another ready agent.'
-    : isProjectConversation && activeConversation.project?.cloneStatus !== 'ready'
-      ? 'Wait for the project clone to finish before sending a run.'
-      : 'Choose a conversation with a ready agent before sending a message.'
+    : 'Choose a conversation with a ready agent before sending a message.'
   const composerPlaceholder = !hasSelectedConversation
     ? 'Select a conversation first'
     : selectedAgentReady

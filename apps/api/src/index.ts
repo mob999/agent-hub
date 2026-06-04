@@ -3331,24 +3331,6 @@ app.post("/conversations/:conversationId/messages", async (c) => {
 
   const agentHubMcpGoals = toMcpGoalList(currentConversationGoals);
 
-  if (
-    conversation.type === "project" &&
-    conversation.project?.cloneStatus !== "ready"
-  ) {
-    return c.json(
-      {
-        error: {
-          code: "PROJECT_NOT_READY",
-          message:
-            conversation.project?.cloneStatus === "failed"
-              ? "Project clone failed. Fix the repository URL or daemon access before sending runs."
-              : "Project repository is still cloning. Try again after it is ready.",
-        },
-      },
-      400,
-    );
-  }
-
   const userAgents = await listAgentsForUser(db, { ownerUserId: user.id });
   const agentNamesById = Object.fromEntries(
     userAgents.map((agent) => [

@@ -1178,6 +1178,14 @@ export function WorkspacePage({
               ...current.filter((conversation) => conversation.id !== event.conversationId),
             ])
           } else {
+            const existingConversation = conversationsRef.current.find(
+              (conversation) => conversation.id === event.conversationId,
+            )
+
+            if (existingConversation === undefined || existingConversation.type === 'project') {
+              void loadConversations()
+            }
+
             setConversations((current) => {
               const existing = current.find((conversation) => conversation.id === event.conversationId)
 
@@ -1621,7 +1629,9 @@ export function WorkspacePage({
         writeConversationDraft(user.id, response.conversation.id, '')
       }
       setSelectedRunId(null)
-      selectConversation(response.conversation.id)
+      if (response.conversation.project?.cloneStatus === 'ready') {
+        selectConversation(response.conversation.id)
+      }
       setProjectModalOpen(false)
       void loadConversations()
     } catch (error) {

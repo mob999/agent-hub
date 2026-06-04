@@ -32,6 +32,7 @@ import {
   ensureProjectCloneQueueGroup,
   ensureRunQueueGroup,
   getArtifactActionAssignment,
+  getConversationForUser,
   getRunById,
   markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
@@ -64,6 +65,22 @@ const logger = createLogger({
     service: "worker",
   },
 });
+
+async function publishConversationUpdated(input: {
+  conversationId: string;
+  ownerUserId: string;
+}): Promise<void> {
+  const conversation = await getConversationForUser(db, input);
+
+  await publishRealtimeEvents([
+    createRealtimeEvent({
+      conversation: conversation ?? undefined,
+      conversationId: input.conversationId,
+      ownerUserId: input.ownerUserId,
+      type: "conversation.updated",
+    }),
+  ]);
+}
 
 async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
   await Promise.all(
@@ -324,13 +341,10 @@ const gateway = new DaemonGateway({
       baseHead: message.baseHead,
     });
     if (result.status === "updated") {
-      await publishRealtimeEvents([
-        createRealtimeEvent({
-          conversationId: result.project.conversationId,
-          ownerUserId: result.project.ownerUserId,
-          type: "conversation.updated",
-        }),
-      ]);
+      await publishConversationUpdated({
+        conversationId: result.project.conversationId,
+        ownerUserId: result.project.ownerUserId,
+      });
     }
     logger.info(
       {
@@ -346,13 +360,10 @@ const gateway = new DaemonGateway({
       error: message.reason,
     });
     if (result.status === "updated") {
-      await publishRealtimeEvents([
-        createRealtimeEvent({
-          conversationId: result.project.conversationId,
-          ownerUserId: result.project.ownerUserId,
-          type: "conversation.updated",
-        }),
-      ]);
+      await publishConversationUpdated({
+        conversationId: result.project.conversationId,
+        ownerUserId: result.project.ownerUserId,
+      });
     }
     logger.warn(
       {
@@ -531,10 +542,16 @@ while (!shuttingDown) {
     });
 
     if (!assigned) {
-      await markProjectCloneFailed(db, {
+      const result = await markProjectCloneFailed(db, {
         conversationId: message.job.conversationId,
         error: `Daemon ${message.job.daemonDeviceId} is not connected.`,
       });
+      if (result.status === "updated") {
+        await publishConversationUpdated({
+          conversationId: result.project.conversationId,
+          ownerUserId: result.project.ownerUserId,
+        });
+      }
       logger.warn(
         {
           conversationId: message.job.conversationId,

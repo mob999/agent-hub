@@ -1,3 +1,4 @@
+import { Loading } from '@carbon/react'
 import {
   Activity,
   Add,
@@ -414,10 +415,13 @@ export function ChatSidebar({
                     <button
                       className={`${sidebarButton} ${
                         projectSelected ? selectedListItem : transparentListItem
+                      } ${
+                        cloneStatus === 'cloning' ? 'cursor-not-allowed opacity-75' : ''
                       } min-h-[2.125rem] grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-2 px-3 py-1.5`}
                       type="button"
                       key={conversation.id}
                       aria-current={projectSelected ? 'page' : undefined}
+                      disabled={cloneStatus === 'cloning'}
                       onClick={() => selectProject(conversation.id)}
                     >
                       <span
@@ -429,14 +433,25 @@ export function ChatSidebar({
                       </span>
                       <span className={sidebarItemLabelClass(projectSelected)}>
                         {conversation.title}
-                        {cloneStatus && cloneStatus !== 'ready' ? (
-                          <span className="ml-2 text-xs font-normal text-[#69707d]">
-                            {cloneStatus === 'cloning' ? 'cloning' : 'failed'}
-                          </span>
-                        ) : null}
                       </span>
-                      <span className="flex min-w-6 justify-end">
+                      <span className="flex min-w-6 items-center justify-end gap-2">
                         <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
+                        {cloneStatus === 'cloning' ? (
+                          <span className="grid h-6 w-6 place-items-center" title="Cloning project">
+                            <Loading
+                              small
+                              withOverlay={false}
+                              description="Cloning project"
+                              className="h-4 w-4"
+                            />
+                          </span>
+                        ) : cloneStatus === 'failed' ? (
+                          <span
+                            className="h-2 w-2 rounded-full bg-[var(--cds-support-error)]"
+                            title="Clone failed"
+                            aria-label="Clone failed"
+                          />
+                        ) : null}
                       </span>
                     </button>
                   )

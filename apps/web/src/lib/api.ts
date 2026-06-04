@@ -526,6 +526,32 @@ export interface GetProjectFileContentResponse {
   content: string
 }
 
+export interface UpdateProjectFileContentResponse {
+  baseHead?: string
+  content: string
+  path: string
+}
+
+export type ProjectChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'binary'
+
+export interface ProjectChangedFile {
+  binary: boolean
+  oldPath?: string
+  path: string
+  status: ProjectChangedFileStatus
+}
+
+export interface ListProjectChangeFilesResponse {
+  files: ProjectChangedFile[]
+}
+
+export interface GetProjectChangeFileContentResponse {
+  binary: boolean
+  file: ProjectChangedFile
+  newContent: string
+  oldContent: string
+}
+
 export interface UpdateGroupConversationRequest {
   title: string
   description?: string

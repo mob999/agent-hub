@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -82,6 +84,7 @@ import {
   listRecentDirectConversationMessagesForAgent,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
+  markProjectBaseHead,
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
@@ -121,6 +124,7 @@ const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const realtimeSubscriber = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({ bindings: { service: "api" } });
+const execFileAsync = promisify(execFile);
 const runtimeKinds = new Set<RuntimeKind>([
   "claude-code",
   "codex",
@@ -782,6 +786,135 @@ async function listProjectFileTree(input: {
   }
 
   return rows;
+}
+
+async function git(
+  args: string[],
+  options: { cwd?: string; maxBuffer?: number } = {},
+): Promise<string> {
+  const result = await execFileAsync("git", args, {
+    cwd: options.cwd,
+    maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024,
+  });
+
+  return result.stdout.trim();
+}
+
+type ProjectChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "binary";
+
+interface ProjectChangedFile {
+  binary: boolean;
+  oldPath?: string;
+  path: string;
+  status: ProjectChangedFileStatus;
+}
+
+function toProjectChangedFileStatus(statusCode: string): ProjectChangedFileStatus {
+  if (statusCode.startsWith("A")) {
+    return "added";
+  }
+
+  if (statusCode.startsWith("D")) {
+    return "deleted";
+  }
+
+  if (statusCode.startsWith("R")) {
+    return "renamed";
+  }
+
+  return "modified";
+}
+
+async function listProjectChangedFiles(input: {
+  baseCommit?: string;
+  headCommit?: string;
+  worktreePath: string;
+}): Promise<ProjectChangedFile[]> {
+  if (input.headCommit === undefined) {
+    return [];
+  }
+
+  const output = input.baseCommit === undefined
+    ? await git(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      })
+    : await git(["diff", "--name-status", "-M", input.baseCommit, input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      });
+
+  if (output.length === 0) {
+    return [];
+  }
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [statusCode, firstPath, secondPath] = line.split("\t");
+      const status = toProjectChangedFileStatus(statusCode);
+      const pathValue = status === "renamed" ? secondPath : firstPath;
+      const oldPath = status === "renamed" ? firstPath : undefined;
+      const fileInfo = inferArtifactFileInfo({ filename: pathValue ?? firstPath ?? "" });
+
+      return {
+        binary: !fileInfo.canEdit,
+        oldPath,
+        path: pathValue ?? firstPath ?? "",
+        status: !fileInfo.canEdit ? "binary" : status,
+      };
+    })
+    .filter((file) => file.path.length > 0);
+}
+
+async function readProjectFileAtCommit(input: {
+  commit?: string;
+  filePath?: string;
+  worktreePath: string;
+}): Promise<string> {
+  if (input.commit === undefined || input.filePath === undefined) {
+    return "";
+  }
+
+  return git(["show", `${input.commit}:${input.filePath}`], {
+    cwd: input.worktreePath,
+    maxBuffer: 20 * 1024 * 1024,
+  }).catch(() => "");
+}
+
+async function commitProjectBaseFile(input: {
+  baseRepoPath: string;
+  relativePath: string;
+}): Promise<string | undefined> {
+  await git(["add", "--", input.relativePath], { cwd: input.baseRepoPath });
+
+  const status = await git(["status", "--porcelain", "--", input.relativePath], {
+    cwd: input.baseRepoPath,
+  });
+
+  if (status.length > 0) {
+    await git(
+      [
+        "-c",
+        "user.name=AgentHub",
+        "-c",
+        "user.email=agenthub@example.local",
+        "commit",
+        "-m",
+        `User edit ${input.relativePath}`,
+      ],
+      {
+        cwd: input.baseRepoPath,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+    );
+  }
+
+  return git(["rev-parse", "HEAD"], {
+    cwd: input.baseRepoPath,
+  }).catch(() => undefined);
 }
 
 async function listAgentDailyMemoryFiles(input: {
@@ -2634,6 +2767,157 @@ app.get("/conversations/:conversationId/project/changes/:changeId", async (c) =>
   return c.json(result);
 });
 
+app.get("/conversations/:conversationId/project/changes/:changeId/files", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_NOT_FOUND",
+          message: "Project change was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    return c.json({
+      files: await listProjectChangedFiles({
+        baseCommit: result.change.baseCommit,
+        headCommit: result.change.headCommit,
+        worktreePath: result.change.worktreePath,
+      }),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILES_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/changes/:changeId/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (requestedPath === undefined || result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILE_NOT_FOUND",
+          message: "Project change file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const files = await listProjectChangedFiles({
+      baseCommit: result.change.baseCommit,
+      headCommit: result.change.headCommit,
+      worktreePath: result.change.worktreePath,
+    });
+    const file = files.find((entry) => entry.path === requestedPath || entry.oldPath === requestedPath);
+
+    if (file === undefined) {
+      return c.json(
+        {
+          error: {
+            code: "PROJECT_CHANGE_FILE_NOT_FOUND",
+            message: "Project change file was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    if (file.binary) {
+      return c.json({
+        binary: true,
+        file,
+        newContent: "",
+        oldContent: "",
+      });
+    }
+
+    const oldContent = file.status === "added"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: result.change.baseCommit,
+          filePath: file.oldPath ?? file.path,
+          worktreePath: result.change.worktreePath,
+        });
+    const newContent = file.status === "deleted"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: result.change.headCommit,
+          filePath: file.path,
+          worktreePath: result.change.worktreePath,
+        });
+
+    return c.json({
+      binary: false,
+      file,
+      newContent,
+      oldContent,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILE_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
 app.get("/conversations/:conversationId/project/files", async (c) => {
   const user = c.get("user");
 
@@ -2679,6 +2963,67 @@ app.get("/conversations/:conversationId/project/files", async (c) => {
         },
       },
       500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/files/raw", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const fileInfo = inferArtifactFileInfo({ filename: requestedPath });
+    const content = await readFile(filePath);
+
+    return new Response(content, {
+      headers: {
+        "content-type": fileInfo.mimeType,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      404,
     );
   }
 });
@@ -2734,6 +3079,101 @@ app.get("/conversations/:conversationId/project/files/content", async (c) => {
         },
       },
       404,
+    );
+  }
+});
+
+app.put("/conversations/:conversationId/project/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = await c.req.json<{ content?: unknown; path?: unknown }>().catch(() => null);
+  const requestedPath = typeof body?.path === "string" ? body.path : undefined;
+  const content = typeof body?.content === "string" ? body.content : undefined;
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    content === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const fileInfo = inferArtifactFileInfo({ filename: requestedPath });
+  if (!fileInfo.canEdit) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_EDITABLE",
+          message: "Project file cannot be edited as text.",
+        },
+      },
+      400,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const fileStat = await stat(filePath);
+
+    if (!fileStat.isFile()) {
+      return c.json(
+        {
+          error: {
+            code: "PROJECT_FILE_NOT_FOUND",
+            message: "Project file was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    await writeFile(filePath, content, "utf8");
+    const baseHead = await commitProjectBaseFile({
+      baseRepoPath: project.baseRepoPath,
+      relativePath: requestedPath,
+    });
+
+    await markProjectBaseHead(db, {
+      baseHead,
+      conversationId: project.conversationId,
+    });
+
+    return c.json({ baseHead, content, path: requestedPath });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_SAVE_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
     );
   }
 });

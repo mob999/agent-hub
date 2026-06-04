@@ -1875,6 +1875,27 @@ export async function markProjectCloneFailed(
     : { status: "updated", project: toConversationProject(project) };
 }
 
+export async function markProjectBaseHead(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    baseHead?: string;
+  },
+): Promise<UpdateProjectCloneResult> {
+  const [project] = await db
+    .update(conversationProjects)
+    .set({
+      baseHead: input.baseHead,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationProjects.conversationId, input.conversationId))
+    .returning();
+
+  return project === undefined
+    ? { status: "not-found" }
+    : { status: "updated", project: toConversationProject(project) };
+}
+
 export async function getProjectForConversation(
   db: Db,
   input: { conversationId: ConversationId; ownerUserId?: string },

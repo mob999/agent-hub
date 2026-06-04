@@ -42,10 +42,9 @@ const transparentListItem =
   'bg-transparent hover:bg-[#eef0f4] hover:text-[#161616]'
 const selectedListItem =
   'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
-const inlineCount = 'font-semibold normal-case text-[#69707d]'
-const labelWithCount = 'inline-flex items-baseline gap-1'
+const sectionHeadingText = 'truncate text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[#344054]'
 const agentAvatarFrame =
-  'grid h-7 w-7 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]'
+  'grid h-6 w-6 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]'
 const unreadBadge =
   'inline-grid min-w-5 place-items-center rounded-full bg-[var(--cds-support-error)] px-1.5 text-xs font-semibold leading-5 text-[var(--cds-text-on-color)]'
 const archivedActionButton =
@@ -57,7 +56,9 @@ const archivedDeleteButton =
 const archivedConfirmDeleteButton =
   'grid h-7 w-7 place-items-center rounded-lg border border-[var(--cds-support-error)] bg-[var(--cds-support-error)] p-0 text-[var(--cds-text-on-color)] hover:bg-[var(--cds-support-error)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const sidebarSectionToggle =
-  'inline-grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 rounded-lg border-0 bg-transparent p-0 text-left text-[#69707d] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'group inline-grid min-w-0 grid-cols-[4.75rem_1rem] items-center gap-1 rounded-lg border-0 bg-transparent p-0 text-left text-[#8a94a6] hover:text-[#4b5565] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const sidebarSectionChevron =
+  'grid h-4 w-4 place-items-center text-[#a4acba] transition-colors group-hover:text-[#4b5565]'
 const shortcutBadge =
   'rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]'
 
@@ -127,7 +128,7 @@ export function ChatSidebar({
         <h2 className="min-w-0 truncate text-base font-semibold text-[#161616]">Chat</h2>
       </header>
 
-      <section className="grid gap-1 px-3 pb-3 pt-2" aria-label="Quick actions">
+      <section className="grid shrink-0 gap-1 px-3 pb-3 pt-2" aria-label="Quick actions">
         <button
           className={`${sidebarButton} ${transparentListItem} min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
           type="button"
@@ -290,11 +291,10 @@ export function ChatSidebar({
         )}
       </section>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <div className="grid gap-2">
         <section
-          className={`flex min-h-0 flex-col gap-1 ${
-            groupsCollapsed ? 'shrink-0' : 'flex-1 basis-0'
-          }`}
+          className="grid gap-1"
           aria-labelledby="groups-heading"
         >
           <div className="grid min-h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
@@ -305,9 +305,11 @@ export function ChatSidebar({
               aria-controls="groups-list"
               onClick={() => setGroupsCollapsed((collapsed) => !collapsed)}
             >
-              {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-              <span id="groups-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
-                Groups<span className={inlineCount}>({groupConversations.length})</span>
+              <span id="groups-heading" className={sectionHeadingText}>
+                Groups
+              </span>
+              <span className={sidebarSectionChevron} aria-hidden="true">
+                {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
               </span>
             </button>
             <button
@@ -320,7 +322,7 @@ export function ChatSidebar({
             </button>
           </div>
           {!groupsCollapsed && (
-            <div id="groups-list" className="min-h-0 overflow-y-auto pr-1">
+            <div id="groups-list" className="pr-1">
               <div className="grid gap-1">
                 {groupConversations.map((conversation) => {
                   const groupChatSelected = activeConversationId === conversation.id
@@ -329,14 +331,14 @@ export function ChatSidebar({
                     <button
                       className={`${sidebarButton} ${
                         groupChatSelected ? selectedListItem : transparentListItem
-                      } min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+                      } min-h-[2.125rem] grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-2 px-3 py-1.5`}
                       type="button"
                       key={conversation.id}
                       aria-current={groupChatSelected ? 'page' : undefined}
                       onClick={() => selectGroup(conversation.id)}
                     >
                       <span
-                        className="grid h-6 w-5 place-items-center text-base leading-5 text-[#596171]"
+                        className="grid h-6 w-6 place-items-center text-sm leading-5 text-[#596171]"
                         aria-hidden="true"
                       >
                         #
@@ -356,9 +358,7 @@ export function ChatSidebar({
         </section>
 
         <section
-          className={`flex min-h-0 flex-col gap-1 ${
-            agentsCollapsed ? 'shrink-0' : 'flex-1 basis-0'
-          }`}
+          className="grid gap-1"
           aria-labelledby="agents-heading"
         >
           <div className="grid min-h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
@@ -369,9 +369,11 @@ export function ChatSidebar({
               aria-controls="agents-list"
               onClick={() => setAgentsCollapsed((collapsed) => !collapsed)}
             >
-              {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-              <span id="agents-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
-                Agents<span className={inlineCount}>({agents.length})</span>
+              <span id="agents-heading" className={sectionHeadingText}>
+                Agents
+              </span>
+              <span className={sidebarSectionChevron} aria-hidden="true">
+                {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
               </span>
             </button>
             <button
@@ -388,7 +390,7 @@ export function ChatSidebar({
               No agents yet.
             </p>
           ) : (
-            <div id="agents-list" className="min-h-0 overflow-y-auto pr-1">
+            <div id="agents-list" className="pr-1">
               <div className="grid gap-1">
                 {agents.map((agent) => {
                   const agentSelected =
@@ -402,7 +404,7 @@ export function ChatSidebar({
                     <button
                       className={`${sidebarButton} ${
                         agentSelected ? selectedListItem : transparentListItem
-                      } min-h-10 grid-cols-[1.75rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+                      } min-h-[2.125rem] grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-2 px-3 py-1.5`}
                       type="button"
                       key={agent.agent.id}
                       aria-current={agentSelected ? 'page' : undefined}
@@ -413,7 +415,7 @@ export function ChatSidebar({
                           <img
                             src={agent.agent.avatar}
                             alt=""
-                            className="h-6 w-6 rounded-[3px] object-cover"
+                            className="h-5 w-5 rounded-[3px] object-cover"
                           />
                         ) : (
                           <ChatBot size={16} />
@@ -431,6 +433,7 @@ export function ChatSidebar({
             </div>
           ))}
         </section>
+        </div>
       </div>
     </aside>
   )

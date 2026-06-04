@@ -37,6 +37,7 @@ export async function createRunRecord(
     dispatchMode: input.job.dispatchMode ?? input.job.run.dispatchMode ?? "new",
     prompt: input.job.prompt,
     workspacePath: input.job.workspacePath,
+    memoryWorkspacePath: input.job.memoryWorkspacePath ?? input.job.workspacePath,
     runtime: input.job.runtime,
     createdAt: new Date(input.job.run.createdAt),
     updatedAt: new Date(input.job.run.updatedAt),
@@ -161,6 +162,7 @@ export async function appendRunEvent(
   return {
     dispatchJobs: conversationResult.dispatchJobs,
     memoryAppendJobs: conversationResult.memoryAppendJobs,
+    projectMergeRequests: conversationResult.projectMergeRequests,
     toolResult: conversationResult.toolResult,
     realtimeEvents: [
       ...realtimeEvents,

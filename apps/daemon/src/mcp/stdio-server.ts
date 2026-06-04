@@ -31,12 +31,21 @@ import type {
   AgentHubListArtifactsToolResult,
   AgentHubListGoalsToolInput,
   AgentHubListGoalsToolResult,
+  AgentHubListProjectChangesToolInput,
+  AgentHubListProjectChangesToolResult,
+  AgentHubMergeProjectChangeToolInput,
+  AgentHubMergeProjectChangeToolResult,
   AgentHubMcpToolName,
+  AgentHubMcpToolInput,
   AgentHubMcpToolResult,
   AgentHubReadMemoryToolInput,
   AgentHubReadMemoryToolResult,
   AgentHubReadArtifactToolInput,
   AgentHubReadArtifactToolResult,
+  AgentHubReadProjectChangeToolInput,
+  AgentHubReadProjectChangeToolResult,
+  AgentHubRejectProjectChangeToolInput,
+  AgentHubRejectProjectChangeToolResult,
   AgentHubSearchGroupMessagesToolInput,
   AgentHubSearchGroupMessagesToolResult,
   AgentHubSearchMemoryToolInput,
@@ -51,6 +60,10 @@ const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
 const listGroupMessagesToolName = "list_group_messages" satisfies AgentHubMcpToolName;
 const searchGroupMessagesToolName = "search_group_messages" satisfies AgentHubMcpToolName;
 const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
+const listProjectChangesToolName = "list_project_changes" satisfies AgentHubMcpToolName;
+const readProjectChangeToolName = "read_project_change" satisfies AgentHubMcpToolName;
+const mergeProjectChangeToolName = "merge_project_change" satisfies AgentHubMcpToolName;
+const rejectProjectChangeToolName = "reject_project_change" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
 const downloadArtifactToolName = "download_artifact" satisfies AgentHubMcpToolName;
@@ -70,6 +83,10 @@ const agentHubMcpToolNames = [
   listGroupMessagesToolName,
   searchGroupMessagesToolName,
   listGoalsToolName,
+  listProjectChangesToolName,
+  readProjectChangeToolName,
+  mergeProjectChangeToolName,
+  rejectProjectChangeToolName,
   listArtifactsToolName,
   readArtifactToolName,
   downloadArtifactToolName,
@@ -245,6 +262,85 @@ export async function startAgentHubMcpStdioServer(
                     description: "Optional goal status filter.",
                   },
                 },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(listProjectChangesToolName)
+        ? [
+            {
+              name: listProjectChangesToolName,
+              description:
+                "List internal Project change proposals for the current AgentHub Project conversation. Use this to inspect open agent branches before deciding whether to merge or reject them.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: ["open", "merged", "rejected", "failed"],
+                    description: "Optional project change status filter.",
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(readProjectChangeToolName)
+        ? [
+            {
+              name: readProjectChangeToolName,
+              description:
+                "Read one internal Project change proposal, including branch metadata, diff stat, and full diff text.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                },
+                required: ["changeId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(mergeProjectChangeToolName)
+        ? [
+            {
+              name: mergeProjectChangeToolName,
+              description:
+                "Approve an internal Project change proposal for merge. Only the configured Project Orchestrator should call this after reviewing the diff.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                  message: {
+                    type: "string",
+                    description: "Optional merge message.",
+                  },
+                },
+                required: ["changeId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(rejectProjectChangeToolName)
+        ? [
+            {
+              name: rejectProjectChangeToolName,
+              description:
+                "Reject an internal Project change proposal. Only the configured Project Orchestrator should call this after reviewing the diff.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                  reason: {
+                    type: "string",
+                    description: "Optional rejection reason.",
+                  },
+                },
+                required: ["changeId"],
               },
             },
           ]
@@ -638,6 +734,14 @@ export async function startAgentHubMcpStdioServer(
             ? readSearchGroupMessagesInput(request.params.arguments)
         : toolName === listGoalsToolName
             ? readListGoalsInput(request.params.arguments)
+            : toolName === listProjectChangesToolName
+              ? readListProjectChangesInput(request.params.arguments)
+              : toolName === readProjectChangeToolName
+                ? readReadProjectChangeInput(request.params.arguments)
+                : toolName === mergeProjectChangeToolName
+                  ? readMergeProjectChangeInput(request.params.arguments)
+                  : toolName === rejectProjectChangeToolName
+                    ? readRejectProjectChangeInput(request.params.arguments)
             : toolName === listArtifactsToolName
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
@@ -809,6 +913,78 @@ function readListGoalsInput(value: unknown): AgentHubListGoalsToolInput {
   return typeof status === "string" && status.length > 0
     ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
+}
+
+function readListProjectChangesInput(
+  value: unknown,
+): AgentHubListProjectChangesToolInput {
+  const input = readObjectArguments(value, "list_project_changes");
+  const status = input.status;
+
+  if (
+    status !== undefined &&
+    status !== "open" &&
+    status !== "merged" &&
+    status !== "rejected" &&
+    status !== "failed"
+  ) {
+    throw new Error("list_project_changes.status is invalid.");
+  }
+
+  return status === undefined ? {} : { status };
+}
+
+function readReadProjectChangeInput(
+  value: unknown,
+): AgentHubReadProjectChangeToolInput {
+  const input = readObjectArguments(value, "read_project_change");
+  const changeId = input.changeId;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("read_project_change.changeId is required.");
+  }
+
+  return { changeId };
+}
+
+function readMergeProjectChangeInput(
+  value: unknown,
+): AgentHubMergeProjectChangeToolInput {
+  const input = readObjectArguments(value, "merge_project_change");
+  const changeId = input.changeId;
+  const message = input.message;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("merge_project_change.changeId is required.");
+  }
+
+  return {
+    changeId,
+    message:
+      typeof message === "string" && message.trim().length > 0
+        ? message.trim()
+        : undefined,
+  };
+}
+
+function readRejectProjectChangeInput(
+  value: unknown,
+): AgentHubRejectProjectChangeToolInput {
+  const input = readObjectArguments(value, "reject_project_change");
+  const changeId = input.changeId;
+  const reason = input.reason;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("reject_project_change.changeId is required.");
+  }
+
+  return {
+    changeId,
+    reason:
+      typeof reason === "string" && reason.trim().length > 0
+        ? reason.trim()
+        : undefined,
+  };
 }
 
 function readListGroupMessagesInput(value: unknown): AgentHubListGroupMessagesToolInput {
@@ -1241,22 +1417,7 @@ function compactUniqueNumbers(value: unknown[]): number[] {
 }
 
 async function callRelayTool(input: {
-  input:
-    | AgentHubApproveTaskToolInput
-    | AgentHubCancelTaskToolInput
-    | AgentHubCompleteGoalToolInput
-    | AgentHubCompleteTaskToolInput
-    | AgentHubDeployStaticSiteToolInput
-    | AgentHubCreateGoalToolInput
-    | AgentHubCreateTaskToolInput
-    | AgentHubAppendMemoryToolInput
-    | AgentHubListArtifactsToolInput
-    | AgentHubListGoalsToolInput
-    | AgentHubReadMemoryToolInput
-    | AgentHubReadArtifactToolInput
-    | AgentHubSearchMemoryToolInput
-    | AgentHubSendMessageToolInput
-    | AgentHubUploadArtifactToolInput;
+  input: AgentHubMcpToolInput;
   relayUrl: string;
   sessionToken: string;
   toolCallId: string;

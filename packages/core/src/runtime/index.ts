@@ -47,6 +47,7 @@ export interface AgentRunInput {
   prompt: string;
   contextCompression?: DaemonRunAssignment["contextCompression"];
   agentInstructions?: string;
+  memoryWorkspacePath?: string;
   workspacePath: string;
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];

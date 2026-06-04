@@ -548,7 +548,7 @@ export class CodexAdapter implements AgentAdapter {
           },
           runId: input.run.id,
           runtimeKind: "codex",
-          workspacePath: input.workspacePath,
+          workspacePath: input.memoryWorkspacePath ?? input.workspacePath,
         });
 
         process.stdin.write(runPrompt);

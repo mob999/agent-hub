@@ -9,6 +9,7 @@ import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
+import { ProjectCreateModal } from '../components/ProjectCreateModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
 import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
@@ -29,6 +30,7 @@ import {
   type ConversationGoal,
   type ConversationMessage,
   type CreateGroupConversationResponse,
+  type CreateProjectConversationResponse,
   type DaemonDevice,
   type LocalRun,
   type RealtimeEvent,
@@ -225,6 +227,9 @@ export function WorkspacePage({
   const [groupEditError, setGroupEditError] = useState<string | null>(null)
   const [isSavingGroup, setIsSavingGroup] = useState(false)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null)
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
@@ -1383,6 +1388,10 @@ export function WorkspacePage({
     setGroupCreateError(null)
     setGroupModalOpen(true)
   }
+  const openCreateProject = () => {
+    setProjectCreateError(null)
+    setProjectModalOpen(true)
+  }
   const openEditActiveConversation = () => {
     if (activeConversation === null) {
       return
@@ -1582,6 +1591,47 @@ export function WorkspacePage({
       } else {
         setRunError('Unable to restore the group. Try again in a moment.')
       }
+    }
+  }
+  const createProject = async (input: {
+    title?: string
+    description?: string
+    remoteUrl: string
+    agentIds: string[]
+    orchestratorAgentId?: string
+  }) => {
+    setIsCreatingProject(true)
+    setProjectCreateError(null)
+
+    try {
+      const response = await apiRequest<CreateProjectConversationResponse>('/conversations/projects', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setMessagesByConversation((current) => ({
+        ...current,
+        [response.conversation.id]: [],
+      }))
+      if (user) {
+        writeConversationDraft(user.id, response.conversation.id, '')
+      }
+      setSelectedRunId(null)
+      selectConversation(response.conversation.id)
+      setProjectModalOpen(false)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setProjectCreateError(error.message)
+      } else {
+        setProjectCreateError('Unable to create the project. Try again in a moment.')
+      }
+    } finally {
+      setIsCreatingProject(false)
     }
   }
   const deleteArchivedGroup = async (conversationId: string) => {
@@ -1876,6 +1926,7 @@ export function WorkspacePage({
             onOpenSearch={openSearch}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onCreateProject={openCreateProject}
             onOpenActivity={() => navigateToView('runs')}
             onDeleteAgent={(agentId) => {
               void deleteArchivedAgent(agentId)
@@ -1891,6 +1942,7 @@ export function WorkspacePage({
             }}
             onToggleSaved={() => setSavedOpen((open) => !open)}
             selectGroup={selectConversation}
+            selectProject={selectConversation}
             selectAgent={(agentId) => {
               void selectAgentConversation(agentId)
             }}
@@ -2024,6 +2076,16 @@ export function WorkspacePage({
           isCreating={isCreatingGroup}
           onClose={() => setGroupModalOpen(false)}
           onCreate={createGroup}
+        />
+      )}
+      {projectModalOpen && (
+        <ProjectCreateModal
+          open={projectModalOpen}
+          agents={agents}
+          error={projectCreateError}
+          isCreating={isCreatingProject}
+          onClose={() => setProjectModalOpen(false)}
+          onCreate={createProject}
         />
       )}
       {editingAgent && (

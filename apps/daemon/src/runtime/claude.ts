@@ -540,7 +540,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           },
           runId: input.run.id,
           runtimeKind: "claude-code",
-          workspacePath: input.workspacePath,
+          workspacePath: input.memoryWorkspacePath ?? input.workspacePath,
         });
 
         childProcess.stdin.write(runPrompt);

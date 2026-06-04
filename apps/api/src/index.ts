@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { serve } from "@hono/node-server";
@@ -33,6 +33,7 @@ import {
   applyRunDispatchPreparation,
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildProjectProtocolPrompt,
   buildRecentDirectMessagesPrompt,
   createRunRecord,
   buildConversationRunPrompt,
@@ -40,6 +41,7 @@ import {
   createConversationArtifactFileRevision,
   createConversationArtifactRevision,
   createGroupConversation,
+  createProjectConversation,
   createUserMessageAndRun,
   createUserMessageAndRuns,
   createRealtimeEvent,
@@ -49,6 +51,7 @@ import {
   enqueueArtifactActionJob,
   enqueueRunJob,
   enqueueMemoryAppendJob,
+  enqueueProjectCloneJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
@@ -59,6 +62,8 @@ import {
   getConversationArtifactFileContentForUser,
   getConversationArtifactFileRawContentForUser,
   getConversationDeploymentFileForUser,
+  getProjectForConversation,
+  getProjectChangeWithDiffForConversation,
   getSiteArtifactZipForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
@@ -66,6 +71,7 @@ import {
   listConversationArtifactsForUser,
   listConversationArtifactFilesForUser,
   listConversationDeploymentsForUser,
+  listProjectChangesForConversation,
   listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
@@ -80,6 +86,7 @@ import {
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
   prepareRunDispatch,
+  prepareProjectRunJobForConversation,
   publishSiteArtifactForUser,
   readArtifactContent,
   conversationArtifactStorageKey,
@@ -120,6 +127,7 @@ const runtimeKinds = new Set<RuntimeKind>([
   "opencode",
   "custom",
 ]);
+const projectChangeStatuses = new Set(["open", "merged", "rejected", "failed"]);
 const orchestratorParallelSerialTaskInstructions = [
   "Parallel task rule: tasks may run in parallel only when they are assigned to different agents, each task has enough input to start, their deliverables are clearly separated, and neither task needs the other's report, code, screenshots, site artifact, decision, or verification result.",
   "Serial task rule: tasks must be serial when they share the same assignee, when one task depends on another task's output, when multiple agents must edit or verify the same deliverable, or when integration, validation, publishing, or final summarization must happen after earlier work.",
@@ -723,6 +731,59 @@ function applyContextCompressionToJob(
   };
 }
 
+function resolveProjectFilePath(baseRepoPath: string, requestedPath?: string): string {
+  const relativePath = (requestedPath ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const resolved = path.resolve(baseRepoPath, relativePath);
+  const root = path.resolve(baseRepoPath);
+
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error("Path is outside the project repository.");
+  }
+
+  return resolved;
+}
+
+async function listProjectFileTree(input: {
+  baseRepoPath: string;
+  relativePath?: string;
+  depth?: number;
+}): Promise<Array<{ path: string; sizeBytes?: number; type: "directory" | "file" }>> {
+  const depth = input.depth ?? 0;
+
+  if (depth > 5) {
+    return [];
+  }
+
+  const directory = resolveProjectFilePath(input.baseRepoPath, input.relativePath);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const rows: Array<{ path: string; sizeBytes?: number; type: "directory" | "file" }> = [];
+
+  for (const entry of entries) {
+    if (entry.name === ".git") {
+      continue;
+    }
+
+    const relativePath = [input.relativePath, entry.name]
+      .filter((segment): segment is string => segment !== undefined && segment.length > 0)
+      .join("/");
+    const fullPath = resolveProjectFilePath(input.baseRepoPath, relativePath);
+
+    if (entry.isDirectory()) {
+      rows.push({ path: relativePath, type: "directory" });
+      rows.push(...await listProjectFileTree({
+        baseRepoPath: input.baseRepoPath,
+        relativePath,
+        depth: depth + 1,
+      }));
+    } else if (entry.isFile()) {
+      const fileStat = await stat(fullPath);
+      rows.push({ path: relativePath, sizeBytes: fileStat.size, type: "file" });
+    }
+  }
+
+  return rows;
+}
+
 async function listAgentDailyMemoryFiles(input: {
   fallbackDate: string;
   workspacePath: string;
@@ -768,7 +829,10 @@ async function prepareApiRunJobDispatch(
   });
 
   return {
-    job: applyRunDispatchPreparation(job, preparation),
+    job: await prepareProjectRunJobForConversation(db, {
+      conversationId: input.conversationId ?? job.conversationId ?? "",
+      job: applyRunDispatchPreparation(job, preparation),
+    }),
     realtimeEvents: preparation.realtimeEvents,
   };
 }
@@ -810,9 +874,11 @@ function buildGroupChatAgentInstructions(input: {
   agentIdentityInstructions: string;
   conversationTitle: string;
   isOrchestrator?: boolean;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     input.agentIdentityInstructions,
+    input.projectProtocolPrompt,
     `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
     input.isOrchestrator === true
       ? "You are the configured Orchestrator for this group, even in Chat mode."
@@ -833,6 +899,7 @@ function buildGroupChatRunPrompt(input: {
   directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
+  projectProtocolPrompt?: string;
 }): string {
   const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
@@ -859,6 +926,8 @@ function buildGroupChatRunPrompt(input: {
     "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "</agenthub_group_chat_protocol>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
     input.directMessagesPrompt,
@@ -870,9 +939,11 @@ function buildGroupChatRunPrompt(input: {
 function buildGroupTaskOrchestratorInstructions(input: {
   agentIdentityInstructions: string;
   conversationTitle: string;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     input.agentIdentityInstructions,
+    input.projectProtocolPrompt,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
     "In Task mode, first create a goal for the user's objective with create_goal.",
     "Then create agent tasks under that goal with create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }).",
@@ -901,6 +972,7 @@ function buildGroupTaskOrchestratorPrompt(input: {
   currentUserMessage: string;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
   orchestratorAgentId?: string;
+  projectProtocolPrompt?: string;
 }): string {
   const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
@@ -945,6 +1017,8 @@ function buildGroupTaskOrchestratorPrompt(input: {
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
     conversationPrompt,
@@ -1793,6 +1867,112 @@ app.post("/conversations/groups", async (c) => {
   return c.json({ conversation: result.conversation }, 201);
 });
 
+app.post("/conversations/projects", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    description?: unknown;
+    orchestratorAgentId?: unknown;
+    remoteUrl?: unknown;
+    title?: unknown;
+  };
+  const remoteUrl = typeof body.remoteUrl === "string"
+    ? body.remoteUrl.trim()
+    : "";
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : undefined;
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
+
+  if (
+    remoteUrl.length === 0 ||
+    remoteUrl.length > 2048 ||
+    (title !== undefined && (title.length === 0 || title.length > 80)) ||
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_REQUEST",
+          message:
+            "remoteUrl, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await createProjectConversation(db, {
+    ownerUserId: user.id,
+    title,
+    description: description.length > 0 ? description : undefined,
+    remoteUrl,
+    agentIds: body.agentIds,
+    orchestratorAgentId,
+  });
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more ready agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-same-daemon") {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_AGENTS_NOT_SAME_DAEMON",
+          message: "Project agents must be ready on the same daemon.",
+        },
+      },
+      400,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-project") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_PROJECT",
+          message: "Orchestrator must be a member of this project.",
+        },
+      },
+      400,
+    );
+  }
+
+  await enqueueProjectCloneJob(redis, {
+    conversationId: result.conversation.id,
+    daemonDeviceId: result.daemonDeviceId,
+    remoteUrl,
+  });
+
+  return c.json({ conversation: result.conversation }, 201);
+});
+
 app.patch("/conversations/groups/:conversationId", async (c) => {
   const user = c.get("user");
 
@@ -2369,6 +2549,195 @@ app.get("/conversations/:conversationId/deployments", async (c) => {
   return c.json({ deployments });
 });
 
+app.get("/conversations/:conversationId/project/changes", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const status = c.req.query("status");
+  if (status !== undefined && !projectChangeStatuses.has(status)) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_CHANGE_STATUS",
+          message: "Project change status filter is invalid.",
+        },
+      },
+      400,
+    );
+  }
+
+  const changes = await listProjectChangesForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    status: status as "open" | "merged" | "rejected" | "failed" | undefined,
+  });
+
+  if (changes === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_NOT_FOUND",
+          message: "Project conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ changes });
+});
+
+app.get("/conversations/:conversationId/project/changes/:changeId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_NOT_FOUND",
+          message: "Project change was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(result);
+});
+
+app.get("/conversations/:conversationId/project/files", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (project === null || project.cloneStatus !== "ready" || project.baseRepoPath === undefined) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_NOT_READY",
+          message: "Project repository is not ready.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    return c.json({
+      files: await listProjectFileTree({ baseRepoPath: project.baseRepoPath }),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILES_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const content = await readFile(filePath, "utf8");
+    return c.json({ content, path: requestedPath });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      404,
+    );
+  }
+});
+
 app.post("/conversations/:conversationId/messages", async (c) => {
   const user = c.get("user");
 
@@ -2499,7 +2868,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const currentConversationGoals =
-    conversation.type === "group"
+    conversation.type === "group" || conversation.type === "project"
       ? await listConversationGoalsForUser(db, {
           conversationId: conversation.id,
           ownerUserId: user.id,
@@ -2521,6 +2890,24 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const agentHubMcpGoals = toMcpGoalList(currentConversationGoals);
+
+  if (
+    conversation.type === "project" &&
+    conversation.project?.cloneStatus !== "ready"
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_NOT_READY",
+          message:
+            conversation.project?.cloneStatus === "failed"
+              ? "Project clone failed. Fix the repository URL or daemon access before sending runs."
+              : "Project repository is still cloning. Try again after it is ready.",
+        },
+      },
+      400,
+    );
+  }
 
   const userAgents = await listAgentsForUser(db, { ownerUserId: user.id });
   const agentNamesById = Object.fromEntries(
@@ -2724,6 +3111,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
+    const projectProtocolPrompt = conversation.type === "project"
+      ? buildProjectProtocolPrompt({
+          conversationTitle: conversation.title,
+          isOrchestrator: true,
+          project: conversation.project,
+        })
+      : undefined;
     const userMessageAttachments = await getUserMessageAttachments();
     const currentUserMessageForPrompt = userMessageForPrompt(
       content,
@@ -2742,6 +3136,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         currentUserMessage: currentUserMessageForPrompt,
         messages: priorMessages,
         orchestratorAgentId: conversation.orchestratorAgentId,
+        projectProtocolPrompt,
       }),
       agentInstructions: buildGroupTaskOrchestratorInstructions({
         agentIdentityInstructions: buildAgentIdentityInstructions({
@@ -2752,6 +3147,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           scenario: "task orchestrator",
         }),
         conversationTitle: conversation.title,
+        projectProtocolPrompt,
       }),
       agentHubMcpTools: [...agentHubAllMcpTools],
       agentHubMcpGoals,
@@ -2884,6 +3280,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   const initialJobs = await Promise.all(
     runAgents.map(async (runAgent): Promise<RunQueueJob> => {
       const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
+      const projectProtocolPrompt = conversation.type === "project"
+        ? buildProjectProtocolPrompt({
+            conversationTitle: conversation.title,
+            isOrchestrator,
+            project: conversation.project,
+          })
+        : undefined;
 
       return applyContextCompressionToJob({
         conversationId: conversation.id,
@@ -2911,6 +3314,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           }),
           isOrchestrator,
           messages: priorMessages,
+          projectProtocolPrompt,
         }),
         agentInstructions: buildGroupChatAgentInstructions({
           agentIdentityInstructions: buildAgentIdentityInstructions({
@@ -2922,6 +3326,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           }),
           conversationTitle: conversation.title,
           isOrchestrator,
+          projectProtocolPrompt,
         }),
         agentHubMcpTools: groupChatMcpToolsForAgent({
           agentId: runAgent.agent.id,

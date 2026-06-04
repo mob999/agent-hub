@@ -1,10 +1,10 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, FileDiff, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
-import { apiUrl } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, ConversationProjectChange, GetConversationProjectChangeResponse, GetProjectFileContentResponse, ListConversationProjectChangesResponse, ListProjectFilesResponse, ProjectFileEntry, User } from '../lib/api'
+import { apiRequest, apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
@@ -321,9 +321,19 @@ export function ChannelWorkspace({
   deploymentRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'deployments' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{
+    conversationId: string
+    view: 'tasks' | 'deployments' | 'project-code' | 'project-changes'
+  } | null>(null)
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
+  const [projectFilesByConversation, setProjectFilesByConversation] = useState<Record<string, ProjectFileEntry[]>>({})
+  const [projectFileContentByKey, setProjectFileContentByKey] = useState<Record<string, string>>({})
+  const [projectActiveFileByConversation, setProjectActiveFileByConversation] = useState<Record<string, string>>({})
+  const [projectChangesByConversation, setProjectChangesByConversation] = useState<Record<string, ConversationProjectChange[]>>({})
+  const [projectDiffByChangeId, setProjectDiffByChangeId] = useState<Record<string, string>>({})
+  const [projectActiveChangeByConversation, setProjectActiveChangeByConversation] = useState<Record<string, string>>({})
+  const [projectError, setProjectError] = useState<string | null>(null)
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [pendingAttachments, setPendingAttachments] = useState<PendingComposerAttachment[]>([])
   const [pendingAttachmentConversationId, setPendingAttachmentConversationId] = useState<string | null>(null)
@@ -373,24 +383,27 @@ export function ChannelWorkspace({
   const focusedGoalId = focusedGoalRoute?.goalId ?? null
   const focusedGoalTaskIndex = focusedGoalRoute?.taskIndex ?? null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
+  const isProjectConversation = activeConversation?.type === 'project'
+  const isMemberConversation =
+    activeConversation?.type === 'group' || activeConversation?.type === 'project'
   const selectedAgent = isAgentDirectMessage
     ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
     : null
-  const groupAgentIds = activeConversation?.type === 'group'
+  const memberAgentIds = isMemberConversation
     ? activeConversation.agentIds ?? []
     : []
-  const readyGroupAgentCount =
-    activeConversation?.type !== 'group'
+  const readyMemberAgentCount =
+    !isMemberConversation
       ? 0
       : activeConversation.key === 'all'
         ? readyAgentCount
         : agents.filter(
             (agent) =>
-              groupAgentIds.includes(agent.agent.id) &&
+              memberAgentIds.includes(agent.agent.id) &&
               isAgentReady(agent),
           ).length
   const mentionableAgents = useMemo(() => {
-    if (activeConversation?.type !== 'group') {
+    if (activeConversation?.type !== 'group' && activeConversation?.type !== 'project') {
       return []
     }
 
@@ -436,7 +449,9 @@ export function ChannelWorkspace({
   const activeMentionSuggestion = mentionSuggestions[normalizedMentionIndex] ?? null
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
-    : hasSelectedConversation && readyGroupAgentCount > 0
+    : hasSelectedConversation &&
+      readyMemberAgentCount > 0 &&
+      (!isProjectConversation || activeConversation.project?.cloneStatus === 'ready')
   const visiblePendingAttachments =
     pendingAttachmentConversationId === activeConversation?.id
       ? pendingAttachments
@@ -452,14 +467,20 @@ export function ChannelWorkspace({
       ? selectedAgent?.agent.name ?? activeConversation.title
       : activeConversation.title
   const chatDisplayName =
-    hasSelectedConversation && !isAgentDirectMessage ? `#${activeConversation.title}` : chatTitle
+    hasSelectedConversation && activeConversation.type === 'group' ? `#${activeConversation.title}` : chatTitle
   const chatDescription = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
-      : activeConversation.key === 'all'
-        ? 'General channel for members and agent runs'
-        : activeConversation.description?.trim() || 'Group channel for selected agents'
+      : activeConversation.type === 'project'
+        ? activeConversation.project?.cloneStatus === 'ready'
+          ? activeConversation.description?.trim() || activeConversation.project.remoteUrl
+          : activeConversation.project?.cloneStatus === 'failed'
+            ? activeConversation.project.cloneError ?? 'Project clone failed'
+            : 'Cloning project repository...'
+        : activeConversation.key === 'all'
+          ? 'General channel for members and agent runs'
+          : activeConversation.description?.trim() || 'Group channel for selected agents'
   const emptyTitle = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
@@ -479,8 +500,8 @@ export function ChannelWorkspace({
       ? selectedAgentReady && selectedAgent
         ? `Message ${selectedAgent.agent.name} to start a private run.`
         : 'This agent is not ready to receive messages yet.'
-      : readyGroupAgentCount > 0
-        ? `Message ${chatDisplayName} to start a group run.`
+      : readyMemberAgentCount > 0
+        ? `Message ${chatDisplayName} to start a run.`
         : (
             <>
               First, {createAgentLink}; then message #all to start a run.
@@ -489,7 +510,9 @@ export function ChannelWorkspace({
   const warningTitle = isAgentDirectMessage ? 'Agent is not ready' : 'No ready agent available'
   const warningSubtitle = isAgentDirectMessage
     ? 'Wait for provisioning to finish, or choose another ready agent.'
-    : 'Choose a group with a ready agent before sending a message.'
+    : isProjectConversation && activeConversation.project?.cloneStatus !== 'ready'
+      ? 'Wait for the project clone to finish before sending a run.'
+      : 'Choose a conversation with a ready agent before sending a message.'
   const composerPlaceholder = !hasSelectedConversation
     ? 'Select a conversation first'
     : selectedAgentReady
@@ -503,7 +526,9 @@ export function ChannelWorkspace({
     ? 'Chat'
     : isAgentDirectMessage
       ? `Private chat ${chatTitle}`
-      : `Group ${chatDisplayName}`
+      : isProjectConversation
+        ? `Project ${chatDisplayName}`
+        : `Group ${chatDisplayName}`
   const isAgentTyping =
     isAgentDirectMessage &&
     messages.some(
@@ -695,7 +720,41 @@ export function ChannelWorkspace({
     !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'deployments'
-  const showWorkspacePage = (showTasks || showFiles || showDeployments) && canOpenWorkspacePanel
+  const showProjectCode =
+    !showFiles &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'project-code'
+  const showProjectChanges =
+    !showFiles &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'project-changes'
+  const showWorkspacePage =
+    (showTasks || showFiles || showDeployments || showProjectCode || showProjectChanges) &&
+    canOpenWorkspacePanel
+  const projectFiles =
+    activeConversation?.id === undefined
+      ? []
+      : projectFilesByConversation[activeConversation.id] ?? []
+  const projectActiveFilePath =
+    activeConversation?.id === undefined
+      ? null
+      : projectActiveFileByConversation[activeConversation.id] ??
+        projectFiles.find((file) => file.type === 'file')?.path ??
+        null
+  const projectActiveFileContent =
+    activeConversation?.id === undefined || projectActiveFilePath === null
+      ? ''
+      : projectFileContentByKey[`${activeConversation.id}:${projectActiveFilePath}`] ?? ''
+  const projectChanges =
+    activeConversation?.id === undefined
+      ? []
+      : projectChangesByConversation[activeConversation.id] ?? []
+  const projectActiveChangeId =
+    activeConversation?.id === undefined
+      ? null
+      : projectActiveChangeByConversation[activeConversation.id] ?? projectChanges[0]?.id ?? null
+  const projectActiveDiff =
+    projectActiveChangeId === null ? '' : projectDiffByChangeId[projectActiveChangeId] ?? ''
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -791,6 +850,194 @@ export function ChannelWorkspace({
 
     return () => window.clearTimeout(timeout)
   }, [activeConversation?.id, deploymentRouteActive, refreshDeployments])
+
+  useEffect(() => {
+    if (!showProjectCode || activeConversation?.id === undefined || activeConversation.type !== 'project') {
+      return
+    }
+
+    let active = true
+    const conversationId = activeConversation.id
+
+    void (async () => {
+      try {
+        const response = await apiRequest<ListProjectFilesResponse>(
+          `/conversations/${conversationId}/project/files`,
+        )
+
+        if (!active) {
+          return
+        }
+
+        setProjectFilesByConversation((current) => ({
+          ...current,
+          [conversationId]: response.files,
+        }))
+        setProjectActiveFileByConversation((current) => {
+          if (current[conversationId] !== undefined) {
+            return current
+          }
+
+          const nextFile = response.files.find((file) => file.type === 'file')?.path
+
+          return nextFile === undefined
+            ? current
+            : {
+                ...current,
+                [conversationId]: nextFile,
+              }
+        })
+        setProjectError(null)
+      } catch (error) {
+        if (active) {
+          setProjectError(error instanceof Error ? error.message : 'Unable to load project files.')
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [activeConversation, showProjectCode])
+
+  useEffect(() => {
+    if (
+      !showProjectCode ||
+      activeConversation?.id === undefined ||
+      projectActiveFilePath === null
+    ) {
+      return
+    }
+
+    const key = `${activeConversation.id}:${projectActiveFilePath}`
+    if (projectFileContentByKey[key] !== undefined) {
+      return
+    }
+
+    let active = true
+    const conversationId = activeConversation.id
+    const params = new URLSearchParams({ path: projectActiveFilePath })
+
+    void (async () => {
+      try {
+        const response = await apiRequest<GetProjectFileContentResponse>(
+          `/conversations/${conversationId}/project/files/content?${params.toString()}`,
+        )
+
+        if (!active) {
+          return
+        }
+
+        setProjectFileContentByKey((current) => ({
+          ...current,
+          [key]: response.content,
+        }))
+        setProjectError(null)
+      } catch (error) {
+        if (active) {
+          setProjectError(error instanceof Error ? error.message : 'Unable to load project file.')
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [
+    activeConversation?.id,
+    projectActiveFilePath,
+    projectFileContentByKey,
+    showProjectCode,
+  ])
+
+  useEffect(() => {
+    if (!showProjectChanges || activeConversation?.id === undefined || activeConversation.type !== 'project') {
+      return
+    }
+
+    let active = true
+    const conversationId = activeConversation.id
+
+    void (async () => {
+      try {
+        const response = await apiRequest<ListConversationProjectChangesResponse>(
+          `/conversations/${conversationId}/project/changes`,
+        )
+
+        if (!active) {
+          return
+        }
+
+        setProjectChangesByConversation((current) => ({
+          ...current,
+          [conversationId]: response.changes,
+        }))
+        setProjectActiveChangeByConversation((current) =>
+          current[conversationId] !== undefined || response.changes[0] === undefined
+            ? current
+            : {
+                ...current,
+                [conversationId]: response.changes[0].id,
+              },
+        )
+        setProjectError(null)
+      } catch (error) {
+        if (active) {
+          setProjectError(error instanceof Error ? error.message : 'Unable to load project changes.')
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [activeConversation, showProjectChanges])
+
+  useEffect(() => {
+    if (
+      !showProjectChanges ||
+      activeConversation?.id === undefined ||
+      projectActiveChangeId === null ||
+      projectDiffByChangeId[projectActiveChangeId] !== undefined
+    ) {
+      return
+    }
+
+    let active = true
+    const conversationId = activeConversation.id
+    const changeId = projectActiveChangeId
+
+    void (async () => {
+      try {
+        const response = await apiRequest<GetConversationProjectChangeResponse>(
+          `/conversations/${conversationId}/project/changes/${changeId}`,
+        )
+
+        if (!active) {
+          return
+        }
+
+        setProjectDiffByChangeId((current) => ({
+          ...current,
+          [changeId]: response.diff,
+        }))
+        setProjectError(null)
+      } catch (error) {
+        if (active) {
+          setProjectError(error instanceof Error ? error.message : 'Unable to load project diff.')
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [
+    activeConversation?.id,
+    projectActiveChangeId,
+    projectDiffByChangeId,
+    showProjectChanges,
+  ])
 
   useEffect(() => {
     if (!showTasks || taskAggregationMode !== 'goal' || focusedGoalId === null) {
@@ -1102,6 +1349,181 @@ export function ChannelWorkspace({
     </div>
   )
 
+  const renderProjectCodeView = () => {
+    const files = projectFiles
+    const activePath = projectActiveFilePath
+    const directories = files.filter((file) => file.type === 'directory')
+    const fileEntries = files.filter((file) => file.type === 'file')
+
+    return (
+      <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white max-[900px]:grid-cols-1">
+        <aside className="min-h-0 overflow-y-auto border-r border-[#e1e5ea] bg-[#f8fafc] p-3 max-[900px]:max-h-64 max-[900px]:border-b max-[900px]:border-r-0">
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#4f5f72]">
+            <Code size={16} />
+            Code
+          </div>
+          {projectError && (
+            <InlineNotification
+              kind="error"
+              title="Project unavailable"
+              subtitle={projectError}
+              lowContrast
+              hideCloseButton
+            />
+          )}
+          {directories.length === 0 && fileEntries.length === 0 ? (
+            <p className="px-2 py-8 text-center text-sm text-[var(--cds-text-secondary)]">
+              No project files yet.
+            </p>
+          ) : (
+            <div className="grid gap-1">
+              {directories.map((file) => (
+                <div
+                  key={file.path}
+                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-sm text-[#69707d]"
+                >
+                  <Folder size={16} />
+                  <span className="min-w-0 truncate">{file.path}</span>
+                </div>
+              ))}
+              {fileEntries.map((file) => {
+                const selected = file.path === activePath
+
+                return (
+                  <button
+                    key={file.path}
+                    type="button"
+                    className={`grid min-h-9 cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-0 px-2 text-left text-sm ${
+                      selected
+                        ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(15,23,42,0.08)]'
+                        : 'bg-transparent text-[#4f5f72] hover:bg-white/70'
+                    }`}
+                    onClick={() => {
+                      if (activeConversation?.id === undefined) {
+                        return
+                      }
+                      setProjectActiveFileByConversation((current) => ({
+                        ...current,
+                        [activeConversation.id]: file.path,
+                      }))
+                    }}
+                  >
+                    <Document size={16} />
+                    <span className="min-w-0 truncate">{file.path}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </aside>
+        <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+          <div className="flex min-h-12 items-center justify-between gap-3 border-b border-[#e1e5ea] px-4">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-semibold text-[var(--cds-text-primary)]">
+                {activePath ?? 'Select a file'}
+              </h3>
+              <p className="truncate text-xs text-[var(--cds-text-secondary)]">
+                Base repository
+              </p>
+            </div>
+          </div>
+          <pre className="min-h-0 overflow-auto bg-[#0f172a] p-4 font-mono text-xs leading-5 text-[#e5e7eb]">
+            {activePath === null ? 'Select a file to inspect project code.' : projectActiveFileContent || 'Loading...'}
+          </pre>
+        </section>
+      </div>
+    )
+  }
+
+  const renderProjectChangesView = () => {
+    const activeChange = projectChanges.find((change) => change.id === projectActiveChangeId) ?? null
+
+    return (
+      <div className="grid h-full min-h-0 grid-cols-[20rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white max-[900px]:grid-cols-1">
+        <aside className="min-h-0 overflow-y-auto border-r border-[#e1e5ea] bg-[#f8fafc] p-3 max-[900px]:max-h-64 max-[900px]:border-b max-[900px]:border-r-0">
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#4f5f72]">
+            <FileDiff size={16} />
+            Changes
+          </div>
+          {projectError && (
+            <InlineNotification
+              kind="error"
+              title="Changes unavailable"
+              subtitle={projectError}
+              lowContrast
+              hideCloseButton
+            />
+          )}
+          {projectChanges.length === 0 ? (
+            <p className="px-2 py-8 text-center text-sm text-[var(--cds-text-secondary)]">
+              No internal changes yet.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {projectChanges.map((change) => {
+                const selected = change.id === projectActiveChangeId
+                const agent = agents.find((item) => item.agent.id === change.agentId)
+
+                return (
+                  <button
+                    key={change.id}
+                    type="button"
+                    className={`grid cursor-pointer gap-1 rounded-xl border px-3 py-2 text-left text-sm ${
+                      selected
+                        ? 'border-[#c9d3df] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]'
+                        : 'border-transparent bg-transparent hover:bg-white/75'
+                    }`}
+                    onClick={() => {
+                      if (activeConversation?.id === undefined) {
+                        return
+                      }
+                      setProjectActiveChangeByConversation((current) => ({
+                        ...current,
+                        [activeConversation.id]: change.id,
+                      }))
+                    }}
+                  >
+                    <span className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-semibold text-[var(--cds-text-primary)]">
+                        {change.summary || change.branchName}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-[#eef0f4] px-2 py-0.5 text-xs font-semibold text-[#4f5f72]">
+                        {change.status}
+                      </span>
+                    </span>
+                    <span className="truncate text-xs text-[var(--cds-text-secondary)]">
+                      {agent?.agent.name ?? 'Agent'} · {change.branchName}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </aside>
+        <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)]">
+          <div className="grid gap-1 border-b border-[#e1e5ea] px-4 py-3">
+            <h3 className="truncate text-sm font-semibold text-[var(--cds-text-primary)]">
+              {activeChange?.summary || activeChange?.branchName || 'Select a change'}
+            </h3>
+            {activeChange && (
+              <p className="truncate text-xs text-[var(--cds-text-secondary)]">
+                {activeChange.branchName} · {activeChange.status}
+              </p>
+            )}
+          </div>
+          {activeChange?.diffStat && (
+            <pre className="max-h-28 overflow-auto border-b border-[#e1e5ea] bg-[#f8fafc] px-4 py-3 font-mono text-xs leading-5 text-[#4f5f72]">
+              {activeChange.diffStat}
+            </pre>
+          )}
+          <pre className="min-h-0 overflow-auto bg-[#0f172a] p-4 font-mono text-xs leading-5 text-[#e5e7eb]">
+            {activeChange === null ? 'Select a change to inspect its diff.' : projectActiveDiff || 'Loading diff...'}
+          </pre>
+        </section>
+      </div>
+    )
+  }
+
   const renderDeploymentListView = () => (
     <div className="grid w-full content-start gap-3">
       {deployments.length === 0 ? (
@@ -1236,6 +1658,50 @@ export function ChannelWorkspace({
           >
             <Task size={16} />
           </IconButton>
+          {activeConversation?.type === 'project' && (
+            <>
+              <IconButton
+                kind={showProjectCode ? 'secondary' : 'ghost'}
+                label="Code"
+                size="md"
+                align="bottom"
+                type="button"
+                disabled={!canOpenWorkspacePanel || activeConversation.project?.cloneStatus !== 'ready'}
+                onClick={() => {
+                  if (showProjectCode) {
+                    setWorkspacePanel(null)
+                    closeConversationRoute()
+                    return
+                  }
+
+                  closeArtifactEditor?.()
+                  setWorkspacePanel({ conversationId: activeConversation.id, view: 'project-code' })
+                }}
+              >
+                <Code size={16} />
+              </IconButton>
+              <IconButton
+                kind={showProjectChanges ? 'secondary' : 'ghost'}
+                label="Changes"
+                size="md"
+                align="bottom"
+                type="button"
+                disabled={!canOpenWorkspacePanel || activeConversation.project?.cloneStatus !== 'ready'}
+                onClick={() => {
+                  if (showProjectChanges) {
+                    setWorkspacePanel(null)
+                    closeConversationRoute()
+                    return
+                  }
+
+                  closeArtifactEditor?.()
+                  setWorkspacePanel({ conversationId: activeConversation.id, view: 'project-changes' })
+                }}
+              >
+                <FileDiff size={16} />
+              </IconButton>
+            </>
+          )}
           <IconButton
             kind={showFiles ? 'secondary' : 'ghost'}
             label="Files"
@@ -1312,7 +1778,10 @@ export function ChannelWorkspace({
       <div
         ref={scrollContainerRef}
         className={`min-h-0 p-4 max-[671px]:p-2 ${showWorkspacePage ? '' : 'bg-white'} ${
-          showFiles || (showWorkspacePage && showTasks && taskAggregationMode === 'status')
+              showFiles ||
+              showProjectCode ||
+              showProjectChanges ||
+              (showWorkspacePage && showTasks && taskAggregationMode === 'status')
             ? 'overflow-hidden'
             : 'overflow-y-auto'
         }`}
@@ -1374,6 +1843,14 @@ export function ChannelWorkspace({
           <div className="grid w-full content-start gap-4">
             {renderDeploymentListView()}
           </div>
+        ) : showWorkspacePage && showProjectCode ? (
+          <div className="grid h-full min-h-0 w-full">
+            {renderProjectCodeView()}
+          </div>
+        ) : showWorkspacePage && showProjectChanges ? (
+          <div className="grid h-full min-h-0 w-full">
+            {renderProjectChangesView()}
+          </div>
         ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
@@ -1403,11 +1880,11 @@ export function ChannelWorkspace({
                     : null
               const avatarInitial = displayNameInitial(senderName)
               const senderIsOrchestrator =
-                activeConversation?.type === 'group' &&
+                (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderAgentId !== undefined &&
                 activeConversation.orchestratorAgentId === message.senderAgentId
               const canMentionSender =
-                activeConversation?.type === 'group' &&
+                (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderType === 'agent' &&
                 senderAgent !== null
 
@@ -1585,7 +2062,7 @@ export function ChannelWorkspace({
 
                 const agent = suggestion.agent
                 const agentIsOrchestrator =
-                  activeConversation?.type === 'group' &&
+                  (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                   activeConversation.orchestratorAgentId === agent.agent.id
 
                 return (

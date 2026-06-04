@@ -6,6 +6,7 @@ import {
   Checkmark,
   ChevronDown,
   ChevronRight,
+  Folder,
   Search,
   TrashCan,
   Undo,
@@ -25,6 +26,7 @@ interface ChatSidebarProps {
   savedOpen: boolean
   onCreateAgent: () => void
   onCreateGroup: () => void
+  onCreateProject: () => void
   onOpenSearch: () => void
   onOpenActivity: () => void
   onDeleteAgent: (agentId: string) => void
@@ -33,6 +35,7 @@ interface ChatSidebarProps {
   onRestoreGroup: (conversationId: string) => void
   onToggleSaved: () => void
   selectGroup: (conversationId: string) => void
+  selectProject: (conversationId: string) => void
   selectAgent: (agentId: string) => void
 }
 
@@ -85,6 +88,7 @@ export function ChatSidebar({
   savedOpen,
   onCreateAgent,
   onCreateGroup,
+  onCreateProject,
   onOpenSearch,
   onOpenActivity,
   onDeleteAgent,
@@ -93,10 +97,12 @@ export function ChatSidebar({
   onRestoreGroup,
   onToggleSaved,
   selectGroup,
+  selectProject,
   selectAgent,
 }: ChatSidebarProps) {
   const [confirmingDeleteKey, setConfirmingDeleteKey] = useState<string | null>(null)
   const [groupsCollapsed, setGroupsCollapsed] = useState(false)
+  const [projectsCollapsed, setProjectsCollapsed] = useState(false)
   const [agentsCollapsed, setAgentsCollapsed] = useState(false)
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null
   const defaultGroupConversation = conversations.find(
@@ -109,6 +115,9 @@ export function ChatSidebar({
     defaultGroupConversation === undefined
       ? customGroupConversations
       : [defaultGroupConversation, ...customGroupConversations]
+  const projectConversations = conversations
+    .filter((conversation) => conversation.type === 'project')
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
   const archivedGroupConversations = archivedConversations
     .filter((conversation) => conversation.type === 'group' && conversation.key !== 'all')
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
@@ -355,6 +364,75 @@ export function ChatSidebar({
               </div>
             </div>
           )}
+        </section>
+
+        <section
+          className="grid gap-1"
+          aria-labelledby="projects-heading"
+        >
+          <div className="grid min-h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
+            <button
+              className={sidebarSectionToggle}
+              type="button"
+              aria-expanded={!projectsCollapsed}
+              aria-controls="projects-list"
+              onClick={() => setProjectsCollapsed((collapsed) => !collapsed)}
+            >
+              <span id="projects-heading" className={sectionHeadingText}>
+                Projects
+              </span>
+              <span className={sidebarSectionChevron} aria-hidden="true">
+                {projectsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+              </span>
+            </button>
+            <button
+              className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+              type="button"
+              aria-label="Create project"
+              onClick={onCreateProject}
+            >
+              <Add className="block h-4 w-4" size={16} />
+            </button>
+          </div>
+          {!projectsCollapsed && (projectConversations.length === 0 ? (
+            <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
+              No projects yet.
+            </p>
+          ) : (
+            <div id="projects-list" className="pr-1">
+              <div className="grid gap-1">
+                {projectConversations.map((conversation) => {
+                  const projectSelected = activeConversationId === conversation.id
+                  const cloneStatus = conversation.project?.cloneStatus
+
+                  return (
+                    <button
+                      className={`${sidebarButton} ${
+                        projectSelected ? selectedListItem : transparentListItem
+                      } min-h-[2.125rem] grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-2 px-3 py-1.5`}
+                      type="button"
+                      key={conversation.id}
+                      aria-current={projectSelected ? 'page' : undefined}
+                      onClick={() => selectProject(conversation.id)}
+                    >
+                      <Folder size={18} />
+                      <span className="min-w-0 truncate text-base leading-5">
+                        {conversation.title}
+                        {cloneStatus && cloneStatus !== 'ready' ? (
+                          <span className="ml-2 text-xs font-normal text-[#69707d]">
+                            {cloneStatus === 'cloning' ? 'cloning' : 'failed'}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="flex min-w-6 justify-end">
+                        <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </section>
 
         <section

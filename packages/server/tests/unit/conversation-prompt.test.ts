@@ -6,6 +6,7 @@ import {
   buildActiveRunsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  buildProjectProtocolPrompt,
   orchestratorParallelSerialTaskInstructions,
   artifactUserFacingLinkInstructions,
   formatArtifactPromptLines,
@@ -343,6 +344,30 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("same assignee");
     expect(prompt).toContain("dependsOnTaskIndexes");
     expect(prompt).toContain("integration, verification, publishing, and final-summary");
+  });
+
+  it("builds Project protocol instructions for worktrees and orchestrator review", () => {
+    const prompt = buildProjectProtocolPrompt({
+      conversationTitle: "agent-hub",
+      isOrchestrator: true,
+      project: {
+        conversationId: "00000000-0000-4000-8000-000000000001",
+        ownerUserId: "00000000-0000-4000-8000-000000000002",
+        remoteUrl: "https://github.com/example/agent-hub.git",
+        daemonDeviceId: "local-dev",
+        defaultBranch: "main",
+        baseHead: "abc123",
+        cloneStatus: "ready",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    });
+
+    expect(prompt).toContain("<agenthub_project_protocol>");
+    expect(prompt).toContain("per-run Git worktree and branch");
+    expect(prompt).toContain("Agent memory is stored in your own AgentHub memory workspace");
+    expect(prompt).toContain("list_project_changes/read_project_change");
+    expect(prompt).toContain("merge_project_change or reject_project_change");
   });
 
   it("resolves text mentions by longest agent name first", () => {

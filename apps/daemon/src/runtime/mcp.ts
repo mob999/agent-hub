@@ -43,6 +43,7 @@ export interface AgentHubMcpRelayLike {
       toolCallId: string;
     }): AgentHubMcpToolResult | Promise<AgentHubMcpToolResult>;
     runId: RunId;
+    memoryWorkspacePath?: string;
     workspacePath: string;
   }): AgentHubMcpSessionHandle;
 }
@@ -106,6 +107,7 @@ export function createAgentHubMcpSession(input: {
   return relay.createSession({
     enabledTools: input.runInput.agentHubMcpTools ?? [],
     runId: input.runInput.run.id,
+    memoryWorkspacePath: input.runInput.memoryWorkspacePath,
     workspacePath: input.runInput.workspacePath,
     onArtifactUpload: input.runInput.uploadArtifact,
     onStaticSiteDeploy: input.runInput.deployStaticSite,

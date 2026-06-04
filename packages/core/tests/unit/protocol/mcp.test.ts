@@ -14,7 +14,11 @@ import type {
   AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
+  AgentHubListProjectChangesToolInput,
+  AgentHubMergeProjectChangeToolInput,
   AgentHubMcpToolCall,
+  AgentHubReadProjectChangeToolInput,
+  AgentHubRejectProjectChangeToolInput,
   AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
   AgentHubSearchGroupMessagesToolInput,
@@ -46,6 +50,10 @@ describe("AgentHub MCP protocol", () => {
       "create_task",
       "approve_task",
       "cancel_task",
+      "list_project_changes",
+      "read_project_change",
+      "merge_project_change",
+      "reject_project_change",
       "complete_goal",
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
@@ -59,6 +67,8 @@ describe("AgentHub MCP protocol", () => {
       "append_memory",
       "search_memory",
       "read_memory",
+      "list_project_changes",
+      "read_project_change",
       "upload_artifact",
       "deploy_static_site",
       "complete_task",
@@ -330,6 +340,35 @@ describe("AgentHub MCP protocol", () => {
 
     expect(input.localPath).toBe("dist");
     expect(result.deployment.url).toContain("/deployments/");
+  });
+
+  it("expresses project change tools", () => {
+    const list: AgentHubListProjectChangesToolInput = {
+      status: "open",
+    };
+    const read: AgentHubReadProjectChangeToolInput = {
+      changeId: "00000000-0000-4000-8000-000000000041",
+    };
+    const merge: AgentHubMergeProjectChangeToolInput = {
+      changeId: read.changeId,
+      message: "Merge implementation changes.",
+    };
+    const reject: AgentHubRejectProjectChangeToolInput = {
+      changeId: read.changeId,
+      reason: "Conflicts with the current goal.",
+    };
+    const call: AgentHubMcpToolCall = {
+      runId: "00000000-0000-4000-8000-000000000003",
+      toolCallId: "tool_project",
+      name: "merge_project_change",
+      input: merge,
+      createdAt: "2026-05-26T00:00:00.000Z",
+    };
+
+    expect(list.status).toBe("open");
+    expect(read.changeId).toBe(merge.changeId);
+    expect(reject.reason).toContain("Conflicts");
+    expect(call.name).toBe("merge_project_change");
   });
 
   it("expresses cross-conversation messages through send_message target", () => {

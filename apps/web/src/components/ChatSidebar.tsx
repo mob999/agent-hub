@@ -120,7 +120,7 @@ export function ChatSidebar({
 
   return (
     <aside
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171]"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171]"
       aria-label="Chat navigation"
     >
       <header className="flex min-h-16 items-center border-b border-[#eef0f3] px-4">
@@ -290,132 +290,148 @@ export function ChatSidebar({
         )}
       </section>
 
-      <section className="grid gap-1 px-3 py-2" aria-labelledby="groups-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
-          <button
-            className={sidebarSectionToggle}
-            type="button"
-            aria-expanded={!groupsCollapsed}
-            aria-controls="groups-list"
-            onClick={() => setGroupsCollapsed((collapsed) => !collapsed)}
-          >
-            {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-            <span id="groups-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
-              Groups<span className={inlineCount}>({groupConversations.length})</span>
-            </span>
-          </button>
-          <button
-            className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-            type="button"
-            aria-label="Add group"
-            onClick={onCreateGroup}
-          >
-            <Add className="block h-4 w-4" size={16} />
-          </button>
-        </div>
-        {!groupsCollapsed && (
-          <div id="groups-list" className="grid gap-1">
-            {groupConversations.map((conversation) => {
-              const groupChatSelected = activeConversationId === conversation.id
-
-              return (
-                <button
-                  className={`${sidebarButton} ${
-                    groupChatSelected ? selectedListItem : transparentListItem
-                  } min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
-                  type="button"
-                  key={conversation.id}
-                  aria-current={groupChatSelected ? 'page' : undefined}
-                  onClick={() => selectGroup(conversation.id)}
-                >
-                  <span
-                    className="grid h-6 w-5 place-items-center text-base leading-5 text-[#596171]"
-                    aria-hidden="true"
-                  >
-                    #
-                  </span>
-                  <span className="min-w-0 truncate text-base leading-5">
-                    {conversation.title}
-                  </span>
-                  <span className="flex min-w-6 justify-end">
-                    <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
-                  </span>
-                </button>
-              )
-            })}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pb-3">
+        <section
+          className={`flex min-h-0 flex-col gap-1 ${
+            groupsCollapsed ? 'shrink-0' : 'flex-1 basis-0'
+          }`}
+          aria-labelledby="groups-heading"
+        >
+          <div className="grid min-h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
+            <button
+              className={sidebarSectionToggle}
+              type="button"
+              aria-expanded={!groupsCollapsed}
+              aria-controls="groups-list"
+              onClick={() => setGroupsCollapsed((collapsed) => !collapsed)}
+            >
+              {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+              <span id="groups-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
+                Groups<span className={inlineCount}>({groupConversations.length})</span>
+              </span>
+            </button>
+            <button
+              className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+              type="button"
+              aria-label="Add group"
+              onClick={onCreateGroup}
+            >
+              <Add className="block h-4 w-4" size={16} />
+            </button>
           </div>
-        )}
-      </section>
+          {!groupsCollapsed && (
+            <div id="groups-list" className="min-h-0 overflow-y-auto pr-1">
+              <div className="grid gap-1">
+                {groupConversations.map((conversation) => {
+                  const groupChatSelected = activeConversationId === conversation.id
 
-      <section className="grid gap-1 px-3 py-2" aria-labelledby="agents-heading">
-        <div className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
-          <button
-            className={sidebarSectionToggle}
-            type="button"
-            aria-expanded={!agentsCollapsed}
-            aria-controls="agents-list"
-            onClick={() => setAgentsCollapsed((collapsed) => !collapsed)}
-          >
-            {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-            <span id="agents-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
-              Agents<span className={inlineCount}>({agents.length})</span>
-            </span>
-          </button>
-          <button
-            className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-            type="button"
-            aria-label="Create agent"
-            onClick={onCreateAgent}
-          >
-            <Add className="block h-4 w-4" size={16} />
-          </button>
-        </div>
-        {!agentsCollapsed && (agents.length === 0 ? (
-          <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
-            No agents yet.
-          </p>
-        ) : (
-          <div id="agents-list" className="grid gap-1">
-            {agents.map((agent) => {
-              const agentSelected =
-                activeConversation?.type === 'direct' &&
-                activeConversation.directAgentId === agent.agent.id
-              const directConversation = directConversationByAgentId.get(agent.agent.id)
-              const unreadCount =
-                directConversation === undefined ? 0 : unreadCounts[directConversation.id] ?? 0
+                  return (
+                    <button
+                      className={`${sidebarButton} ${
+                        groupChatSelected ? selectedListItem : transparentListItem
+                      } min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+                      type="button"
+                      key={conversation.id}
+                      aria-current={groupChatSelected ? 'page' : undefined}
+                      onClick={() => selectGroup(conversation.id)}
+                    >
+                      <span
+                        className="grid h-6 w-5 place-items-center text-base leading-5 text-[#596171]"
+                        aria-hidden="true"
+                      >
+                        #
+                      </span>
+                      <span className="min-w-0 truncate text-base leading-5">
+                        {conversation.title}
+                      </span>
+                      <span className="flex min-w-6 justify-end">
+                        <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </section>
 
-              return (
-                <button
-                  className={`${sidebarButton} ${
-                    agentSelected ? selectedListItem : transparentListItem
-                  } min-h-10 grid-cols-[1.75rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
-                  type="button"
-                  key={agent.agent.id}
-                  aria-current={agentSelected ? 'page' : undefined}
-                  onClick={() => selectAgent(agent.agent.id)}
-                >
-                  <span className={agentAvatarFrame} aria-hidden="true">
-                    {agent.agent.avatar ? (
-                      <img
-                        src={agent.agent.avatar}
-                        alt=""
-                        className="h-6 w-6 rounded-[3px] object-cover"
-                      />
-                    ) : (
-                      <ChatBot size={16} />
-                    )}
-                  </span>
-                  <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
-                  <span className="flex min-w-6 items-center justify-end gap-2">
-                    <UnreadBadge count={unreadCount} />
-                    <AgentStatusIndicator agent={agent} />
-                  </span>
-                </button>
-              )
-            })}
+        <section
+          className={`flex min-h-0 flex-col gap-1 ${
+            agentsCollapsed ? 'shrink-0' : 'flex-1 basis-0'
+          }`}
+          aria-labelledby="agents-heading"
+        >
+          <div className="grid min-h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 text-[#69707d]">
+            <button
+              className={sidebarSectionToggle}
+              type="button"
+              aria-expanded={!agentsCollapsed}
+              aria-controls="agents-list"
+              onClick={() => setAgentsCollapsed((collapsed) => !collapsed)}
+            >
+              {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+              <span id="agents-heading" className={`${labelWithCount} truncate text-xs font-medium uppercase tracking-wide`}>
+                Agents<span className={inlineCount}>({agents.length})</span>
+              </span>
+            </button>
+            <button
+              className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+              type="button"
+              aria-label="Create agent"
+              onClick={onCreateAgent}
+            >
+              <Add className="block h-4 w-4" size={16} />
+            </button>
           </div>
-        ))}
-      </section>
+          {!agentsCollapsed && (agents.length === 0 ? (
+            <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
+              No agents yet.
+            </p>
+          ) : (
+            <div id="agents-list" className="min-h-0 overflow-y-auto pr-1">
+              <div className="grid gap-1">
+                {agents.map((agent) => {
+                  const agentSelected =
+                    activeConversation?.type === 'direct' &&
+                    activeConversation.directAgentId === agent.agent.id
+                  const directConversation = directConversationByAgentId.get(agent.agent.id)
+                  const unreadCount =
+                    directConversation === undefined ? 0 : unreadCounts[directConversation.id] ?? 0
+
+                  return (
+                    <button
+                      className={`${sidebarButton} ${
+                        agentSelected ? selectedListItem : transparentListItem
+                      } min-h-10 grid-cols-[1.75rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
+                      type="button"
+                      key={agent.agent.id}
+                      aria-current={agentSelected ? 'page' : undefined}
+                      onClick={() => selectAgent(agent.agent.id)}
+                    >
+                      <span className={agentAvatarFrame} aria-hidden="true">
+                        {agent.agent.avatar ? (
+                          <img
+                            src={agent.agent.avatar}
+                            alt=""
+                            className="h-6 w-6 rounded-[3px] object-cover"
+                          />
+                        ) : (
+                          <ChatBot size={16} />
+                        )}
+                      </span>
+                      <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
+                      <span className="flex min-w-6 items-center justify-end gap-2">
+                        <UnreadBadge count={unreadCount} />
+                        <AgentStatusIndicator agent={agent} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </section>
+      </div>
     </aside>
   )
 }

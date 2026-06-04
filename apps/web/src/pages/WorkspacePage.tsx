@@ -1252,7 +1252,7 @@ export function WorkspacePage({
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
-  const openSearch = () => {
+  const openSearch = useCallback(() => {
     const path = searchRoutePath({
       channelId: searchSelectedChannelId,
       query: searchQuery,
@@ -1262,7 +1262,27 @@ export function WorkspacePage({
     })
     window.history.pushState({}, '', path)
     navigate('/chat/search')
-  }
+  }, [navigate, searchQuery, searchSelectedChannelId, searchSelectedSender, searchSort, searchTime])
+
+  useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.key.toLowerCase() !== 'k' || (!event.ctrlKey && !event.metaKey)) {
+        return
+      }
+
+      event.preventDefault()
+      openSearch()
+      window.setTimeout(() => {
+        document.getElementById('workspace-search-input')?.focus()
+      }, 0)
+    }
+
+    window.addEventListener('keydown', handleSearchShortcut)
+
+    return () => {
+      window.removeEventListener('keydown', handleSearchShortcut)
+    }
+  }, [openSearch])
   const openRun = (runId: string) => {
     setSelectedRunId(runId)
     navigate('/runs')

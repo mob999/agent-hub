@@ -90,6 +90,12 @@ export const apiEnvSchema = z.object({
   AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  GITHUB_OAUTH_CALLBACK_URL: z
+    .string()
+    .url()
+    .default("http://127.0.0.1:3000/auth/github/callback"),
   AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD: z.coerce
     .number()
     .int()

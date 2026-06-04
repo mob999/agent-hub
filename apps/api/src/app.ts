@@ -25,6 +25,13 @@ export type CreatedApiApp = {
 
 export function createApiApp(context: ApiContext): CreatedApiApp {
   const services = createApiServices(context);
+  const allowedWebOrigins = Array.from(
+    new Set([
+      new URL(context.env.AGENTHUB_PUBLIC_WEB_URL).origin,
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
+    ]),
+  );
   const routeContext: ApiRouteContext = {
     ...context,
     services,
@@ -40,7 +47,7 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
   app.use(
     "*",
     cors({
-      origin: ["http://localhost:5173"],
+      origin: allowedWebOrigins,
       credentials: true,
     }),
   );

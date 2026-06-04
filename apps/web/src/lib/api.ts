@@ -1,4 +1,4 @@
-const apiBaseUrl = import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://localhost:3000'
+export const apiBaseUrl = import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://127.0.0.1:3000'
 
 export function apiUrl(path: string): string {
   return `${apiBaseUrl}${path}`

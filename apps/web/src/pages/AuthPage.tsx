@@ -1,5 +1,6 @@
 import {
   Button,
+  ButtonSet,
   Form,
   InlineLoading,
   InlineNotification,
@@ -12,7 +13,7 @@ import {
 } from '@carbon/react'
 import { ChatBot } from '@carbon/react/icons'
 import { useState, type FormEvent, type MouseEvent } from 'react'
-import { ApiRequestError, apiRequest, type AuthResponse } from '../lib/api'
+import { ApiRequestError, apiRequest, apiUrl, type AuthResponse } from '../lib/api'
 
 export type ChatRoutePath = '/chat' | `/chat/${string}`
 export type WorkspaceRoutePath = ChatRoutePath | '/runs' | '/daemon'
@@ -24,6 +25,20 @@ const authRedirectStorageKey = 'agenthub.auth.redirect'
 
 function readPendingAuthRedirect(): RoutePath | null {
   const value = window.sessionStorage.getItem(authRedirectStorageKey)
+  const redirect = getValidAuthRedirect(value)
+
+  if (redirect !== null) {
+    window.sessionStorage.removeItem(authRedirectStorageKey)
+  }
+
+  return redirect
+}
+
+function peekPendingAuthRedirect(): RoutePath | null {
+  return getValidAuthRedirect(window.sessionStorage.getItem(authRedirectStorageKey))
+}
+
+function getValidAuthRedirect(value: string | null): RoutePath | null {
   const isChatConversationRoute = value?.startsWith('/chat/') === true &&
     (
       [2, 4, 6].includes(value.split('/').filter(Boolean).length) ||
@@ -42,7 +57,6 @@ function readPendingAuthRedirect(): RoutePath | null {
     value === '/daemon' ||
     isEditorRoute
   ) {
-    window.sessionStorage.removeItem(authRedirectStorageKey)
     return value as RoutePath
   }
 
@@ -66,6 +80,7 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const hasOAuthError = new URLSearchParams(window.location.search).has('error')
 
   const isRegister = mode === 'register'
   const emailError = submitted
@@ -138,6 +153,15 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
     navigate(path)
   }
 
+  const startGitHubLogin = () => {
+    const redirect = peekPendingAuthRedirect() ?? '/chat'
+    const params = new URLSearchParams({
+      redirect,
+      web_origin: window.location.origin,
+    })
+    window.location.href = apiUrl(`/auth/github/start?${params.toString()}`)
+  }
+
   return (
     <main
       className="grid min-h-screen grid-cols-[minmax(24rem,0.95fr)_minmax(28rem,1.05fr)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1"
@@ -197,11 +221,11 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
                 </p>
               </div>
 
-              {serverError && (
+              {(serverError || hasOAuthError) && (
                 <InlineNotification
                   kind="error"
                   title={isRegister ? 'Registration failed' : 'Login failed'}
-                  subtitle={serverError}
+                  subtitle={serverError ?? 'GitHub login could not be completed.'}
                   lowContrast
                   aria-label="Close notification"
                 />
@@ -256,9 +280,19 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
                   status="active"
                 />
               ) : (
-                <Button type="submit" size="lg">
-                  {isRegister ? 'Create account' : 'Log in'}
-                </Button>
+                <ButtonSet stacked>
+                  <Button type="submit" size="lg">
+                    {isRegister ? 'Create account' : 'Log in'}
+                  </Button>
+                  <Button type="button" kind="secondary" size="lg" onClick={startGitHubLogin}>
+                    <span className="inline-flex items-center gap-2">
+                      <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 19 19">
+                        <use href="/icons.svg#github-icon" />
+                      </svg>
+                      Continue with GitHub
+                    </span>
+                  </Button>
+                </ButtonSet>
               )}
 
               <p className="cds--type-body-01">

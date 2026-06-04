@@ -72,6 +72,79 @@ export const conversationAgentMembers = pgTable(
   }),
 );
 
+export const conversationProjects = pgTable(
+  "conversation_projects",
+  {
+    conversationId: uuid("conversation_id")
+      .primaryKey()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    remoteUrl: text("remote_url").notNull(),
+    daemonDeviceId: varchar("daemon_device_id", { length: 120 }).notNull(),
+    baseRepoPath: text("base_repo_path"),
+    defaultBranch: varchar("default_branch", { length: 160 }),
+    baseHead: varchar("base_head", { length: 80 }),
+    cloneStatus: varchar("clone_status", { length: 32 }).notNull(),
+    cloneError: text("clone_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    conversationProjectsOwnerIdx: index("conversation_projects_owner_idx").on(
+      table.ownerUserId,
+    ),
+    conversationProjectsDaemonIdx: index("conversation_projects_daemon_idx").on(
+      table.daemonDeviceId,
+    ),
+    conversationProjectsCloneStatusIdx: index(
+      "conversation_projects_clone_status_idx",
+    ).on(table.cloneStatus),
+  }),
+);
+
+export const conversationProjectChanges = pgTable(
+  "conversation_project_changes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id"),
+    taskIndex: integer("task_index"),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    branchName: text("branch_name").notNull(),
+    worktreePath: text("worktree_path").notNull(),
+    baseCommit: varchar("base_commit", { length: 80 }),
+    headCommit: varchar("head_commit", { length: 80 }),
+    status: varchar("status", { length: 32 }).notNull(),
+    summary: text("summary"),
+    diffStat: text("diff_stat"),
+    diff: text("diff"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
+  },
+  (table) => ({
+    conversationProjectChangesConversationIdx: index(
+      "conversation_project_changes_conversation_idx",
+    ).on(table.conversationId, table.createdAt),
+    conversationProjectChangesRunIdx: index(
+      "conversation_project_changes_run_idx",
+    ).on(table.runId),
+    conversationProjectChangesStatusIdx: index(
+      "conversation_project_changes_status_idx",
+    ).on(table.status),
+  }),
+);
+
 export const conversationMessages = pgTable(
   "conversation_messages",
   {

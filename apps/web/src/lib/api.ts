@@ -148,7 +148,7 @@ export interface AgentRunSummary {
   conversationId?: string
 }
 
-export type ConversationType = 'group' | 'direct'
+export type ConversationType = 'group' | 'direct' | 'project'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
@@ -172,6 +172,8 @@ export type ConversationArtifactActionStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+export type ConversationProjectCloneStatus = 'cloning' | 'ready' | 'failed'
+export type ConversationProjectChangeStatus = 'open' | 'merged' | 'rejected' | 'failed'
 export type SearchSort = 'relevant' | 'recent'
 export type SearchTimeFilter = 'any' | '24h' | '7d' | '30d'
 export type SearchSenderType = 'user' | 'agent' | 'system'
@@ -190,6 +192,41 @@ export interface Conversation {
   createdAt: string
   updatedAt: string
   lastMessageAt?: string
+  project?: ConversationProject
+}
+
+export interface ConversationProject {
+  conversationId: string
+  ownerUserId: string
+  remoteUrl: string
+  daemonDeviceId: string
+  baseRepoPath?: string
+  defaultBranch?: string
+  baseHead?: string
+  cloneStatus: ConversationProjectCloneStatus
+  cloneError?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationProjectChange {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  goalId?: string
+  taskIndex?: number
+  agentId: string
+  runId: string
+  branchName: string
+  worktreePath: string
+  baseCommit?: string
+  headCommit?: string
+  status: ConversationProjectChangeStatus
+  summary?: string
+  diffStat?: string
+  createdAt: string
+  updatedAt: string
+  mergedAt?: string
 }
 
 export interface ConversationGoalTask {
@@ -451,6 +488,68 @@ export interface CreateGroupConversationRequest {
 
 export interface CreateGroupConversationResponse {
   conversation: Conversation
+}
+
+export interface CreateProjectConversationRequest {
+  title?: string
+  description?: string
+  remoteUrl: string
+  agentIds: string[]
+  orchestratorAgentId?: string
+}
+
+export interface CreateProjectConversationResponse {
+  conversation: Conversation
+}
+
+export interface ListConversationProjectChangesResponse {
+  changes: ConversationProjectChange[]
+}
+
+export interface GetConversationProjectChangeResponse {
+  change: ConversationProjectChange
+  diff: string
+}
+
+export interface ProjectFileEntry {
+  path: string
+  type: 'directory' | 'file'
+  sizeBytes?: number
+}
+
+export interface ListProjectFilesResponse {
+  files: ProjectFileEntry[]
+}
+
+export interface GetProjectFileContentResponse {
+  path: string
+  content: string
+}
+
+export interface UpdateProjectFileContentResponse {
+  baseHead?: string
+  content: string
+  path: string
+}
+
+export type ProjectChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'binary'
+
+export interface ProjectChangedFile {
+  binary: boolean
+  oldPath?: string
+  path: string
+  status: ProjectChangedFileStatus
+}
+
+export interface ListProjectChangeFilesResponse {
+  files: ProjectChangedFile[]
+}
+
+export interface GetProjectChangeFileContentResponse {
+  binary: boolean
+  file: ProjectChangedFile
+  newContent: string
+  oldContent: string
 }
 
 export interface UpdateGroupConversationRequest {

@@ -47,6 +47,21 @@ export interface DaemonGatewayOptions {
   onMemoryAppended?(
     message: Extract<DaemonClientMessage, { type: "memory.appended" }>,
   ): void | Promise<void>;
+  onProjectCloneCompleted?(
+    message: Extract<DaemonClientMessage, { type: "project.clone.completed" }>,
+  ): void | Promise<void>;
+  onProjectCloneFailed?(
+    message: Extract<DaemonClientMessage, { type: "project.clone.failed" }>,
+  ): void | Promise<void>;
+  onProjectChangeCreated?(
+    message: Extract<DaemonClientMessage, { type: "project.change.created" }>,
+  ): void | Promise<void>;
+  onProjectChangeMergeAck?(
+    message: Extract<DaemonClientMessage, { type: "project.change.merge.ack" }>,
+  ): void | Promise<void>;
+  onProjectChangeMergeRejected?(
+    message: Extract<DaemonClientMessage, { type: "project.change.merge.rejected" }>,
+  ): void | Promise<void>;
 }
 
 interface DaemonConnection {
@@ -345,6 +360,66 @@ export class DaemonGateway {
           );
           return;
         }
+
+        if (message.type === "project.clone.completed") {
+          void Promise.resolve(
+            this.#options.onProjectCloneCompleted?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), conversationId: message.conversationId },
+              "Failed to persist project clone completion",
+            );
+          });
+          return;
+        }
+
+        if (message.type === "project.clone.failed") {
+          void Promise.resolve(
+            this.#options.onProjectCloneFailed?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), conversationId: message.conversationId },
+              "Failed to persist project clone failure",
+            );
+          });
+          return;
+        }
+
+        if (message.type === "project.change.created") {
+          void Promise.resolve(
+            this.#options.onProjectChangeCreated?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), changeId: message.change.id },
+              "Failed to persist project change",
+            );
+          });
+          return;
+        }
+
+        if (message.type === "project.change.merge.ack") {
+          void Promise.resolve(
+            this.#options.onProjectChangeMergeAck?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), changeId: message.changeId },
+              "Failed to persist project change merge ack",
+            );
+          });
+          return;
+        }
+
+        if (message.type === "project.change.merge.rejected") {
+          void Promise.resolve(
+            this.#options.onProjectChangeMergeRejected?.(message),
+          ).catch((error) => {
+            this.#options.logger?.error(
+              { err: toError(error), changeId: message.changeId },
+              "Failed to persist project change merge rejection",
+            );
+          });
+          return;
+        }
       });
 
       ws.on("close", () => {
@@ -487,6 +562,8 @@ export class DaemonGateway {
       agentInstructions: job.agentInstructions,
       contextCompression: job.contextCompression,
       workspacePath: job.workspacePath,
+      memoryWorkspacePath: job.memoryWorkspacePath,
+      projectRun: job.projectRun,
       runtime: job.runtime,
       agentHubMcpTools: job.agentHubMcpTools,
       agentHubMcpGoals: job.agentHubMcpGoals,
@@ -549,6 +626,66 @@ export class DaemonGateway {
         requestId: message.requestId,
       },
       "Assigned memory append to daemon",
+    );
+    return true;
+  }
+
+  assignProjectClone(
+    message: Extract<DaemonServerMessage, { type: "project.clone" }> & {
+      daemonDeviceId: DaemonDeviceId;
+    },
+  ): boolean {
+    const connection = this.#connections.get(message.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          conversationId: message.conversationId,
+          daemonDeviceId: message.daemonDeviceId,
+        },
+        "Cannot assign project clone because daemon is not connected",
+      );
+      return false;
+    }
+
+    const { daemonDeviceId: _daemonDeviceId, ...serverMessage } = message;
+    send(connection.ws, serverMessage);
+    this.#options.logger?.info(
+      {
+        conversationId: message.conversationId,
+        daemonDeviceId: message.daemonDeviceId,
+      },
+      "Assigned project clone to daemon",
+    );
+    return true;
+  }
+
+  assignProjectChangeMerge(
+    message: Extract<DaemonServerMessage, { type: "project.change.merge" }> & {
+      daemonDeviceId: DaemonDeviceId;
+    },
+  ): boolean {
+    const connection = this.#connections.get(message.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          changeId: message.changeId,
+          daemonDeviceId: message.daemonDeviceId,
+        },
+        "Cannot assign project merge because daemon is not connected",
+      );
+      return false;
+    }
+
+    const { daemonDeviceId: _daemonDeviceId, ...serverMessage } = message;
+    send(connection.ws, serverMessage);
+    this.#options.logger?.info(
+      {
+        changeId: message.changeId,
+        daemonDeviceId: message.daemonDeviceId,
+      },
+      "Assigned project merge to daemon",
     );
     return true;
   }

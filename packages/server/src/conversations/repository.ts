@@ -11,7 +11,11 @@ import type {
   AgentHubDownloadArtifactToolInput,
   AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
+  AgentHubListProjectChangesToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubReadProjectChangeToolInput,
+  AgentHubMergeProjectChangeToolInput,
+  AgentHubRejectProjectChangeToolInput,
   AgentHubSearchGroupMessagesToolInput,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
@@ -26,6 +30,8 @@ import type {
   ConversationId,
   ConversationMessage,
   ConversationMessageAttachment,
+  ConversationProject,
+  ConversationProjectChange,
   ConversationArtifactDetails,
   ConversationArtifactFile,
   ConversationArtifactFileRevision,
@@ -54,6 +60,8 @@ import {
   conversationMessages,
   conversationGoals,
   conversationGoalTasks,
+  conversationProjectChanges,
+  conversationProjects,
   conversations,
   runEvents,
   runs,
@@ -114,6 +122,8 @@ type ConversationArtifactRevisionRow =
   typeof conversationArtifactRevisions.$inferSelect;
 type ConversationArtifactActionRow = typeof conversationArtifactActions.$inferSelect;
 type ConversationDeploymentRow = typeof conversationDeployments.$inferSelect;
+type ConversationProjectRow = typeof conversationProjects.$inferSelect;
+type ConversationProjectChangeRow = typeof conversationProjectChanges.$inferSelect;
 
 async function prepareConversationRunJobDispatch(
   db: Db,
@@ -141,10 +151,87 @@ async function prepareConversationRunJobDispatch(
 
   input.realtimeEvents?.push(...preparation.realtimeEvents);
 
+  const preparedJob = applyRunDispatchPreparation(job, preparation);
+
   return {
     handedOffTaskContexts: preparation.handedOffTaskContexts,
-    job: applyRunDispatchPreparation(job, preparation),
+    job: await applyProjectRunWorkspace(db, {
+      conversationId: input.conversationId,
+      job: preparedJob,
+    }),
   };
+}
+
+function safeProjectBranchSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "agent";
+}
+
+async function applyProjectRunWorkspace(
+  db: Db,
+  input: { conversationId: string; job: RunQueueJob },
+): Promise<RunQueueJob> {
+  const [row] = await db
+    .select({
+      conversation: conversations,
+      project: conversationProjects,
+      agent: agents,
+    })
+    .from(conversations)
+    .leftJoin(
+      conversationProjects,
+      eq(conversationProjects.conversationId, conversations.id),
+    )
+    .leftJoin(agents, eq(agents.id, input.job.run.agentId))
+    .where(eq(conversations.id, input.conversationId))
+    .limit(1);
+
+  if (
+    row === undefined ||
+    row.conversation.type !== "project" ||
+    row.project === null ||
+    row.project.cloneStatus !== "ready" ||
+    row.project.baseRepoPath === null ||
+    row.agent === null
+  ) {
+    return input.job;
+  }
+
+  const branchName = [
+    "agenthub",
+    safeProjectBranchSegment(row.agent.name),
+    input.job.run.id.slice(0, 8),
+  ].join("/");
+  const worktreePath = [
+    row.project.baseRepoPath.replace(/[\\/]base$/, ""),
+    "worktrees",
+    row.agent.id,
+    input.job.run.id,
+  ].join("/");
+
+  return {
+    ...input.job,
+    memoryWorkspacePath: input.job.memoryWorkspacePath ?? input.job.workspacePath,
+    projectRun: {
+      baseRepoPath: row.project.baseRepoPath,
+      branchName,
+      conversationId: row.conversation.id,
+      ownerUserId: row.conversation.ownerUserId,
+      projectId: row.conversation.id,
+    },
+    workspacePath: worktreePath,
+  };
+}
+
+export async function prepareProjectRunJobForConversation(
+  db: Db,
+  input: { conversationId: ConversationId; job: RunQueueJob },
+): Promise<RunQueueJob> {
+  return applyProjectRunWorkspace(db, input);
 }
 
 export interface UserMessageAttachmentUpload {
@@ -178,6 +265,12 @@ export type CreateGroupConversationResult =
   | { status: "agents-not-found" }
   | { status: "orchestrator-not-in-group" };
 
+export type CreateProjectConversationResult =
+  | { status: "created"; conversation: Conversation; daemonDeviceId: string }
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-project" }
+  | { status: "agents-not-same-daemon" };
+
 export type UpdateGroupConversationResult =
   | { status: "updated"; conversation: Conversation }
   | { status: "not-found" }
@@ -185,6 +278,13 @@ export type UpdateGroupConversationResult =
   | { status: "duplicate-key" }
   | { status: "agents-not-found" }
   | { status: "orchestrator-not-in-group" };
+
+export type UpdateProjectConversationResult =
+  | { status: "updated"; conversation: Conversation }
+  | { status: "not-found" }
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-project" }
+  | { status: "agents-not-same-daemon" };
 
 export type UpdateConversationOrchestratorResult =
   | { status: "updated"; conversation: Conversation }
@@ -210,11 +310,24 @@ export type DeleteArchivedGroupConversationResult =
   | { status: "reserved-key" }
   | { status: "not-archived" };
 
+export type UpdateProjectCloneResult =
+  | { status: "updated"; project: ConversationProject }
+  | { status: "not-found" };
+
 export interface AppendRunEventResult {
   dispatchJobs: RunQueueJob[];
   memoryAppendJobs: MemoryAppendQueueJob[];
+  projectMergeRequests: ProjectChangeMergeRequest[];
   toolResult?: AgentHubMcpToolResult;
   realtimeEvents: RealtimeEvent[];
+}
+
+export interface ProjectChangeMergeRequest {
+  baseRepoPath: string;
+  branchName: string;
+  changeId: ConversationProjectChange["id"];
+  daemonDeviceId: string;
+  message?: string;
 }
 
 export interface AppendRunEventOptions {
@@ -298,9 +411,24 @@ export function groupConversationKeyFromTitle(title: string): string {
   return normalizeGroupConversationTitle(title).toLowerCase();
 }
 
+function inferProjectConversationTitle(remoteUrl: string): string {
+  const normalized = remoteUrl.trim().replace(/[?#].*$/, "");
+  const lastSegment = normalized.split(/[/:\\]/).filter(Boolean).at(-1) ?? "Project";
+  const withoutGit = lastSegment.endsWith(".git")
+    ? lastSegment.slice(0, -4)
+    : lastSegment;
+  return normalizeGroupConversationTitle(withoutGit || "Project").slice(0, 160);
+}
+
+function normalizeProjectDescription(description?: string): string | undefined {
+  const normalized = description?.trim();
+  return normalized === "" ? undefined : normalized;
+}
+
 export function toConversation(
   row: ConversationRow,
   agentIds?: string[],
+  project?: ConversationProject,
 ): Conversation {
   return {
     id: row.id,
@@ -316,6 +444,47 @@ export function toConversation(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     lastMessageAt: row.lastMessageAt?.toISOString(),
+    project,
+  };
+}
+
+export function toConversationProject(row: ConversationProjectRow): ConversationProject {
+  return {
+    conversationId: row.conversationId,
+    ownerUserId: row.ownerUserId,
+    remoteUrl: row.remoteUrl,
+    daemonDeviceId: row.daemonDeviceId,
+    baseRepoPath: optionalString(row.baseRepoPath),
+    defaultBranch: optionalString(row.defaultBranch),
+    baseHead: optionalString(row.baseHead),
+    cloneStatus: row.cloneStatus as ConversationProject["cloneStatus"],
+    cloneError: optionalString(row.cloneError),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toConversationProjectChange(
+  row: ConversationProjectChangeRow,
+): ConversationProjectChange {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    conversationId: row.conversationId,
+    goalId: optionalString(row.goalId),
+    taskIndex: row.taskIndex ?? undefined,
+    agentId: row.agentId,
+    runId: row.runId,
+    branchName: row.branchName,
+    worktreePath: row.worktreePath,
+    baseCommit: optionalString(row.baseCommit),
+    headCommit: optionalString(row.headCommit),
+    status: row.status as ConversationProjectChange["status"],
+    summary: optionalString(row.summary),
+    diffStat: optionalString(row.diffStat),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    mergedAt: row.mergedAt?.toISOString(),
   };
 }
 
@@ -342,11 +511,11 @@ async function getConversationAgentIdsForRow(
   db: Pick<Db, "select">,
   row: ConversationRow,
 ): Promise<string[] | undefined> {
-  if (row.type !== "group") {
+  if (row.type !== "group" && row.type !== "project") {
     return undefined;
   }
 
-  if (row.key === defaultGroupConversationKey) {
+  if (row.type === "group" && row.key === defaultGroupConversationKey) {
     const agentRows = await db
       .select({ id: agents.id })
       .from(agents)
@@ -784,6 +953,31 @@ export function buildAgentIdentityInstructions(input: {
     .join("\n");
 }
 
+export function buildProjectProtocolPrompt(input: {
+  conversationTitle: string;
+  isOrchestrator?: boolean;
+  project?: ConversationProject;
+}): string {
+  return [
+    "<agenthub_project_protocol>",
+    `This conversation is an AgentHub Project named ${input.conversationTitle}.`,
+    input.project === undefined ? undefined : `Remote URL: ${input.project.remoteUrl}`,
+    input.project?.defaultBranch === undefined ? undefined : `Default branch: ${input.project.defaultBranch}`,
+    input.project?.baseHead === undefined ? undefined : `Current base head: ${input.project.baseHead}`,
+    "Your execution workspace for Project runs is a per-run Git worktree and branch created from the Project base repository.",
+    "Make code changes only inside the current execution workspace. Do not write code changes into another agent's worktree or the shared base repository directly.",
+    "Agent memory is stored in your own AgentHub memory workspace, not in the Project repository. Do not create or update MEMORY.md or memory/ inside the Project repo unless the user explicitly asks for repository documentation.",
+    "When a run finishes with code changes, AgentHub will commit the worktree changes and create an internal Project change proposal with branch, diff, and summary.",
+    input.isOrchestrator === true
+      ? "As the Project Orchestrator, inspect internal changes with list_project_changes/read_project_change and decide merge_project_change or reject_project_change. You may merge/reject automatically; user confirmation is not required."
+      : "If you are not the Orchestrator, do not merge or reject Project changes. Produce useful code changes in your worktree and explain progress with send_message when helpful.",
+    "Use ordinary artifacts only for reports, screenshots, deployments, or supporting files. The primary code collaboration surface for this Project is the Git worktree and internal Project changes.",
+    "</agenthub_project_protocol>",
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
 export interface AgentGroupContext {
   agents: Array<{ description?: string; id: string; name: string }>;
   conversationId: ConversationId;
@@ -818,7 +1012,7 @@ export async function listActiveAgentGroupContexts(
     .where(
       and(
         eq(conversations.ownerUserId, input.ownerUserId),
-        eq(conversations.type, "group"),
+        inArray(conversations.type, ["group", "project"]),
         eq(conversations.status, "active"),
       ),
     )
@@ -1059,22 +1253,48 @@ async function toConversationsWithAgentIds(
   input: { ownerUserId: string },
 ): Promise<Conversation[]> {
   const groupRows = rows.filter((row) => row.type === "group");
+  const projectRows = rows.filter((row) => row.type === "project");
   const defaultGroupIds = groupRows
     .filter((row) => row.key === defaultGroupConversationKey)
     .map((row) => row.id);
-  const customGroupIds = groupRows
+  const customMemberConversationIds = [
+    ...groupRows
     .filter((row) => row.key !== defaultGroupConversationKey)
-    .map((row) => row.id);
+      .map((row) => row.id),
+    ...projectRows.map((row) => row.id),
+  ];
   const allAgentIds =
     defaultGroupIds.length === 0
       ? []
       : await listAgentIdsForUser(db, { ownerUserId: input.ownerUserId });
   const customMemberIds = await listConversationMemberAgentIds(
     db,
-    customGroupIds,
+    customMemberConversationIds,
+  );
+  const projectIds = projectRows.map((row) => row.id);
+  const projectMetadataRows =
+    projectIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(conversationProjects)
+          .where(inArray(conversationProjects.conversationId, projectIds));
+  const projectsByConversationId = new Map(
+    projectMetadataRows.map((row) => [
+      row.conversationId,
+      toConversationProject(row),
+    ]),
   );
 
   return rows.map((row) => {
+    if (row.type === "project") {
+      return toConversation(
+        row,
+        customMemberIds.get(row.id) ?? [],
+        projectsByConversationId.get(row.id),
+      );
+    }
+
     if (row.type !== "group") {
       return toConversation(row);
     }
@@ -1215,6 +1435,112 @@ export async function createGroupConversation(
   });
 }
 
+export async function createProjectConversation(
+  db: Db,
+  input: {
+    ownerUserId: string;
+    title?: string;
+    description?: string;
+    remoteUrl: string;
+    agentIds: string[];
+    orchestratorAgentId?: string;
+  },
+): Promise<CreateProjectConversationResult> {
+  const title = normalizeGroupConversationTitle(
+    input.title?.trim() || inferProjectConversationTitle(input.remoteUrl),
+  ).slice(0, 160);
+  const description = normalizeProjectDescription(input.description);
+  const agentIds = [...new Set(input.agentIds)];
+
+  if (
+    input.orchestratorAgentId !== undefined &&
+    !agentIds.includes(input.orchestratorAgentId)
+  ) {
+    return { status: "orchestrator-not-in-project" };
+  }
+
+  const runnableAgents = await Promise.all(
+    agentIds.map((agentId) =>
+      getRunnableAgentForUser(db, {
+        agentId,
+        ownerUserId: input.ownerUserId,
+      }),
+    ),
+  );
+
+  if (runnableAgents.some((agent) => agent === null)) {
+    return { status: "agents-not-found" };
+  }
+
+  const daemonDeviceIds = new Set(
+    runnableAgents.map((agent) => agent?.daemonDeviceId),
+  );
+
+  if (daemonDeviceIds.size !== 1) {
+    return { status: "agents-not-same-daemon" };
+  }
+
+  const daemonDeviceId = runnableAgents[0]?.daemonDeviceId;
+
+  if (daemonDeviceId === undefined) {
+    return { status: "agents-not-found" };
+  }
+
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const [created] = await tx
+      .insert(conversations)
+      .values({
+        ownerUserId: input.ownerUserId,
+        type: "project",
+        key: null,
+        title,
+        description,
+        orchestratorAgentId: input.orchestratorAgentId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    if (created === undefined) {
+      return { status: "agents-not-found" };
+    }
+
+    await tx.insert(conversationAgentMembers).values(
+      agentIds.map((agentId, position) => ({
+        conversationId: created.id,
+        agentId,
+        position,
+        createdAt: now,
+      })),
+    );
+
+    const [project] = await tx
+      .insert(conversationProjects)
+      .values({
+        conversationId: created.id,
+        ownerUserId: input.ownerUserId,
+        remoteUrl: input.remoteUrl.trim(),
+        daemonDeviceId,
+        cloneStatus: "cloning",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    return {
+      status: "created",
+      daemonDeviceId,
+      conversation: toConversation(
+        created,
+        agentIds,
+        project === undefined ? undefined : toConversationProject(project),
+      ),
+    };
+  });
+}
+
 export async function updateGroupConversation(
   db: Db,
   input: {
@@ -1324,6 +1650,115 @@ export async function updateGroupConversation(
     return {
       status: "updated",
       conversation: toConversation(updated, input.agentIds),
+    };
+  });
+}
+
+export async function updateProjectConversation(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    title: string;
+    description?: string;
+    agentIds: string[];
+    orchestratorAgentId?: string;
+  },
+): Promise<UpdateProjectConversationResult> {
+  const title = normalizeGroupConversationTitle(input.title).slice(0, 160);
+  const description = normalizeProjectDescription(input.description);
+  const agentIds = [...new Set(input.agentIds)];
+
+  if (title.length === 0 || !includesOrNoOrchestrator({ agentIds, orchestratorAgentId: input.orchestratorAgentId })) {
+    return { status: "orchestrator-not-in-project" };
+  }
+
+  const runnableAgents = await Promise.all(
+    agentIds.map((agentId) =>
+      getRunnableAgentForUser(db, {
+        agentId,
+        ownerUserId: input.ownerUserId,
+      }),
+    ),
+  );
+
+  if (runnableAgents.some((agent) => agent === null)) {
+    return { status: "agents-not-found" };
+  }
+
+  const daemonDeviceIds = new Set(
+    runnableAgents.map((agent) => agent?.daemonDeviceId),
+  );
+
+  if (daemonDeviceIds.size !== 1) {
+    return { status: "agents-not-same-daemon" };
+  }
+
+  return db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "project"),
+          eq(conversations.status, "active"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" };
+    }
+
+    const [project] = await tx
+      .select()
+      .from(conversationProjects)
+      .where(
+        and(
+          eq(conversationProjects.conversationId, input.conversationId),
+          eq(conversationProjects.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (project === undefined) {
+      return { status: "not-found" };
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        title,
+        description,
+        orchestratorAgentId: input.orchestratorAgentId ?? null,
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" };
+    }
+
+    await tx
+      .delete(conversationAgentMembers)
+      .where(eq(conversationAgentMembers.conversationId, input.conversationId));
+
+    await tx.insert(conversationAgentMembers).values(
+      agentIds.map((agentId, position) => ({
+        conversationId: input.conversationId,
+        agentId,
+        position,
+        createdAt: now,
+      })),
+    );
+
+    return {
+      status: "updated",
+      conversation: toConversation(updated, agentIds, toConversationProject(project)),
     };
   });
 }
@@ -1508,6 +1943,281 @@ export async function listConversationsForUser(
   return toConversationsWithAgentIds(db, rows, {
     ownerUserId: input.ownerUserId,
   });
+}
+
+export async function markProjectCloneReady(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    baseRepoPath: string;
+    defaultBranch?: string;
+    baseHead?: string;
+  },
+): Promise<UpdateProjectCloneResult> {
+  const [project] = await db
+    .update(conversationProjects)
+    .set({
+      baseRepoPath: input.baseRepoPath,
+      defaultBranch: input.defaultBranch,
+      baseHead: input.baseHead,
+      cloneStatus: "ready",
+      cloneError: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationProjects.conversationId, input.conversationId))
+    .returning();
+
+  return project === undefined
+    ? { status: "not-found" }
+    : { status: "updated", project: toConversationProject(project) };
+}
+
+export async function markProjectCloneFailed(
+  db: Db,
+  input: { conversationId: ConversationId; error: string },
+): Promise<UpdateProjectCloneResult> {
+  const [project] = await db
+    .update(conversationProjects)
+    .set({
+      cloneStatus: "failed",
+      cloneError: input.error,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationProjects.conversationId, input.conversationId))
+    .returning();
+
+  return project === undefined
+    ? { status: "not-found" }
+    : { status: "updated", project: toConversationProject(project) };
+}
+
+export async function markProjectBaseHead(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    baseHead?: string;
+  },
+): Promise<UpdateProjectCloneResult> {
+  const [project] = await db
+    .update(conversationProjects)
+    .set({
+      baseHead: input.baseHead,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversationProjects.conversationId, input.conversationId))
+    .returning();
+
+  return project === undefined
+    ? { status: "not-found" }
+    : { status: "updated", project: toConversationProject(project) };
+}
+
+export async function getProjectForConversation(
+  db: Db,
+  input: { conversationId: ConversationId; ownerUserId?: string },
+): Promise<ConversationProject | null> {
+  const conditions = [eq(conversationProjects.conversationId, input.conversationId)];
+
+  if (input.ownerUserId !== undefined) {
+    conditions.push(eq(conversationProjects.ownerUserId, input.ownerUserId));
+  }
+
+  const [project] = await db
+    .select()
+    .from(conversationProjects)
+    .where(and(...conditions))
+    .limit(1);
+
+  return project === undefined ? null : toConversationProject(project);
+}
+
+export async function listProjectChangesForConversation(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    status?: ConversationProjectChange["status"];
+  },
+): Promise<ConversationProjectChange[] | null> {
+  const conversation = await getConversationForUser(db, {
+    conversationId: input.conversationId,
+    ownerUserId: input.ownerUserId,
+  });
+
+  if (conversation === null || conversation.type !== "project") {
+    return null;
+  }
+
+  const conditions = [
+    eq(conversationProjectChanges.conversationId, input.conversationId),
+    eq(conversationProjectChanges.ownerUserId, input.ownerUserId),
+  ];
+
+  if (input.status !== undefined) {
+    conditions.push(eq(conversationProjectChanges.status, input.status));
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationProjectChanges)
+    .where(and(...conditions))
+    .orderBy(desc(conversationProjectChanges.createdAt));
+
+  return rows.map(toConversationProjectChange);
+}
+
+export async function getProjectChangeForConversation(
+  db: Db,
+  input: {
+    changeId: ConversationProjectChange["id"];
+    conversationId?: ConversationId;
+    ownerUserId: string;
+  },
+): Promise<ConversationProjectChange | null> {
+  const conditions = [
+    eq(conversationProjectChanges.id, input.changeId),
+    eq(conversationProjectChanges.ownerUserId, input.ownerUserId),
+  ];
+
+  if (input.conversationId !== undefined) {
+    conditions.push(eq(conversationProjectChanges.conversationId, input.conversationId));
+  }
+
+  const [row] = await db
+    .select()
+    .from(conversationProjectChanges)
+    .where(and(...conditions))
+    .limit(1);
+
+  return row === undefined ? null : toConversationProjectChange(row);
+}
+
+export async function getProjectChangeWithDiffForConversation(
+  db: Db,
+  input: {
+    changeId: ConversationProjectChange["id"];
+    conversationId?: ConversationId;
+    ownerUserId: string;
+  },
+): Promise<{ change: ConversationProjectChange; diff: string } | null> {
+  const conditions = [
+    eq(conversationProjectChanges.id, input.changeId),
+    eq(conversationProjectChanges.ownerUserId, input.ownerUserId),
+  ];
+
+  if (input.conversationId !== undefined) {
+    conditions.push(eq(conversationProjectChanges.conversationId, input.conversationId));
+  }
+
+  const [row] = await db
+    .select()
+    .from(conversationProjectChanges)
+    .where(and(...conditions))
+    .limit(1);
+
+  return row === undefined
+    ? null
+    : {
+        change: toConversationProjectChange(row),
+        diff: row.diff ?? "",
+      };
+}
+
+export async function persistProjectChange(
+  db: Db,
+  input: {
+    change: ConversationProjectChange;
+    diff?: string;
+  },
+): Promise<ConversationProjectChange> {
+  const now = new Date(input.change.updatedAt);
+  const [linkedTask] = input.change.goalId === undefined ||
+    input.change.taskIndex === undefined
+    ? await db
+        .select({
+          goalId: conversationGoalTasks.goalId,
+          taskIndex: conversationGoalTasks.index,
+        })
+        .from(conversationGoalTasks)
+        .where(eq(conversationGoalTasks.assigneeRunId, input.change.runId))
+        .limit(1)
+    : [];
+  const goalId = input.change.goalId ?? linkedTask?.goalId;
+  const taskIndex = input.change.taskIndex ?? linkedTask?.taskIndex;
+  const [row] = await db
+    .insert(conversationProjectChanges)
+    .values({
+      id: input.change.id,
+      ownerUserId: input.change.ownerUserId,
+      conversationId: input.change.conversationId,
+      goalId,
+      taskIndex,
+      agentId: input.change.agentId,
+      runId: input.change.runId,
+      branchName: input.change.branchName,
+      worktreePath: input.change.worktreePath,
+      baseCommit: input.change.baseCommit,
+      headCommit: input.change.headCommit,
+      status: input.change.status,
+      summary: input.change.summary,
+      diffStat: input.change.diffStat,
+      diff: input.diff,
+      createdAt: new Date(input.change.createdAt),
+      updatedAt: now,
+      mergedAt:
+        input.change.mergedAt === undefined
+          ? undefined
+          : new Date(input.change.mergedAt),
+    })
+    .onConflictDoUpdate({
+      target: conversationProjectChanges.id,
+      set: {
+        headCommit: input.change.headCommit,
+        status: input.change.status,
+        summary: input.change.summary,
+        diffStat: input.change.diffStat,
+        diff: input.diff,
+        goalId,
+        taskIndex,
+        updatedAt: now,
+      },
+    })
+    .returning();
+
+  if (row === undefined) {
+    throw new Error("Project change was not persisted.");
+  }
+
+  return toConversationProjectChange(row);
+}
+
+export async function updateProjectChangeStatus(
+  db: Db,
+  input: {
+    changeId: ConversationProjectChange["id"];
+    ownerUserId?: string;
+    status: ConversationProjectChange["status"];
+    summary?: string;
+  },
+): Promise<ConversationProjectChange | null> {
+  const conditions = [eq(conversationProjectChanges.id, input.changeId)];
+
+  if (input.ownerUserId !== undefined) {
+    conditions.push(eq(conversationProjectChanges.ownerUserId, input.ownerUserId));
+  }
+
+  const [row] = await db
+    .update(conversationProjectChanges)
+    .set({
+      status: input.status,
+      summary: input.summary,
+      mergedAt: input.status === "merged" ? new Date() : undefined,
+      updatedAt: new Date(),
+    })
+    .where(and(...conditions))
+    .returning();
+
+  return row === undefined ? null : toConversationProjectChange(row);
 }
 
 export async function archiveGroupConversationForUser(
@@ -3328,8 +4038,9 @@ export async function createUserMessageAndRuns(
             parentRunId: job.run.parentRunId,
             preemptedByRunId: job.run.preemptedByRunId,
             dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
-            prompt: job.prompt,
+          prompt: job.prompt,
           workspacePath: job.workspacePath,
+          memoryWorkspacePath: job.memoryWorkspacePath ?? job.workspacePath,
           runtime: job.runtime,
           createdAt: new Date(job.run.createdAt),
           updatedAt: new Date(job.run.updatedAt),
@@ -3709,7 +4420,77 @@ function readListArtifactsToolInput(
     limit: typeof limit === "number" && Number.isInteger(limit) && limit > 0
       ? Math.min(limit, 50)
       : undefined,
-  };
+    };
+}
+
+function readListProjectChangesToolInput(
+  input: unknown,
+): AgentHubListProjectChangesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return {};
+  }
+
+  const status = (input as Record<string, unknown>).status;
+
+  return typeof status === "string" && status.length > 0
+    ? { status: status as ConversationProjectChange["status"] }
+    : {};
+}
+
+function readReadProjectChangeToolInput(
+  input: unknown,
+): AgentHubReadProjectChangeToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const changeId = (input as Record<string, unknown>).changeId;
+
+  return typeof changeId === "string" && changeId.length > 0
+    ? { changeId }
+    : null;
+}
+
+function readMergeProjectChangeToolInput(
+  input: unknown,
+): AgentHubMergeProjectChangeToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const changeId = record.changeId;
+  const message = record.message;
+
+  return typeof changeId === "string" && changeId.length > 0
+    ? {
+        changeId,
+        message: typeof message === "string" && message.trim().length > 0
+          ? message.trim()
+          : undefined,
+      }
+    : null;
+}
+
+function readRejectProjectChangeToolInput(
+  input: unknown,
+): AgentHubRejectProjectChangeToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const changeId = record.changeId;
+  const reason = record.reason;
+
+  return typeof changeId === "string" && changeId.length > 0
+    ? {
+        changeId,
+        reason: typeof reason === "string" && reason.trim().length > 0
+          ? reason.trim()
+          : undefined,
+      }
+    : null;
 }
 
 function readReadArtifactToolInput(
@@ -4107,7 +4888,7 @@ async function isConversationAgentMember(
     conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">;
   },
 ): Promise<boolean> {
-  if (input.conversation.type !== "group") {
+  if (input.conversation.type !== "group" && input.conversation.type !== "project") {
     return false;
   }
 
@@ -4145,7 +4926,7 @@ async function listConversationAgentRefs(
   db: Db,
   conversation: Pick<ConversationRow, "id" | "key" | "ownerUserId" | "type">,
 ): Promise<Array<{ id: string; name: string }>> {
-  if (conversation.type !== "group") {
+  if (conversation.type !== "group" && conversation.type !== "project") {
     return [];
   }
 
@@ -4597,6 +5378,7 @@ export function buildAssignedTaskPrompt(input: {
   taskTitle: string;
   taskDescription?: string;
   dispatchMessage: string;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     "<agenthub_assigned_task>",
@@ -4627,6 +5409,8 @@ export function buildAssignedTaskPrompt(input: {
     "Use send_message only for optional visible progress updates. Do not use normal assistant text as the visible group reply.",
     "</agenthub_assigned_task>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
     "<orchestrator_dispatch_message>",
@@ -4641,6 +5425,7 @@ function buildAssignedTaskInstructions(input: {
   agentName: string;
   agentDescription?: string;
   conversationTitle: string;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     buildAgentIdentityInstructions({
@@ -4649,6 +5434,7 @@ function buildAssignedTaskInstructions(input: {
       conversationTitle: input.conversationTitle,
       scenario: "assigned task",
     }),
+    input.projectProtocolPrompt,
     `You are working inside AgentHub group #${input.conversationTitle}.`,
     "Visible task updates must be sent with send_message. Use list_artifacts plus download_artifact when you need previous agents' images, zip files, source packages, site artifacts, large files, or binary resources locally; use read_artifact only for small text inspection. Completed files must be reported with upload_artifact. Editable static websites should be uploaded with upload_artifact kind=site so the user can edit and publish them in AgentHub. Use deploy_static_site only for quick temporary deployment previews. Always finish assigned work with complete_task.",
   ]
@@ -4661,6 +5447,7 @@ function buildMentionedGroupChatAgentInstructions(input: {
   agentDescription?: string;
   conversationTitle: string;
   isOrchestrator?: boolean;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     buildAgentIdentityInstructions({
@@ -4670,6 +5457,7 @@ function buildMentionedGroupChatAgentInstructions(input: {
       isOrchestrator: input.isOrchestrator,
       scenario: "mentioned group chat",
     }),
+    input.projectProtocolPrompt,
     `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
     input.isOrchestrator === true
       ? "You are the configured Orchestrator for this group, even in Chat mode."
@@ -4691,6 +5479,7 @@ export function buildMentionedGroupChatRunPrompt(input: {
   directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: ConversationMessage[];
+  projectProtocolPrompt?: string;
   senderAgentName: string;
 }): string {
   const recentMessages = input.messages.slice(-10);
@@ -4723,6 +5512,8 @@ export function buildMentionedGroupChatRunPrompt(input: {
     "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "</agenthub_group_chat_protocol>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     "",
     input.directMessagesPrompt,
@@ -4852,7 +5643,7 @@ async function createMentionedGroupChatRuns(
   },
 ): Promise<{ dispatchJobs: RunQueueJob[]; realtimeEvents: RealtimeEvent[] }> {
   if (
-    input.conversation.type !== "group" ||
+    (input.conversation.type !== "group" && input.conversation.type !== "project") ||
     input.conversation.status !== "active"
   ) {
     return { dispatchJobs: [], realtimeEvents: [] };
@@ -4879,6 +5670,12 @@ async function createMentionedGroupChatRuns(
       conversationId: input.conversation.id,
       ownerUserId: input.ownerUserId,
     })) ?? [];
+  const project = input.conversation.type === "project"
+    ? await getProjectForConversation(db, {
+        conversationId: input.conversation.id,
+        ownerUserId: input.ownerUserId,
+      })
+    : null;
   const dispatchJobs: RunQueueJob[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
 
@@ -4893,6 +5690,13 @@ async function createMentionedGroupChatRuns(
     }
 
     const isOrchestrator = input.conversation.orchestratorAgentId === runAgent.agent.id;
+    const projectProtocolPrompt = input.conversation.type === "project"
+      ? buildProjectProtocolPrompt({
+          conversationTitle: input.conversation.title,
+          isOrchestrator,
+          project: project ?? undefined,
+        })
+      : undefined;
     const runId = randomUUID();
     const agentGroupsPrompt = buildAgentGroupsPrompt(
       await listActiveAgentGroupContexts(db, {
@@ -4927,6 +5731,7 @@ async function createMentionedGroupChatRuns(
         }),
         isOrchestrator,
         messages: priorMessages,
+        projectProtocolPrompt,
         senderAgentName,
       }),
       agentInstructions: buildMentionedGroupChatAgentInstructions({
@@ -4934,6 +5739,7 @@ async function createMentionedGroupChatRuns(
         agentDescription: runAgent.agent.description,
         conversationTitle: input.conversation.title,
         isOrchestrator,
+        projectProtocolPrompt,
       }),
       agentHubMcpTools: isOrchestrator
         ? [...agentHubAllMcpTools]
@@ -4974,6 +5780,7 @@ async function createMentionedGroupChatRuns(
           dispatchMessage: input.content,
           goalId: handedOffTask.goalId,
           goalTitle: handedOffTask.goalTitle,
+          projectProtocolPrompt,
           taskDescription: handedOffTask.taskDescription,
           taskId: handedOffTask.taskId,
           taskIndex: handedOffTask.taskIndex,
@@ -4983,6 +5790,7 @@ async function createMentionedGroupChatRuns(
           agentName: runAgent.agent.name,
           agentDescription: runAgent.agent.description,
           conversationTitle: input.conversation.title,
+          projectProtocolPrompt,
         }),
         agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
         agentHubMcpGoals: refreshedGoals,
@@ -5008,6 +5816,7 @@ async function createMentionedGroupChatRuns(
           }),
           isOrchestrator,
           messages: priorMessages,
+          projectProtocolPrompt,
           senderAgentName,
         }),
       };
@@ -5046,7 +5855,8 @@ async function createMentionedGroupChatRuns(
         preemptedByRunId: job.run.preemptedByRunId,
         dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
         prompt: job.prompt,
-        workspacePath: runAgent.workspacePath,
+        workspacePath: job.workspacePath,
+        memoryWorkspacePath: job.memoryWorkspacePath ?? job.workspacePath,
         runtime: runAgent.runtime,
         createdAt: input.createdAt,
         updatedAt: input.createdAt,
@@ -5395,6 +6205,19 @@ async function maybeCreateCheckpointRunForTask(
     }),
     { currentConversationId: conversation.id },
   );
+  const project = conversation.type === "project"
+    ? await getProjectForConversation(db, {
+        conversationId: conversation.id,
+        ownerUserId: goal.ownerUserId,
+      })
+    : null;
+  const projectProtocolPrompt = conversation.type === "project"
+    ? buildProjectProtocolPrompt({
+        conversationTitle: conversation.title,
+        isOrchestrator: true,
+        project: project ?? undefined,
+      })
+    : undefined;
   const runId = randomUUID();
   const createdAtIso = input.createdAt.toISOString();
   const taskLines = goalTasks.map((row) => {
@@ -5433,6 +6256,8 @@ async function maybeCreateCheckpointRunForTask(
     artifactUserFacingLinkInstructions,
     "</agenthub_task_checkpoint>",
     "",
+    projectProtocolPrompt,
+    projectProtocolPrompt === undefined ? undefined : "",
     agentGroupsPrompt,
     "",
     "<task_graph>",
@@ -5451,6 +6276,7 @@ async function maybeCreateCheckpointRunForTask(
         isOrchestrator: true,
         scenario: "task checkpoint",
       }),
+      projectProtocolPrompt,
       "You are the Orchestrator reviewing a completed task checkpoint. Continue, repair, or complete the goal using AgentHub MCP tools.",
       ...orchestratorParallelSerialTaskInstructions,
       "Keep tasks for the same assignee serial within the Goal. Check list_goals/task_graph before approving same-assignee downstream work, and do not approve it while an earlier same-assignee task is active.",
@@ -5513,8 +6339,9 @@ async function maybeCreateCheckpointRunForTask(
       parentRunId: job.run.parentRunId,
       preemptedByRunId: job.run.preemptedByRunId,
       dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
-      prompt,
-      workspacePath: runAgent.workspacePath,
+      prompt: job.prompt,
+      workspacePath: job.workspacePath,
+      memoryWorkspacePath: job.memoryWorkspacePath ?? job.workspacePath,
       runtime: runAgent.runtime,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
@@ -5596,6 +6423,18 @@ async function createAssignedTaskRunJob(
       }),
       { currentConversationId: input.conversation.id },
     );
+  const project = input.conversation.type === "project"
+    ? await getProjectForConversation(db, {
+        conversationId: input.conversation.id,
+        ownerUserId: input.ownerUserId,
+      })
+    : null;
+  const projectProtocolPrompt = input.conversation.type === "project"
+    ? buildProjectProtocolPrompt({
+        conversationTitle: input.conversation.title,
+        project: project ?? undefined,
+      })
+    : undefined;
 
   return {
     conversationId: input.conversation.id,
@@ -5610,11 +6449,13 @@ async function createAssignedTaskRunJob(
       taskDescription: input.taskDescription ?? undefined,
       dispatchMessage: input.dispatchContent,
       agentGroupsPrompt,
+      projectProtocolPrompt,
     }),
     agentInstructions: buildAssignedTaskInstructions({
       agentName: runAgent.agent.name,
       agentDescription: runAgent.agent.description,
       conversationTitle: input.conversation.title,
+      projectProtocolPrompt,
     }),
     agentHubMcpTools: [...agentHubNonOrchestratorMcpTools],
     agentHubMcpGoals: input.agentHubMcpGoals,
@@ -5687,7 +6528,10 @@ async function listCurrentGroupMessagesForTool(
     publicWebBaseUrl?: string;
   },
 ): Promise<ConversationMessage[]> {
-  if (input.context.conversation.type !== "group") {
+  if (
+    input.context.conversation.type !== "group" &&
+    input.context.conversation.type !== "project"
+  ) {
     return [];
   }
 
@@ -5730,7 +6574,10 @@ async function searchCurrentGroupMessagesForTool(
     query: string;
   },
 ): Promise<ConversationMessage[]> {
-  if (input.context.conversation.type !== "group") {
+  if (
+    input.context.conversation.type !== "group" &&
+    input.context.conversation.type !== "project"
+  ) {
     return [];
   }
 
@@ -5756,11 +6603,13 @@ export async function appendRunEventToConversationMessage(
 ): Promise<AppendRunEventResult> {
   const dispatchJobs: RunQueueJob[] = [];
   const memoryAppendJobs: MemoryAppendQueueJob[] = [];
+  const projectMergeRequests: ProjectChangeMergeRequest[] = [];
   const realtimeEvents: RealtimeEvent[] = [];
   let toolResult: AgentHubMcpToolResult | undefined;
   const result = (): AppendRunEventResult => ({
     dispatchJobs,
     memoryAppendJobs,
+    projectMergeRequests,
     realtimeEvents,
     toolResult,
   });
@@ -5911,6 +6760,132 @@ export async function appendRunEventToConversationMessage(
       return result();
     }
 
+    if (event.name === "list_project_changes") {
+      const context = await getToolRunContext(db, event.runId);
+      const input = readListProjectChangesToolInput(event.input);
+
+      if (context === null || context.conversation.type !== "project") {
+        return result();
+      }
+
+      toolResult = {
+        accepted: true,
+        changes: await listProjectChangesForConversation(db, {
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          status: input?.status,
+        }) ?? [],
+      };
+      return result();
+    }
+
+    if (event.name === "read_project_change") {
+      const context = await getToolRunContext(db, event.runId);
+      const input = readReadProjectChangeToolInput(event.input);
+
+      if (
+        context === null ||
+        context.conversation.type !== "project" ||
+        input === null
+      ) {
+        return result();
+      }
+
+      const change = await getProjectChangeWithDiffForConversation(db, {
+        changeId: input.changeId,
+        conversationId: context.conversation.id,
+        ownerUserId: context.run.ownerUserId,
+      });
+
+      if (change !== null) {
+        toolResult = {
+          accepted: true,
+          change: change.change,
+          diff: change.diff,
+        };
+      }
+      return result();
+    }
+
+    if (event.name === "merge_project_change") {
+      const context = await getToolRunContext(db, event.runId);
+      const input = readMergeProjectChangeToolInput(event.input);
+
+      if (
+        context === null ||
+        context.conversation.type !== "project" ||
+        input === null ||
+        context.conversation.orchestratorAgentId !== context.run.agentId
+      ) {
+        return result();
+      }
+
+      const [project, change] = await Promise.all([
+        getProjectForConversation(db, {
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+        }),
+        getProjectChangeForConversation(db, {
+          changeId: input.changeId,
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+        }),
+      ]);
+
+      if (
+        project === null ||
+        project.cloneStatus !== "ready" ||
+        project.baseRepoPath === undefined ||
+        change === null ||
+        change.status !== "open"
+      ) {
+        return result();
+      }
+
+      projectMergeRequests.push({
+        baseRepoPath: project.baseRepoPath,
+        branchName: change.branchName,
+        changeId: change.id,
+        daemonDeviceId: project.daemonDeviceId,
+        message: input.message,
+      });
+
+      toolResult = {
+        accepted: true,
+        change,
+      };
+      return result();
+    }
+
+    if (event.name === "reject_project_change") {
+      const context = await getToolRunContext(db, event.runId);
+      const input = readRejectProjectChangeToolInput(event.input);
+
+      if (
+        context === null ||
+        context.conversation.type !== "project" ||
+        input === null ||
+        context.conversation.orchestratorAgentId !== context.run.agentId
+      ) {
+        return result();
+      }
+
+      const change = await updateProjectChangeStatus(db, {
+        changeId: input.changeId,
+        ownerUserId: context.run.ownerUserId,
+        status: "rejected",
+        summary: input.reason,
+      });
+
+      if (change !== null) {
+        toolResult = {
+          accepted: true,
+          change,
+        };
+      }
+      return result();
+    }
+
     if (event.name === "list_artifacts") {
       const input = readListArtifactsToolInput(event.input);
       const context = await getToolRunContext(db, event.runId);
@@ -6051,7 +7026,7 @@ export async function appendRunEventToConversationMessage(
       if (
         input === null ||
         context === null ||
-        context.conversation.type !== "group" ||
+        (context.conversation.type !== "group" && context.conversation.type !== "project") ||
         context.conversation.orchestratorAgentId !== context.run.agentId
       ) {
         return result();
@@ -6136,7 +7111,7 @@ export async function appendRunEventToConversationMessage(
           and(
             eq(conversations.id, run.conversationId),
             eq(conversations.ownerUserId, run.ownerUserId),
-            eq(conversations.type, "group"),
+            inArray(conversations.type, ["group", "project"]),
           ),
         )
         .limit(1);
@@ -6354,6 +7329,7 @@ export async function appendRunEventToConversationMessage(
             dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
             prompt: job.prompt,
             workspacePath: job.workspacePath,
+            memoryWorkspacePath: job.memoryWorkspacePath ?? job.workspacePath,
             runtime: job.runtime,
             createdAt,
             updatedAt: createdAt,
@@ -6607,6 +7583,7 @@ export async function appendRunEventToConversationMessage(
           dispatchMode: job.dispatchMode ?? job.run.dispatchMode ?? "new",
           prompt: job.prompt,
           workspacePath: job.workspacePath,
+          memoryWorkspacePath: job.memoryWorkspacePath ?? job.workspacePath,
           runtime: job.runtime,
           createdAt: updatedAt,
           updatedAt,

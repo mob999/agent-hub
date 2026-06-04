@@ -7,6 +7,8 @@ import type {
   ConversationGoalId,
   ConversationGoalStatus,
   ConversationGoalTask,
+  ConversationProjectChange,
+  ConversationProjectChangeId,
   ConversationId,
   ConversationMessage,
   ConversationMessageId,
@@ -30,6 +32,10 @@ export type AgentHubMcpToolName =
   | "cancel_task"
   | "upload_artifact"
   | "deploy_static_site"
+  | "list_project_changes"
+  | "read_project_change"
+  | "merge_project_change"
+  | "reject_project_change"
   | "complete_task"
   | "complete_goal";
 
@@ -48,6 +54,10 @@ export const agentHubAllMcpTools = [
   "create_task",
   "approve_task",
   "cancel_task",
+  "list_project_changes",
+  "read_project_change",
+  "merge_project_change",
+  "reject_project_change",
   "complete_goal",
 ] as const satisfies readonly AgentHubMcpToolName[];
 
@@ -62,6 +72,8 @@ export const agentHubNonOrchestratorMcpTools = [
   "append_memory",
   "search_memory",
   "read_memory",
+  "list_project_changes",
+  "read_project_change",
   "upload_artifact",
   "deploy_static_site",
   "complete_task",
@@ -296,6 +308,45 @@ export interface AgentHubDeployStaticSiteToolResult {
   deployment: ConversationDeployment;
 }
 
+export interface AgentHubListProjectChangesToolInput {
+  status?: ConversationProjectChange["status"];
+}
+
+export interface AgentHubListProjectChangesToolResult {
+  accepted: true;
+  changes: ConversationProjectChange[];
+}
+
+export interface AgentHubReadProjectChangeToolInput {
+  changeId: ConversationProjectChangeId;
+}
+
+export interface AgentHubReadProjectChangeToolResult {
+  accepted: true;
+  change: ConversationProjectChange;
+  diff: string;
+}
+
+export interface AgentHubMergeProjectChangeToolInput {
+  changeId: ConversationProjectChangeId;
+  message?: string;
+}
+
+export interface AgentHubMergeProjectChangeToolResult {
+  accepted: true;
+  change: ConversationProjectChange;
+}
+
+export interface AgentHubRejectProjectChangeToolInput {
+  changeId: ConversationProjectChangeId;
+  reason?: string;
+}
+
+export interface AgentHubRejectProjectChangeToolResult {
+  accepted: true;
+  change: ConversationProjectChange;
+}
+
 export interface AgentHubCompleteTaskToolInput {
   goalId: ConversationGoalId;
   taskIndex: number;
@@ -324,6 +375,10 @@ export type AgentHubMcpToolInput =
   | AgentHubCancelTaskToolInput
   | AgentHubUploadArtifactToolInput
   | AgentHubDeployStaticSiteToolInput
+  | AgentHubListProjectChangesToolInput
+  | AgentHubReadProjectChangeToolInput
+  | AgentHubMergeProjectChangeToolInput
+  | AgentHubRejectProjectChangeToolInput
   | AgentHubCompleteTaskToolInput
   | AgentHubCompleteGoalToolInput;
 export type AgentHubMcpToolResult =
@@ -343,6 +398,10 @@ export type AgentHubMcpToolResult =
   | AgentHubCancelTaskToolResult
   | AgentHubUploadArtifactToolResult
   | AgentHubDeployStaticSiteToolResult
+  | AgentHubListProjectChangesToolResult
+  | AgentHubReadProjectChangeToolResult
+  | AgentHubMergeProjectChangeToolResult
+  | AgentHubRejectProjectChangeToolResult
   | AgentHubCompleteTaskToolResult
   | AgentHubCompleteGoalToolResult;
 

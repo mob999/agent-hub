@@ -9,6 +9,8 @@ import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
+import { ProjectCreateModal } from '../components/ProjectCreateModal'
+import { ProjectEditModal } from '../components/ProjectEditModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
 import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
@@ -29,6 +31,7 @@ import {
   type ConversationGoal,
   type ConversationMessage,
   type CreateGroupConversationResponse,
+  type CreateProjectConversationResponse,
   type DaemonDevice,
   type LocalRun,
   type RealtimeEvent,
@@ -225,6 +228,10 @@ export function WorkspacePage({
   const [groupEditError, setGroupEditError] = useState<string | null>(null)
   const [isSavingGroup, setIsSavingGroup] = useState(false)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null)
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
@@ -281,6 +288,10 @@ export function WorkspacePage({
   const editingGroup = useMemo(
     () => conversations.find((conversation) => conversation.id === editingGroupId) ?? null,
     [conversations, editingGroupId],
+  )
+  const editingProject = useMemo(
+    () => conversations.find((conversation) => conversation.id === editingProjectId) ?? null,
+    [conversations, editingProjectId],
   )
   const canEditActiveConversation =
     activeConversation !== null &&
@@ -1173,6 +1184,14 @@ export function WorkspacePage({
               ...current.filter((conversation) => conversation.id !== event.conversationId),
             ])
           } else {
+            const existingConversation = conversationsRef.current.find(
+              (conversation) => conversation.id === event.conversationId,
+            )
+
+            if (existingConversation === undefined || existingConversation.type === 'project') {
+              void loadConversations()
+            }
+
             setConversations((current) => {
               const existing = current.find((conversation) => conversation.id === event.conversationId)
 
@@ -1383,6 +1402,10 @@ export function WorkspacePage({
     setGroupCreateError(null)
     setGroupModalOpen(true)
   }
+  const openCreateProject = () => {
+    setProjectCreateError(null)
+    setProjectModalOpen(true)
+  }
   const openEditActiveConversation = () => {
     if (activeConversation === null) {
       return
@@ -1397,6 +1420,12 @@ export function WorkspacePage({
     if (activeConversation.type === 'group') {
       setGroupEditError(null)
       setEditingGroupId(activeConversation.id)
+      return
+    }
+
+    if (activeConversation.type === 'project') {
+      setGroupEditError(null)
+      setEditingProjectId(activeConversation.id)
     }
   }
   const createGroup = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
@@ -1481,6 +1510,40 @@ export function WorkspacePage({
         )
       } else {
         setGroupEditError('Unable to update the group. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingGroup(false)
+    }
+  }
+  const updateProject = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
+    if (editingProject === null) {
+      return
+    }
+
+    setIsSavingGroup(true)
+    setGroupEditError(null)
+
+    try {
+      const response = await apiRequest<UpdateGroupConversationResponse>(
+        `/conversations/projects/${editingProject.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        },
+      )
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      activateConversation(response.conversation.id)
+      setEditingProjectId(null)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupEditError(error.message)
+      } else {
+        setGroupEditError('Unable to update the project. Try again in a moment.')
       }
     } finally {
       setIsSavingGroup(false)
@@ -1582,6 +1645,49 @@ export function WorkspacePage({
       } else {
         setRunError('Unable to restore the group. Try again in a moment.')
       }
+    }
+  }
+  const createProject = async (input: {
+    title?: string
+    description?: string
+    remoteUrl: string
+    agentIds: string[]
+    orchestratorAgentId?: string
+  }) => {
+    setIsCreatingProject(true)
+    setProjectCreateError(null)
+
+    try {
+      const response = await apiRequest<CreateProjectConversationResponse>('/conversations/projects', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setMessagesByConversation((current) => ({
+        ...current,
+        [response.conversation.id]: [],
+      }))
+      if (user) {
+        writeConversationDraft(user.id, response.conversation.id, '')
+      }
+      setSelectedRunId(null)
+      if (response.conversation.project?.cloneStatus === 'ready') {
+        selectConversation(response.conversation.id)
+      }
+      setProjectModalOpen(false)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setProjectCreateError(error.message)
+      } else {
+        setProjectCreateError('Unable to create the project. Try again in a moment.')
+      }
+    } finally {
+      setIsCreatingProject(false)
     }
   }
   const deleteArchivedGroup = async (conversationId: string) => {
@@ -1876,6 +1982,7 @@ export function WorkspacePage({
             onOpenSearch={openSearch}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onCreateProject={openCreateProject}
             onOpenActivity={() => navigateToView('runs')}
             onDeleteAgent={(agentId) => {
               void deleteArchivedAgent(agentId)
@@ -1891,6 +1998,7 @@ export function WorkspacePage({
             }}
             onToggleSaved={() => setSavedOpen((open) => !open)}
             selectGroup={selectConversation}
+            selectProject={selectConversation}
             selectAgent={(agentId) => {
               void selectAgentConversation(agentId)
             }}
@@ -2026,6 +2134,16 @@ export function WorkspacePage({
           onCreate={createGroup}
         />
       )}
+      {projectModalOpen && (
+        <ProjectCreateModal
+          open={projectModalOpen}
+          agents={agents}
+          error={projectCreateError}
+          isCreating={isCreatingProject}
+          onClose={() => setProjectModalOpen(false)}
+          onCreate={createProject}
+        />
+      )}
       {editingAgent && (
         <AgentEditModal
           key={editingAgent.agent.id}
@@ -2063,6 +2181,18 @@ export function WorkspacePage({
             onSave={updateGroup}
           />
         )
+      )}
+      {editingProject && (
+        <ProjectEditModal
+          key={editingProject.id}
+          open={editingProject !== null}
+          agents={agents}
+          conversation={editingProject}
+          error={groupEditError}
+          isSaving={isSavingGroup}
+          onClose={() => setEditingProjectId(null)}
+          onSave={updateProject}
+        />
       )}
       {settingsOpen && user && (
         <UserSettingsModal

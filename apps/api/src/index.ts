@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -33,6 +35,7 @@ import {
   applyRunDispatchPreparation,
   buildAgentIdentityInstructions,
   buildAgentGroupsPrompt,
+  buildProjectProtocolPrompt,
   buildRecentDirectMessagesPrompt,
   createRunRecord,
   buildConversationRunPrompt,
@@ -40,6 +43,7 @@ import {
   createConversationArtifactFileRevision,
   createConversationArtifactRevision,
   createGroupConversation,
+  createProjectConversation,
   createUserMessageAndRun,
   createUserMessageAndRuns,
   createRealtimeEvent,
@@ -49,6 +53,7 @@ import {
   enqueueArtifactActionJob,
   enqueueRunJob,
   enqueueMemoryAppendJob,
+  enqueueProjectCloneJob,
   ensureDefaultGroupConversation,
   ensureDirectConversation,
   getAgentForUser,
@@ -59,6 +64,8 @@ import {
   getConversationArtifactFileContentForUser,
   getConversationArtifactFileRawContentForUser,
   getConversationDeploymentFileForUser,
+  getProjectForConversation,
+  getProjectChangeWithDiffForConversation,
   getSiteArtifactZipForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
@@ -66,6 +73,7 @@ import {
   listConversationArtifactsForUser,
   listConversationArtifactFilesForUser,
   listConversationDeploymentsForUser,
+  listProjectChangesForConversation,
   listConversationGoalsForUser,
   listConversationsForUser,
   getRunEventsForUser,
@@ -76,10 +84,12 @@ import {
   listRecentDirectConversationMessagesForAgent,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
+  markProjectBaseHead,
   groupConversationKeyFromTitle,
   normalizeGroupConversationTitle,
   publishRealtimeEvent,
   prepareRunDispatch,
+  prepareProjectRunJobForConversation,
   publishSiteArtifactForUser,
   readArtifactContent,
   conversationArtifactStorageKey,
@@ -93,6 +103,7 @@ import {
   updateConversationOrchestrator,
   updateAgentProfileForUser,
   updateGroupConversation,
+  updateProjectConversation,
   type RunnableAgent,
   type RunQueueJob,
   type UserMessageAttachmentUpload,
@@ -114,12 +125,14 @@ const db = createDb(env.DATABASE_URL);
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const realtimeSubscriber = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({ bindings: { service: "api" } });
+const execFileAsync = promisify(execFile);
 const runtimeKinds = new Set<RuntimeKind>([
   "claude-code",
   "codex",
   "opencode",
   "custom",
 ]);
+const projectChangeStatuses = new Set(["open", "merged", "rejected", "failed"]);
 const orchestratorParallelSerialTaskInstructions = [
   "Parallel task rule: tasks may run in parallel only when they are assigned to different agents, each task has enough input to start, their deliverables are clearly separated, and neither task needs the other's report, code, screenshots, site artifact, decision, or verification result.",
   "Serial task rule: tasks must be serial when they share the same assignee, when one task depends on another task's output, when multiple agents must edit or verify the same deliverable, or when integration, validation, publishing, or final summarization must happen after earlier work.",
@@ -723,6 +736,188 @@ function applyContextCompressionToJob(
   };
 }
 
+function resolveProjectFilePath(baseRepoPath: string, requestedPath?: string): string {
+  const relativePath = (requestedPath ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const resolved = path.resolve(baseRepoPath, relativePath);
+  const root = path.resolve(baseRepoPath);
+
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error("Path is outside the project repository.");
+  }
+
+  return resolved;
+}
+
+async function listProjectFileTree(input: {
+  baseRepoPath: string;
+  relativePath?: string;
+  depth?: number;
+}): Promise<Array<{ path: string; sizeBytes?: number; type: "directory" | "file" }>> {
+  const depth = input.depth ?? 0;
+
+  if (depth > 5) {
+    return [];
+  }
+
+  const directory = resolveProjectFilePath(input.baseRepoPath, input.relativePath);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const rows: Array<{ path: string; sizeBytes?: number; type: "directory" | "file" }> = [];
+
+  for (const entry of entries) {
+    if (entry.name === ".git") {
+      continue;
+    }
+
+    const relativePath = [input.relativePath, entry.name]
+      .filter((segment): segment is string => segment !== undefined && segment.length > 0)
+      .join("/");
+    const fullPath = resolveProjectFilePath(input.baseRepoPath, relativePath);
+
+    if (entry.isDirectory()) {
+      rows.push({ path: relativePath, type: "directory" });
+      rows.push(...await listProjectFileTree({
+        baseRepoPath: input.baseRepoPath,
+        relativePath,
+        depth: depth + 1,
+      }));
+    } else if (entry.isFile()) {
+      const fileStat = await stat(fullPath);
+      rows.push({ path: relativePath, sizeBytes: fileStat.size, type: "file" });
+    }
+  }
+
+  return rows;
+}
+
+async function git(
+  args: string[],
+  options: { cwd?: string; maxBuffer?: number } = {},
+): Promise<string> {
+  const result = await execFileAsync("git", args, {
+    cwd: options.cwd,
+    maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024,
+  });
+
+  return result.stdout.trim();
+}
+
+type ProjectChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "binary";
+
+interface ProjectChangedFile {
+  binary: boolean;
+  oldPath?: string;
+  path: string;
+  status: ProjectChangedFileStatus;
+}
+
+function toProjectChangedFileStatus(statusCode: string): ProjectChangedFileStatus {
+  if (statusCode.startsWith("A")) {
+    return "added";
+  }
+
+  if (statusCode.startsWith("D")) {
+    return "deleted";
+  }
+
+  if (statusCode.startsWith("R")) {
+    return "renamed";
+  }
+
+  return "modified";
+}
+
+async function listProjectChangedFiles(input: {
+  baseCommit?: string;
+  headCommit?: string;
+  worktreePath: string;
+}): Promise<ProjectChangedFile[]> {
+  if (input.headCommit === undefined) {
+    return [];
+  }
+
+  const output = input.baseCommit === undefined
+    ? await git(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      })
+    : await git(["diff", "--name-status", "-M", input.baseCommit, input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      });
+
+  if (output.length === 0) {
+    return [];
+  }
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [statusCode, firstPath, secondPath] = line.split("\t");
+      const status = toProjectChangedFileStatus(statusCode);
+      const pathValue = status === "renamed" ? secondPath : firstPath;
+      const oldPath = status === "renamed" ? firstPath : undefined;
+      const fileInfo = inferArtifactFileInfo({ filename: pathValue ?? firstPath ?? "" });
+
+      return {
+        binary: !fileInfo.canEdit,
+        oldPath,
+        path: pathValue ?? firstPath ?? "",
+        status: !fileInfo.canEdit ? "binary" : status,
+      };
+    })
+    .filter((file) => file.path.length > 0);
+}
+
+async function readProjectFileAtCommit(input: {
+  commit?: string;
+  filePath?: string;
+  worktreePath: string;
+}): Promise<string> {
+  if (input.commit === undefined || input.filePath === undefined) {
+    return "";
+  }
+
+  return git(["show", `${input.commit}:${input.filePath}`], {
+    cwd: input.worktreePath,
+    maxBuffer: 20 * 1024 * 1024,
+  }).catch(() => "");
+}
+
+async function commitProjectBaseFile(input: {
+  baseRepoPath: string;
+  relativePath: string;
+}): Promise<string | undefined> {
+  await git(["add", "--", input.relativePath], { cwd: input.baseRepoPath });
+
+  const status = await git(["status", "--porcelain", "--", input.relativePath], {
+    cwd: input.baseRepoPath,
+  });
+
+  if (status.length > 0) {
+    await git(
+      [
+        "-c",
+        "user.name=AgentHub",
+        "-c",
+        "user.email=agenthub@example.local",
+        "commit",
+        "-m",
+        `User edit ${input.relativePath}`,
+      ],
+      {
+        cwd: input.baseRepoPath,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+    );
+  }
+
+  return git(["rev-parse", "HEAD"], {
+    cwd: input.baseRepoPath,
+  }).catch(() => undefined);
+}
+
 async function listAgentDailyMemoryFiles(input: {
   fallbackDate: string;
   workspacePath: string;
@@ -768,7 +963,10 @@ async function prepareApiRunJobDispatch(
   });
 
   return {
-    job: applyRunDispatchPreparation(job, preparation),
+    job: await prepareProjectRunJobForConversation(db, {
+      conversationId: input.conversationId ?? job.conversationId ?? "",
+      job: applyRunDispatchPreparation(job, preparation),
+    }),
     realtimeEvents: preparation.realtimeEvents,
   };
 }
@@ -810,9 +1008,11 @@ function buildGroupChatAgentInstructions(input: {
   agentIdentityInstructions: string;
   conversationTitle: string;
   isOrchestrator?: boolean;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     input.agentIdentityInstructions,
+    input.projectProtocolPrompt,
     `You are participating in the AgentHub group chat #${input.conversationTitle}.`,
     input.isOrchestrator === true
       ? "You are the configured Orchestrator for this group, even in Chat mode."
@@ -833,6 +1033,7 @@ function buildGroupChatRunPrompt(input: {
   directMessagesPrompt?: string;
   isOrchestrator?: boolean;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
+  projectProtocolPrompt?: string;
 }): string {
   const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
@@ -859,6 +1060,8 @@ function buildGroupChatRunPrompt(input: {
     "Only the 10 most recent group messages are included below. Use list_group_messages or search_group_messages when you need older group context.",
     "</agenthub_group_chat_protocol>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
     input.directMessagesPrompt,
@@ -870,9 +1073,11 @@ function buildGroupChatRunPrompt(input: {
 function buildGroupTaskOrchestratorInstructions(input: {
   agentIdentityInstructions: string;
   conversationTitle: string;
+  projectProtocolPrompt?: string;
 }): string {
   return [
     input.agentIdentityInstructions,
+    input.projectProtocolPrompt,
     `You are the configured Orchestrator for AgentHub group #${input.conversationTitle}.`,
     "In Task mode, first create a goal for the user's objective with create_goal.",
     "Then create agent tasks under that goal with create_task({ goalId, title, description, assigneeAgentId, dependsOnTaskIndexes? }).",
@@ -901,6 +1106,7 @@ function buildGroupTaskOrchestratorPrompt(input: {
   currentUserMessage: string;
   messages: Awaited<ReturnType<typeof listConversationMessagesForUser>>;
   orchestratorAgentId?: string;
+  projectProtocolPrompt?: string;
 }): string {
   const recentMessages = (input.messages ?? []).slice(-10);
   const conversationPrompt = buildConversationRunPrompt({
@@ -945,6 +1151,8 @@ function buildGroupTaskOrchestratorPrompt(input: {
     "Normal assistant text is not visible in group task mode.",
     "</agenthub_group_task_protocol>",
     "",
+    input.projectProtocolPrompt,
+    input.projectProtocolPrompt === undefined ? undefined : "",
     input.agentGroupsPrompt,
     input.agentGroupsPrompt === undefined ? undefined : "",
     conversationPrompt,
@@ -1793,6 +2001,112 @@ app.post("/conversations/groups", async (c) => {
   return c.json({ conversation: result.conversation }, 201);
 });
 
+app.post("/conversations/projects", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    description?: unknown;
+    orchestratorAgentId?: unknown;
+    remoteUrl?: unknown;
+    title?: unknown;
+  };
+  const remoteUrl = typeof body.remoteUrl === "string"
+    ? body.remoteUrl.trim()
+    : "";
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : undefined;
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
+
+  if (
+    remoteUrl.length === 0 ||
+    remoteUrl.length > 2048 ||
+    (title !== undefined && (title.length === 0 || title.length > 80)) ||
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_REQUEST",
+          message:
+            "remoteUrl, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await createProjectConversation(db, {
+    ownerUserId: user.id,
+    title,
+    description: description.length > 0 ? description : undefined,
+    remoteUrl,
+    agentIds: body.agentIds,
+    orchestratorAgentId,
+  });
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more ready agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-same-daemon") {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_AGENTS_NOT_SAME_DAEMON",
+          message: "Project agents must be ready on the same daemon.",
+        },
+      },
+      400,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-project") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_PROJECT",
+          message: "Orchestrator must be a member of this project.",
+        },
+      },
+      400,
+    );
+  }
+
+  await enqueueProjectCloneJob(redis, {
+    conversationId: result.conversation.id,
+    daemonDeviceId: result.daemonDeviceId,
+    remoteUrl,
+  });
+
+  return c.json({ conversation: result.conversation }, 201);
+});
+
 app.patch("/conversations/groups/:conversationId", async (c) => {
   const user = c.get("user");
 
@@ -1905,6 +2219,113 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
         error: {
           code: "ORCHESTRATOR_NOT_IN_GROUP",
           message: "Orchestrator must be a member of this group.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
+});
+
+app.patch("/conversations/projects/:conversationId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    description?: unknown;
+    orchestratorAgentId?: unknown;
+    title?: unknown;
+  };
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : "";
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
+
+  if (
+    title.length === 0 ||
+    title.length > 160 ||
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_REQUEST",
+          message:
+            "title, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await updateProjectConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    title,
+    description: description.length > 0 ? description : undefined,
+    agentIds: body.agentIds,
+    orchestratorAgentId,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more ready agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-same-daemon") {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_AGENTS_NOT_SAME_DAEMON",
+          message: "Project agents must be ready on the same daemon.",
+        },
+      },
+      400,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-project") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_PROJECT",
+          message: "Orchestrator must be a member of this project.",
         },
       },
       400,
@@ -2369,6 +2790,502 @@ app.get("/conversations/:conversationId/deployments", async (c) => {
   return c.json({ deployments });
 });
 
+app.get("/conversations/:conversationId/project/changes", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const status = c.req.query("status");
+  if (status !== undefined && !projectChangeStatuses.has(status)) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_CHANGE_STATUS",
+          message: "Project change status filter is invalid.",
+        },
+      },
+      400,
+    );
+  }
+
+  const changes = await listProjectChangesForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    status: status as "open" | "merged" | "rejected" | "failed" | undefined,
+  });
+
+  if (changes === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_NOT_FOUND",
+          message: "Project conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ changes });
+});
+
+app.get("/conversations/:conversationId/project/changes/:changeId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_NOT_FOUND",
+          message: "Project change was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(result);
+});
+
+app.get("/conversations/:conversationId/project/changes/:changeId/files", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_NOT_FOUND",
+          message: "Project change was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    return c.json({
+      files: await listProjectChangedFiles({
+        baseCommit: result.change.baseCommit,
+        headCommit: result.change.headCommit,
+        worktreePath: result.change.worktreePath,
+      }),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILES_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/changes/:changeId/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const result = await getProjectChangeWithDiffForConversation(db, {
+    changeId: c.req.param("changeId"),
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (requestedPath === undefined || result === null) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILE_NOT_FOUND",
+          message: "Project change file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const files = await listProjectChangedFiles({
+      baseCommit: result.change.baseCommit,
+      headCommit: result.change.headCommit,
+      worktreePath: result.change.worktreePath,
+    });
+    const file = files.find((entry) => entry.path === requestedPath || entry.oldPath === requestedPath);
+
+    if (file === undefined) {
+      return c.json(
+        {
+          error: {
+            code: "PROJECT_CHANGE_FILE_NOT_FOUND",
+            message: "Project change file was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    if (file.binary) {
+      return c.json({
+        binary: true,
+        file,
+        newContent: "",
+        oldContent: "",
+      });
+    }
+
+    const oldContent = file.status === "added"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: result.change.baseCommit,
+          filePath: file.oldPath ?? file.path,
+          worktreePath: result.change.worktreePath,
+        });
+    const newContent = file.status === "deleted"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: result.change.headCommit,
+          filePath: file.path,
+          worktreePath: result.change.worktreePath,
+        });
+
+    return c.json({
+      binary: false,
+      file,
+      newContent,
+      oldContent,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_CHANGE_FILE_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/files", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (project === null || project.cloneStatus !== "ready" || project.baseRepoPath === undefined) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_NOT_READY",
+          message: "Project repository is not ready.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    return c.json({
+      files: await listProjectFileTree({ baseRepoPath: project.baseRepoPath }),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILES_UNAVAILABLE",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/files/raw", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const fileInfo = inferArtifactFileInfo({ filename: requestedPath });
+    const content = await readFile(filePath);
+
+    return new Response(content, {
+      headers: {
+        "content-type": fileInfo.mimeType,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      404,
+    );
+  }
+});
+
+app.get("/conversations/:conversationId/project/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const requestedPath = c.req.query("path");
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const content = await readFile(filePath, "utf8");
+    return c.json({ content, path: requestedPath });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      404,
+    );
+  }
+});
+
+app.put("/conversations/:conversationId/project/files/content", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = await c.req.json<{ content?: unknown; path?: unknown }>().catch(() => null);
+  const requestedPath = typeof body?.path === "string" ? body.path : undefined;
+  const content = typeof body?.content === "string" ? body.content : undefined;
+  const project = await getProjectForConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+  });
+
+  if (
+    requestedPath === undefined ||
+    content === undefined ||
+    project === null ||
+    project.cloneStatus !== "ready" ||
+    project.baseRepoPath === undefined
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_FOUND",
+          message: "Project file was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const fileInfo = inferArtifactFileInfo({ filename: requestedPath });
+  if (!fileInfo.canEdit) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_NOT_EDITABLE",
+          message: "Project file cannot be edited as text.",
+        },
+      },
+      400,
+    );
+  }
+
+  try {
+    const filePath = resolveProjectFilePath(project.baseRepoPath, requestedPath);
+    const fileStat = await stat(filePath);
+
+    if (!fileStat.isFile()) {
+      return c.json(
+        {
+          error: {
+            code: "PROJECT_FILE_NOT_FOUND",
+            message: "Project file was not found.",
+          },
+        },
+        404,
+      );
+    }
+
+    await writeFile(filePath, content, "utf8");
+    const baseHead = await commitProjectBaseFile({
+      baseRepoPath: project.baseRepoPath,
+      relativePath: requestedPath,
+    });
+
+    await markProjectBaseHead(db, {
+      baseHead,
+      conversationId: project.conversationId,
+    });
+
+    return c.json({ baseHead, content, path: requestedPath });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_FILE_SAVE_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500,
+    );
+  }
+});
+
 app.post("/conversations/:conversationId/messages", async (c) => {
   const user = c.get("user");
 
@@ -2499,7 +3416,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   }
 
   const currentConversationGoals =
-    conversation.type === "group"
+    conversation.type === "group" || conversation.type === "project"
       ? await listConversationGoalsForUser(db, {
           conversationId: conversation.id,
           ownerUserId: user.id,
@@ -2724,6 +3641,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
       currentConversationId: conversation.id,
       ownerUserId: user.id,
     });
+    const projectProtocolPrompt = conversation.type === "project"
+      ? buildProjectProtocolPrompt({
+          conversationTitle: conversation.title,
+          isOrchestrator: true,
+          project: conversation.project,
+        })
+      : undefined;
     const userMessageAttachments = await getUserMessageAttachments();
     const currentUserMessageForPrompt = userMessageForPrompt(
       content,
@@ -2742,6 +3666,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
         currentUserMessage: currentUserMessageForPrompt,
         messages: priorMessages,
         orchestratorAgentId: conversation.orchestratorAgentId,
+        projectProtocolPrompt,
       }),
       agentInstructions: buildGroupTaskOrchestratorInstructions({
         agentIdentityInstructions: buildAgentIdentityInstructions({
@@ -2752,6 +3677,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           scenario: "task orchestrator",
         }),
         conversationTitle: conversation.title,
+        projectProtocolPrompt,
       }),
       agentHubMcpTools: [...agentHubAllMcpTools],
       agentHubMcpGoals,
@@ -2884,6 +3810,13 @@ app.post("/conversations/:conversationId/messages", async (c) => {
   const initialJobs = await Promise.all(
     runAgents.map(async (runAgent): Promise<RunQueueJob> => {
       const isOrchestrator = conversation.orchestratorAgentId === runAgent.agent.id;
+      const projectProtocolPrompt = conversation.type === "project"
+        ? buildProjectProtocolPrompt({
+            conversationTitle: conversation.title,
+            isOrchestrator,
+            project: conversation.project,
+          })
+        : undefined;
 
       return applyContextCompressionToJob({
         conversationId: conversation.id,
@@ -2911,6 +3844,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           }),
           isOrchestrator,
           messages: priorMessages,
+          projectProtocolPrompt,
         }),
         agentInstructions: buildGroupChatAgentInstructions({
           agentIdentityInstructions: buildAgentIdentityInstructions({
@@ -2922,6 +3856,7 @@ app.post("/conversations/:conversationId/messages", async (c) => {
           }),
           conversationTitle: conversation.title,
           isOrchestrator,
+          projectProtocolPrompt,
         }),
         agentHubMcpTools: groupChatMcpToolsForAgent({
           agentId: runAgent.agent.id,

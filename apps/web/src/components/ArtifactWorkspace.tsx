@@ -78,6 +78,23 @@ const textLanguages: Record<string, string> = {
   yml: 'yaml',
   zsh: 'shell',
 }
+const textFilenameLanguages: Record<string, string> = {
+  '.dockerignore': 'plaintext',
+  '.editorconfig': 'ini',
+  '.env': 'plaintext',
+  '.eslintignore': 'plaintext',
+  '.eslintrc': 'json',
+  '.gitattributes': 'plaintext',
+  '.gitignore': 'plaintext',
+  '.npmrc': 'plaintext',
+  '.prettierignore': 'plaintext',
+  '.prettierrc': 'json',
+  copying: 'plaintext',
+  dockerfile: 'dockerfile',
+  license: 'plaintext',
+  makefile: 'makefile',
+  readme: 'markdown',
+}
 
 function extensionFromFilename(filename: string): string {
   const extension = filename.split('.').pop()?.toLowerCase()
@@ -85,8 +102,23 @@ function extensionFromFilename(filename: string): string {
   return extension && extension !== filename.toLowerCase() ? extension : ''
 }
 
+function baseNameFromFilename(filename: string): string {
+  return filename.split(/[\\/]/).pop()?.toLowerCase() ?? ''
+}
+
 function inferArtifactFileInfo(filename: string): ArtifactFileInfo {
   const extension = extensionFromFilename(filename)
+  const filenameLanguage = textFilenameLanguages[baseNameFromFilename(filename)]
+
+  if (filenameLanguage !== undefined) {
+    return {
+      category: filenameLanguage === 'markdown' ? 'markdown' : 'text',
+      label: filenameLanguage === 'markdown' ? 'Markdown' : 'File',
+      language: filenameLanguage,
+      canEdit: true,
+      canPreview: filenameLanguage === 'markdown',
+    }
+  }
 
   switch (extension) {
     case 'html':

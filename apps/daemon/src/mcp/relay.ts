@@ -67,6 +67,7 @@ interface AgentHubMcpSession {
     deployment: AgentRunStaticSiteDeploy,
   ): Promise<AgentHubDeployStaticSiteToolResult>;
   onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
+  memoryWorkspacePath?: string;
   runId: RunId;
   workspacePath: string;
 }
@@ -162,6 +163,7 @@ export class AgentHubMcpRelay {
       deployment: AgentRunStaticSiteDeploy,
     ): Promise<AgentHubDeployStaticSiteToolResult>;
     onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
+    memoryWorkspacePath?: string;
     runId: RunId;
     workspacePath: string;
   }): AgentHubMcpSessionHandle {
@@ -173,6 +175,7 @@ export class AgentHubMcpRelay {
       onArtifactUpload: input.onArtifactUpload,
       onStaticSiteDeploy: input.onStaticSiteDeploy,
       onToolCall: input.onToolCall,
+      memoryWorkspacePath: input.memoryWorkspacePath,
       runId: input.runId,
       workspacePath: input.workspacePath,
     });
@@ -322,7 +325,7 @@ export class AgentHubMcpRelay {
 
       if (toolName === "append_memory") {
         const result = await appendMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubAppendMemoryToolInput,
         );
         void Promise.resolve()
@@ -365,7 +368,7 @@ export class AgentHubMcpRelay {
 
       if (toolName === "search_memory") {
         const result = await searchMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubSearchMemoryToolInput,
         );
         void Promise.resolve()
@@ -385,7 +388,7 @@ export class AgentHubMcpRelay {
 
       if (toolName === "read_memory") {
         const result = await readMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubReadMemoryToolInput,
         );
         void Promise.resolve()
@@ -452,6 +455,22 @@ function readToolInput(
 
   if (toolName === "list_goals") {
     return readListGoalsInput(input);
+  }
+
+  if (toolName === "list_project_changes") {
+    return readListProjectChangesInput(input);
+  }
+
+  if (toolName === "read_project_change") {
+    return readProjectChangeInput(input);
+  }
+
+  if (toolName === "merge_project_change") {
+    return readProjectChangeInput(input, "message");
+  }
+
+  if (toolName === "reject_project_change") {
+    return readProjectChangeInput(input, "reason");
   }
 
   if (toolName === "list_group_messages") {
@@ -636,6 +655,53 @@ function readListGoalsInput(input: unknown): AgentHubListGoalsToolInput | null {
   return typeof status === "string" && status.length > 0
     ? { status: status as AgentHubListGoalsToolInput["status"] }
     : {};
+}
+
+function readListProjectChangesInput(input: unknown): AgentHubMcpToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const status = (input as Record<string, unknown>).status;
+
+  if (
+    status !== undefined &&
+    status !== "open" &&
+    status !== "merged" &&
+    status !== "rejected" &&
+    status !== "failed"
+  ) {
+    return null;
+  }
+
+  return status === undefined ? {} : { status };
+}
+
+function readProjectChangeInput(
+  input: unknown,
+  optionalTextField?: "message" | "reason",
+): AgentHubMcpToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const changeId = record.changeId;
+
+  if (typeof changeId !== "string" || changeId.trim().length === 0) {
+    return null;
+  }
+
+  const result: Record<string, string> = { changeId: changeId.trim() };
+  if (
+    optionalTextField !== undefined &&
+    typeof record[optionalTextField] === "string" &&
+    record[optionalTextField].trim().length > 0
+  ) {
+    result[optionalTextField] = record[optionalTextField].trim();
+  }
+
+  return result as AgentHubMcpToolInput;
 }
 
 function readListGroupMessagesInput(input: unknown): AgentHubListGroupMessagesToolInput | null {

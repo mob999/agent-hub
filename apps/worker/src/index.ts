@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 
+import { randomUUID } from "node:crypto";
+
 import { loadWorkerEnv } from "@agent-hub/config";
 import type {
   AgentHubMcpToolName,
@@ -13,6 +15,7 @@ import {
   ackAgentProvisioningQueueMessage,
   ackArtifactActionQueueMessage,
   ackMemoryAppendQueueMessage,
+  ackProjectCloneQueueMessage,
   ackRunQueueMessage,
   appendRunEvent,
   completeConversationArtifactAction,
@@ -26,20 +29,27 @@ import {
   ensureAgentProvisioningQueueGroup,
   ensureArtifactActionQueueGroup,
   ensureMemoryAppendQueueGroup,
+  ensureProjectCloneQueueGroup,
   ensureRunQueueGroup,
   getArtifactActionAssignment,
+  getConversationForUser,
   getRunById,
   markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
+  markProjectCloneFailed,
+  markProjectCloneReady,
+  persistProjectChange,
   persistConversationArtifactUpload,
   persistStaticSiteDeployment,
   publishRealtimeEvent,
   readAgentProvisioningQueueMessages,
   readArtifactActionQueueMessages,
   readMemoryAppendQueueMessages,
+  readProjectCloneQueueMessages,
   readRunQueueMessages,
   setDaemonRuntimesStatus,
+  updateProjectChangeStatus,
   upsertDaemonRuntime,
   upsertDaemonDevice,
 } from "@agent-hub/server";
@@ -55,6 +65,22 @@ const logger = createLogger({
     service: "worker",
   },
 });
+
+async function publishConversationUpdated(input: {
+  conversationId: string;
+  ownerUserId: string;
+}): Promise<void> {
+  const conversation = await getConversationForUser(db, input);
+
+  await publishRealtimeEvents([
+    createRealtimeEvent({
+      conversation: conversation ?? undefined,
+      conversationId: input.conversationId,
+      ownerUserId: input.ownerUserId,
+      type: "conversation.updated",
+    }),
+  ]);
+}
 
 async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
   await Promise.all(
@@ -81,6 +107,30 @@ async function processRunAppendResult(
   await publishRealtimeEvents(result.realtimeEvents);
   await Promise.all(result.dispatchJobs.map((job) => enqueueRunJob(redis, job)));
   await Promise.all(result.memoryAppendJobs.map((job) => enqueueMemoryAppendJob(redis, job)));
+  await Promise.all(
+    result.projectMergeRequests.map(async (request) => {
+      const assigned = gateway.assignProjectChangeMerge({
+        type: "project.change.merge",
+        requestId: randomUUID(),
+        changeId: request.changeId,
+        baseRepoPath: request.baseRepoPath,
+        branchName: request.branchName,
+        daemonDeviceId: request.daemonDeviceId,
+        message: request.message,
+        sentAt: new Date().toISOString(),
+      });
+
+      if (assigned) {
+        return;
+      }
+
+      await updateProjectChangeStatus(db, {
+        changeId: request.changeId,
+        status: "failed",
+        summary: "Project change merge failed because the target daemon is offline.",
+      });
+    }),
+  );
 }
 
 async function appendAgentHubToolResultEvent(input: {
@@ -283,6 +333,102 @@ const gateway = new DaemonGateway({
       "Memory append rejected by daemon",
     );
   },
+  onProjectCloneCompleted: async (message) => {
+    const result = await markProjectCloneReady(db, {
+      conversationId: message.conversationId,
+      baseRepoPath: message.baseRepoPath,
+      defaultBranch: message.defaultBranch,
+      baseHead: message.baseHead,
+    });
+    if (result.status === "updated") {
+      await publishConversationUpdated({
+        conversationId: result.project.conversationId,
+        ownerUserId: result.project.ownerUserId,
+      });
+    }
+    logger.info(
+      {
+        baseRepoPath: message.baseRepoPath,
+        conversationId: message.conversationId,
+      },
+      "Project clone completed",
+    );
+  },
+  onProjectCloneFailed: async (message) => {
+    const result = await markProjectCloneFailed(db, {
+      conversationId: message.conversationId,
+      error: message.reason,
+    });
+    if (result.status === "updated") {
+      await publishConversationUpdated({
+        conversationId: result.project.conversationId,
+        ownerUserId: result.project.ownerUserId,
+      });
+    }
+    logger.warn(
+      {
+        conversationId: message.conversationId,
+        reason: message.reason,
+      },
+      "Project clone failed",
+    );
+  },
+  onProjectChangeCreated: async (message) => {
+    const change = await persistProjectChange(db, {
+      change: message.change,
+      diff: message.diff,
+    });
+    await publishRealtimeEvents([
+      createRealtimeEvent({
+        conversationId: change.conversationId,
+        ownerUserId: change.ownerUserId,
+        type: "conversation.updated",
+      }),
+    ]);
+    logger.info(
+      {
+        changeId: message.change.id,
+        conversationId: message.change.conversationId,
+      },
+      "Project change created",
+    );
+  },
+  onProjectChangeMergeAck: async (message) => {
+    const change = await updateProjectChangeStatus(db, {
+      changeId: message.changeId,
+      status: "merged",
+    });
+    if (change !== null) {
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          conversationId: change.conversationId,
+          ownerUserId: change.ownerUserId,
+          type: "conversation.updated",
+        }),
+      ]);
+    }
+    logger.info({ changeId: message.changeId }, "Project change merge acked");
+  },
+  onProjectChangeMergeRejected: async (message) => {
+    const change = await updateProjectChangeStatus(db, {
+      changeId: message.changeId,
+      status: "failed",
+      summary: message.reason,
+    });
+    if (change !== null) {
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          conversationId: change.conversationId,
+          ownerUserId: change.ownerUserId,
+          type: "conversation.updated",
+        }),
+      ]);
+    }
+    logger.warn(
+      { changeId: message.changeId, reason: message.reason },
+      "Project change merge rejected",
+    );
+  },
 });
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
@@ -306,6 +452,7 @@ await ensureRunQueueGroup(redis);
 await ensureAgentProvisioningQueueGroup(redis);
 await ensureArtifactActionQueueGroup(redis);
 await ensureMemoryAppendQueueGroup(redis);
+await ensureProjectCloneQueueGroup(redis);
 await new Promise<void>((resolve) => {
   server.listen(env.WORKER_PORT, resolve);
 });
@@ -373,6 +520,48 @@ while (!shuttingDown) {
     }
 
     await ackAgentProvisioningQueueMessage(redis, message.id);
+  }
+
+  const projectCloneMessages = await readProjectCloneQueueMessages(
+    redis,
+    env.AGENTHUB_WORKER_CONSUMER_NAME,
+    {
+      count: 5,
+      blockMs: 500,
+    },
+  );
+
+  for (const message of projectCloneMessages) {
+    const assigned = gateway.assignProjectClone({
+      type: "project.clone",
+      requestId: message.id,
+      conversationId: message.job.conversationId,
+      daemonDeviceId: message.job.daemonDeviceId,
+      remoteUrl: message.job.remoteUrl,
+      sentAt: new Date().toISOString(),
+    });
+
+    if (!assigned) {
+      const result = await markProjectCloneFailed(db, {
+        conversationId: message.job.conversationId,
+        error: `Daemon ${message.job.daemonDeviceId} is not connected.`,
+      });
+      if (result.status === "updated") {
+        await publishConversationUpdated({
+          conversationId: result.project.conversationId,
+          ownerUserId: result.project.ownerUserId,
+        });
+      }
+      logger.warn(
+        {
+          conversationId: message.job.conversationId,
+          daemonDeviceId: message.job.daemonDeviceId,
+        },
+        "Failed to assign project clone because daemon is offline",
+      );
+    }
+
+    await ackProjectCloneQueueMessage(redis, message.id);
   }
 
   const messages = await readRunQueueMessages(

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { loadDaemonEnv } from "@agent-hub/config";
 import type {
@@ -14,6 +16,7 @@ import type {
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
   AgentRunStaticSiteDeploy,
+  ConversationProjectChange,
   RunId,
 } from "@agent-hub/core";
 import { createLogger } from "@agent-hub/server";
@@ -70,6 +73,7 @@ const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
 const mcpToolCallTimeoutMs = 30_000;
 const runPreemptTimeoutMs = 10_000;
+const execFileAsync = promisify(execFile);
 
 type RunAbortReason = "cancelled" | "interrupted";
 interface ActiveRun {
@@ -112,6 +116,204 @@ async function handleArtifactAction(input: {
   }
 
   throw new Error(`Unsupported artifact action: ${message.actionType}`);
+}
+
+async function git(
+  args: string[],
+  options: { cwd?: string; maxBuffer?: number } = {},
+): Promise<string> {
+  const result = await execFileAsync("git", args, {
+    cwd: options.cwd,
+    maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024,
+  });
+
+  return result.stdout.trim();
+}
+
+function getProjectRootPath(
+  env: ReturnType<typeof loadDaemonEnv>,
+  conversationId: string,
+): string {
+  return path.join(env.AGENTHUB_WORKSPACE_ROOT, "projects", conversationId);
+}
+
+async function handleProjectClone(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "project.clone" }>;
+}): Promise<{
+  baseHead?: string;
+  baseRepoPath: string;
+  defaultBranch?: string;
+}> {
+  const projectRootPath = getProjectRootPath(input.env, input.message.conversationId);
+  const baseRepoPath = path.join(projectRootPath, "base");
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRootPath);
+  await mkdir(projectRootPath, { recursive: true });
+  await rm(baseRepoPath, { force: true, recursive: true });
+  await git(["clone", input.message.remoteUrl, baseRepoPath], {
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  const defaultBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: baseRepoPath,
+  }).catch(() => undefined);
+  const baseHead = await git(["rev-parse", "HEAD"], {
+    cwd: baseRepoPath,
+  }).catch(() => undefined);
+
+  return { baseHead, baseRepoPath, defaultBranch };
+}
+
+async function prepareProjectWorktree(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "run.assigned" }>;
+}): Promise<void> {
+  const projectRun = input.message.projectRun;
+
+  if (projectRun === undefined) {
+    return;
+  }
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRun.baseRepoPath);
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.workspacePath);
+  await mkdir(path.dirname(input.message.workspacePath), { recursive: true });
+  await rm(input.message.workspacePath, { force: true, recursive: true });
+  await git(
+    [
+      "worktree",
+      "add",
+      "-B",
+      projectRun.branchName,
+      input.message.workspacePath,
+      "HEAD",
+    ],
+    {
+      cwd: projectRun.baseRepoPath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+}
+
+async function createProjectChangeIfNeeded(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "run.assigned" }>;
+  logger: ReturnType<typeof createLogger>;
+}): Promise<{ change: ConversationProjectChange; diff: string } | null> {
+  const projectRun = input.message.projectRun;
+
+  if (projectRun === undefined) {
+    return null;
+  }
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRun.baseRepoPath);
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.workspacePath);
+
+  const status = await git(["status", "--porcelain"], {
+    cwd: input.message.workspacePath,
+  });
+
+  if (status.length === 0) {
+    return null;
+  }
+
+  const baseCommit = await git(["rev-parse", "HEAD"], {
+    cwd: projectRun.baseRepoPath,
+  }).catch(() => undefined);
+  await git(["add", "-A"], { cwd: input.message.workspacePath });
+  await git(
+    [
+      "-c",
+      "user.name=AgentHub",
+      "-c",
+      "user.email=agenthub@example.local",
+      "commit",
+      "-m",
+      `AgentHub run ${input.message.run.id.slice(0, 8)}`,
+    ],
+    {
+      cwd: input.message.workspacePath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+  const headCommit = await git(["rev-parse", "HEAD"], {
+    cwd: input.message.workspacePath,
+  }).catch(() => undefined);
+  const diffStat = baseCommit === undefined
+    ? undefined
+    : await git(["diff", "--stat", baseCommit, "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => undefined);
+  const diff = baseCommit === undefined
+    ? await git(["show", "--format=", "--no-ext-diff", "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => "")
+    : await git(["diff", "--no-ext-diff", baseCommit, "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => "");
+
+  input.logger.info(
+    {
+      branchName: projectRun.branchName,
+      runId: input.message.run.id,
+    },
+    "Created project change commit",
+  );
+
+  const now = nowIsoDateTime();
+  return {
+    change: {
+      id: randomUUID(),
+      ownerUserId: projectRun.ownerUserId,
+      conversationId: projectRun.conversationId,
+      goalId: undefined,
+      taskIndex: undefined,
+      agentId: input.message.run.agentId,
+      runId: input.message.run.id,
+      branchName: projectRun.branchName,
+      worktreePath: input.message.workspacePath,
+      baseCommit,
+      headCommit,
+      status: "open",
+      summary: `Changes from run ${input.message.run.id.slice(0, 8)}`,
+      diffStat,
+      createdAt: now,
+      updatedAt: now,
+    },
+    diff,
+  };
+}
+
+async function handleProjectChangeMerge(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "project.change.merge" }>;
+}): Promise<void> {
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.baseRepoPath);
+
+  await git(["fetch", "--all", "--prune"], {
+    cwd: input.message.baseRepoPath,
+    maxBuffer: 20 * 1024 * 1024,
+  }).catch(() => "");
+  await git(
+    [
+      "-c",
+      "user.name=AgentHub",
+      "-c",
+      "user.email=agenthub@example.local",
+      "merge",
+      "--no-ff",
+      input.message.branchName,
+      "-m",
+      input.message.message?.trim() || `Merge ${input.message.branchName}`,
+    ],
+    {
+      cwd: input.message.baseRepoPath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
 }
 
 export async function startDaemon(): Promise<void> {
@@ -311,6 +513,79 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
+    if (message.type === "project.clone") {
+      void (async () => {
+        try {
+          const result = await handleProjectClone({ env, message });
+          send(ws, {
+            type: "project.clone.completed",
+            requestId: message.requestId,
+            conversationId: message.conversationId,
+            baseRepoPath: result.baseRepoPath,
+            defaultBranch: result.defaultBranch,
+            baseHead: result.baseHead,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.info(
+            {
+              baseRepoPath: result.baseRepoPath,
+              conversationId: message.conversationId,
+            },
+            "Project cloned",
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          send(ws, {
+            type: "project.clone.failed",
+            requestId: message.requestId,
+            conversationId: message.conversationId,
+            reason,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, conversationId: message.conversationId },
+            "Project clone failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.change.merge") {
+      void (async () => {
+        try {
+          await handleProjectChangeMerge({ env, message });
+          send(ws, {
+            type: "project.change.merge.ack",
+            requestId: message.requestId,
+            changeId: message.changeId,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.info(
+            {
+              branchName: message.branchName,
+              changeId: message.changeId,
+            },
+            "Project change merged",
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          send(ws, {
+            type: "project.change.merge.rejected",
+            requestId: message.requestId,
+            changeId: message.changeId,
+            reason,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, changeId: message.changeId },
+            "Project change merge failed",
+          );
+        }
+      })();
+      return;
+    }
+
     if (message.type === "agent.create") {
       void (async () => {
         try {
@@ -399,6 +674,7 @@ export async function startDaemon(): Promise<void> {
           env.AGENTHUB_WORKSPACE_ROOT,
           message.workspacePath,
         );
+        await prepareProjectWorktree({ env, message });
       } catch (error) {
         send(ws, {
           type: "run.rejected",
@@ -554,6 +830,7 @@ export async function startDaemon(): Promise<void> {
       };
 
       void (async () => {
+        let completedStatus: string | undefined;
         try {
           for await (const event of adapter.run({
             run: message.run,
@@ -561,6 +838,7 @@ export async function startDaemon(): Promise<void> {
             contextCompression: message.contextCompression,
             agentInstructions: message.agentInstructions,
             workspacePath: message.workspacePath,
+            memoryWorkspacePath: message.memoryWorkspacePath,
             runtime: message.runtime,
             agentHubMcpTools: message.agentHubMcpTools,
             agentHubMcpGoals: message.agentHubMcpGoals,
@@ -569,6 +847,9 @@ export async function startDaemon(): Promise<void> {
             callAgentHubMcpTool,
             abortSignal: abortController.signal,
           })) {
+            if (event.type === "run.completed") {
+              completedStatus = event.status;
+            }
             send(ws, {
               type: "run.event",
               runId: message.run.id,
@@ -590,7 +871,32 @@ export async function startDaemon(): Promise<void> {
             },
             sentAt: nowIsoDateTime(),
           });
+          completedStatus = "failed";
         } finally {
+          if (completedStatus === "succeeded") {
+            try {
+              const change = await createProjectChangeIfNeeded({
+                env,
+                logger,
+                message,
+              });
+
+              if (change !== null) {
+                send(ws, {
+                  type: "project.change.created",
+                  requestId: randomUUID(),
+                  change: change.change,
+                  diff: change.diff,
+                  sentAt: nowIsoDateTime(),
+                });
+              }
+            } catch (error) {
+              logger.error(
+                { err: error, runId: message.run.id },
+                "Failed to create project change after run",
+              );
+            }
+          }
           activeRun.resolveDone();
           activeRuns.delete(message.run.id);
           logger.info({ runId: message.run.id }, "Daemon run finished");

@@ -42,6 +42,7 @@ export const runs = pgTable(
     dispatchMode: varchar("dispatch_mode", { length: 16 }).notNull().default("new"),
     prompt: text("prompt").notNull(),
     workspacePath: text("workspace_path").notNull(),
+    memoryWorkspacePath: text("memory_workspace_path"),
     runtime: jsonb("runtime").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

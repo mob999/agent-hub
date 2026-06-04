@@ -1,13 +1,15 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
+import { getProjectIcon } from '../lib/projectIcon'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
+import { ProjectWorkspace } from './ProjectWorkspace'
 
 const inlineLink =
   'cursor-pointer border-0 bg-transparent p-0 font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
@@ -321,7 +323,10 @@ export function ChannelWorkspace({
   deploymentRouteActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
-  const [workspacePanel, setWorkspacePanel] = useState<{ conversationId: string; view: 'tasks' | 'deployments' } | null>(null)
+  const [workspacePanel, setWorkspacePanel] = useState<{
+    conversationId: string
+    view: 'tasks' | 'deployments' | 'project'
+  } | null>(null)
   const [taskAggregationMode, setTaskAggregationMode] = useState<TaskAggregationMode>('goal')
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -373,24 +378,27 @@ export function ChannelWorkspace({
   const focusedGoalId = focusedGoalRoute?.goalId ?? null
   const focusedGoalTaskIndex = focusedGoalRoute?.taskIndex ?? null
   const isAgentDirectMessage = activeConversation?.type === 'direct'
+  const isProjectConversation = activeConversation?.type === 'project'
+  const isMemberConversation =
+    activeConversation?.type === 'group' || activeConversation?.type === 'project'
   const selectedAgent = isAgentDirectMessage
     ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
     : null
-  const groupAgentIds = activeConversation?.type === 'group'
+  const memberAgentIds = isMemberConversation
     ? activeConversation.agentIds ?? []
     : []
-  const readyGroupAgentCount =
-    activeConversation?.type !== 'group'
+  const readyMemberAgentCount =
+    !isMemberConversation
       ? 0
       : activeConversation.key === 'all'
         ? readyAgentCount
         : agents.filter(
             (agent) =>
-              groupAgentIds.includes(agent.agent.id) &&
+              memberAgentIds.includes(agent.agent.id) &&
               isAgentReady(agent),
           ).length
   const mentionableAgents = useMemo(() => {
-    if (activeConversation?.type !== 'group') {
+    if (activeConversation?.type !== 'group' && activeConversation?.type !== 'project') {
       return []
     }
 
@@ -436,7 +444,8 @@ export function ChannelWorkspace({
   const activeMentionSuggestion = mentionSuggestions[normalizedMentionIndex] ?? null
   const selectedAgentReady = isAgentDirectMessage
     ? selectedAgent !== null && isAgentReady(selectedAgent)
-    : hasSelectedConversation && readyGroupAgentCount > 0
+    : hasSelectedConversation &&
+      readyMemberAgentCount > 0
   const visiblePendingAttachments =
     pendingAttachmentConversationId === activeConversation?.id
       ? pendingAttachments
@@ -452,14 +461,16 @@ export function ChannelWorkspace({
       ? selectedAgent?.agent.name ?? activeConversation.title
       : activeConversation.title
   const chatDisplayName =
-    hasSelectedConversation && !isAgentDirectMessage ? `#${activeConversation.title}` : chatTitle
+    hasSelectedConversation && activeConversation.type === 'group' ? `#${activeConversation.title}` : chatTitle
   const chatDescription = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
-      : activeConversation.key === 'all'
-        ? 'General channel for members and agent runs'
-        : activeConversation.description?.trim() || 'Group channel for selected agents'
+      : activeConversation.type === 'project'
+        ? activeConversation.description?.trim() || activeConversation.project?.remoteUrl || 'Project conversation'
+        : activeConversation.key === 'all'
+          ? 'General channel for members and agent runs'
+          : activeConversation.description?.trim() || 'Group channel for selected agents'
   const emptyTitle = !hasSelectedConversation
     ? 'No conversation selected'
     : isAgentDirectMessage
@@ -479,17 +490,19 @@ export function ChannelWorkspace({
       ? selectedAgentReady && selectedAgent
         ? `Message ${selectedAgent.agent.name} to start a private run.`
         : 'This agent is not ready to receive messages yet.'
-      : readyGroupAgentCount > 0
-        ? `Message ${chatDisplayName} to start a group run.`
+      : readyMemberAgentCount > 0
+        ? `Message ${chatDisplayName} to start a run.`
         : (
             <>
               First, {createAgentLink}; then message #all to start a run.
             </>
           )
-  const warningTitle = isAgentDirectMessage ? 'Agent is not ready' : 'No ready agent available'
+  const warningTitle = isAgentDirectMessage
+    ? 'Agent is not ready'
+    : 'No ready agent available'
   const warningSubtitle = isAgentDirectMessage
     ? 'Wait for provisioning to finish, or choose another ready agent.'
-    : 'Choose a group with a ready agent before sending a message.'
+    : 'Choose a conversation with a ready agent before sending a message.'
   const composerPlaceholder = !hasSelectedConversation
     ? 'Select a conversation first'
     : selectedAgentReady
@@ -503,7 +516,12 @@ export function ChannelWorkspace({
     ? 'Chat'
     : isAgentDirectMessage
       ? `Private chat ${chatTitle}`
-      : `Group ${chatDisplayName}`
+      : isProjectConversation
+        ? `Project ${chatDisplayName}`
+        : `Group ${chatDisplayName}`
+  const projectIcon = isProjectConversation && activeConversation !== null
+    ? getProjectIcon(activeConversation)
+    : null
   const isAgentTyping =
     isAgentDirectMessage &&
     messages.some(
@@ -695,7 +713,13 @@ export function ChannelWorkspace({
     !showFiles &&
     workspacePanel?.conversationId === activeConversation?.id &&
     workspacePanel?.view === 'deployments'
-  const showWorkspacePage = (showTasks || showFiles || showDeployments) && canOpenWorkspacePanel
+  const showProjectWorkspace =
+    !showFiles &&
+    workspacePanel?.conversationId === activeConversation?.id &&
+    workspacePanel?.view === 'project'
+  const showWorkspacePage =
+    (showTasks || showFiles || showDeployments || showProjectWorkspace) &&
+    canOpenWorkspacePanel
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -1176,6 +1200,7 @@ export function ChannelWorkspace({
         <div className="flex min-w-0 items-center gap-3">
           <span
             className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
+            style={projectIcon?.style}
             aria-hidden="true"
           >
             {!hasSelectedConversation ? (
@@ -1191,7 +1216,7 @@ export function ChannelWorkspace({
                 <ChatBot size={20} />
               )
             ) : (
-              '#'
+              projectIcon?.initial ?? '#'
             )}
           </span>
           <div className="grid min-w-0 gap-0.5">
@@ -1236,6 +1261,28 @@ export function ChannelWorkspace({
           >
             <Task size={16} />
           </IconButton>
+          {activeConversation?.type === 'project' && (
+            <IconButton
+              kind={showProjectWorkspace ? 'secondary' : 'ghost'}
+              label="Project"
+              size="md"
+              align="bottom"
+              type="button"
+              disabled={!canOpenWorkspacePanel || activeConversation.project?.cloneStatus !== 'ready'}
+              onClick={() => {
+                if (showProjectWorkspace) {
+                  setWorkspacePanel(null)
+                  closeConversationRoute()
+                  return
+                }
+
+                closeArtifactEditor?.()
+                setWorkspacePanel({ conversationId: activeConversation.id, view: 'project' })
+              }}
+            >
+              <Code size={16} />
+            </IconButton>
+          )}
           <IconButton
             kind={showFiles ? 'secondary' : 'ghost'}
             label="Files"
@@ -1312,7 +1359,9 @@ export function ChannelWorkspace({
       <div
         ref={scrollContainerRef}
         className={`min-h-0 p-4 max-[671px]:p-2 ${showWorkspacePage ? '' : 'bg-white'} ${
-          showFiles || (showWorkspacePage && showTasks && taskAggregationMode === 'status')
+              showFiles ||
+              showProjectWorkspace ||
+              (showWorkspacePage && showTasks && taskAggregationMode === 'status')
             ? 'overflow-hidden'
             : 'overflow-y-auto'
         }`}
@@ -1374,6 +1423,10 @@ export function ChannelWorkspace({
           <div className="grid w-full content-start gap-4">
             {renderDeploymentListView()}
           </div>
+        ) : showWorkspacePage && showProjectWorkspace && activeConversation?.type === 'project' ? (
+          <div className="grid h-full min-h-0 w-full">
+            <ProjectWorkspace agents={agents} conversation={activeConversation} />
+          </div>
         ) : visibleMessages.length === 0 ? (
           <div className="grid min-h-full place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
             <ChatBot size={32} />
@@ -1403,11 +1456,11 @@ export function ChannelWorkspace({
                     : null
               const avatarInitial = displayNameInitial(senderName)
               const senderIsOrchestrator =
-                activeConversation?.type === 'group' &&
+                (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderAgentId !== undefined &&
                 activeConversation.orchestratorAgentId === message.senderAgentId
               const canMentionSender =
-                activeConversation?.type === 'group' &&
+                (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderType === 'agent' &&
                 senderAgent !== null
 
@@ -1585,7 +1638,7 @@ export function ChannelWorkspace({
 
                 const agent = suggestion.agent
                 const agentIsOrchestrator =
-                  activeConversation?.type === 'group' &&
+                  (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                   activeConversation.orchestratorAgentId === agent.agent.id
 
                 return (

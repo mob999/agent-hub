@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { serve } from "@hono/node-server";
@@ -141,6 +142,46 @@ const orchestratorParallelSerialTaskInstructions = [
 ];
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const daemonDeviceIdPattern = /^[A-Za-z0-9_.:-]{1,120}$/;
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
+
+function powerShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function posixShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function buildDaemonSourceCommand(input: {
+  deviceId: string;
+  gatewayUrl: string;
+  token: string;
+  platform: "windows" | "posix";
+}): string {
+  if (input.platform === "posix") {
+    return [
+      `cd ${posixShellQuote(repositoryRoot)}`,
+      [
+        `AGENTHUB_DAEMON_GATEWAY_URL=${posixShellQuote(input.gatewayUrl)}`,
+        `AGENTHUB_DAEMON_TOKEN=${posixShellQuote(input.token)}`,
+        `AGENTHUB_DEVICE_ID=${posixShellQuote(input.deviceId)}`,
+        "pnpm --filter @agent-hub/daemon dev",
+      ].join(" "),
+    ].join(" && ");
+  }
+
+  return [
+    `cd ${powerShellQuote(repositoryRoot)}`,
+    `$env:AGENTHUB_DAEMON_GATEWAY_URL=${powerShellQuote(input.gatewayUrl)}`,
+    `$env:AGENTHUB_DAEMON_TOKEN=${powerShellQuote(input.token)}`,
+    `$env:AGENTHUB_DEVICE_ID=${powerShellQuote(input.deviceId)}`,
+    "pnpm --filter @agent-hub/daemon dev",
+  ].join("; ");
+}
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" &&
@@ -1333,6 +1374,43 @@ app.get("/daemon/devices", async (c) => {
       runningRunIds: runningRunIdsByDevice.get(device.id) ?? [],
       runtimes: device.runtimes,
     })),
+  });
+});
+
+app.use("/daemon/registration-command", requireAuth);
+app.post("/daemon/registration-command", (c) => {
+  const platformQuery = c.req.query("platform");
+  const platform = platformQuery === "posix" ? "posix" : "windows";
+  const requestedDeviceId = c.req.query("deviceId")?.trim();
+
+  if (
+    requestedDeviceId !== undefined &&
+    !daemonDeviceIdPattern.test(requestedDeviceId)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_DAEMON_DEVICE_ID",
+          message: "Device id contains unsupported characters.",
+        },
+      },
+      400,
+    );
+  }
+
+  const deviceId = requestedDeviceId ?? `device-${randomUUID().slice(0, 8)}`;
+  const gatewayUrl = env.AGENTHUB_DAEMON_GATEWAY_URL;
+
+  return c.json({
+    command: buildDaemonSourceCommand({
+      deviceId,
+      gatewayUrl,
+      token: env.AGENTHUB_DAEMON_TOKEN,
+      platform,
+    }),
+    deviceId,
+    gatewayUrl,
+    shell: platform === "windows" ? "powershell" : "sh",
   });
 });
 

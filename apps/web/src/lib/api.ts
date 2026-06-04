@@ -54,6 +54,13 @@ export interface DaemonDevice {
   runtimes: DaemonRuntime[]
 }
 
+export interface DaemonRegistrationCommandResponse {
+  command: string
+  deviceId: string
+  gatewayUrl: string
+  shell: 'powershell' | 'sh' | string
+}
+
 export interface Agent {
   id: string
   ownerUserId: string

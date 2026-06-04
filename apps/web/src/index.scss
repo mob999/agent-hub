@@ -160,3 +160,27 @@ textarea {
   border: 1px solid var(--cds-border-subtle-01);
   padding: 0.375rem 0.5rem;
 }
+
+.agenthub-command-markdown {
+  color: var(--cds-text-primary);
+}
+
+.agenthub-command-markdown :where(p, pre) {
+  margin: 0;
+}
+
+.agenthub-command-markdown pre {
+  max-height: 14rem;
+  overflow: auto;
+  border-radius: 0.75rem;
+  background: #161616;
+  color: #f4f4f4;
+  padding: 0.875rem;
+}
+
+.agenthub-command-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}

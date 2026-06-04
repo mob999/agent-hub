@@ -1,8 +1,11 @@
-import { InlineNotification } from '@carbon/react'
-import { Add, Devices } from '@carbon/react/icons'
+import { InlineNotification, Modal } from '@carbon/react'
+import { Add, Checkmark, Copy, Devices } from '@carbon/react/icons'
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { MarkdownCodeBlock } from '../components/MarkdownCodeBlock'
 import { WorkspacePanel } from '../components/WorkspacePanel'
-import type { DaemonDevice, DaemonRuntime, DeviceStatus, RuntimeKind } from '../lib/api'
+import { apiRequest, type DaemonDevice, type DaemonRegistrationCommandResponse, type DaemonRuntime, type DeviceStatus, type RuntimeKind } from '../lib/api'
 import { formatTime } from '../lib/format'
 
 interface DaemonPageProps {
@@ -10,10 +13,71 @@ interface DaemonPageProps {
   deviceError: string | null
 }
 
+function detectDaemonCommandPlatform(): 'windows' | 'posix' {
+  if (typeof navigator === 'undefined') {
+    return 'posix'
+  }
+
+  return /Win/i.test(navigator.platform) ? 'windows' : 'posix'
+}
+
 export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
+  const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [registrationCommand, setRegistrationCommand] = useState<DaemonRegistrationCommandResponse | null>(null)
+  const [registrationError, setRegistrationError] = useState<string | null>(null)
+  const [registrationLoading, setRegistrationLoading] = useState(false)
+  const [commandCopied, setCommandCopied] = useState(false)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
+  const registeredDevice = registrationCommand
+    ? devices.find((device) => device.id === registrationCommand.deviceId)
+    : null
+  const registrationConnected = registeredDevice?.status === 'online'
+
+  const loadRegistrationCommand = async () => {
+    setRegistrationLoading(true)
+    setRegistrationError(null)
+    setRegistrationCommand(null)
+    setCommandCopied(false)
+
+    try {
+      const params = new URLSearchParams({ platform: detectDaemonCommandPlatform() })
+      const response = await apiRequest<DaemonRegistrationCommandResponse>(
+        `/daemon/registration-command?${params.toString()}`,
+        {
+          method: 'POST',
+        },
+      )
+      setRegistrationCommand(response)
+    } catch (error) {
+      setRegistrationError(error instanceof Error ? error.message : 'Unable to generate daemon command.')
+    } finally {
+      setRegistrationLoading(false)
+    }
+  }
+
+  const openRegistrationModal = () => {
+    setRegistrationOpen(true)
+    void loadRegistrationCommand()
+  }
+
+  const closeRegistrationModal = () => {
+    setRegistrationOpen(false)
+  }
+
+  const copyRegistrationCommand = async () => {
+    if (!registrationCommand?.command) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(registrationCommand.command)
+      setCommandCopied(true)
+    } catch {
+      setRegistrationError('Copy failed. Select the command and copy it manually.')
+    }
+  }
 
   return (
     <section
@@ -31,6 +95,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
             className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label="Add daemon"
+            onClick={openRegistrationModal}
           >
             <Add size={16} />
           </button>
@@ -157,6 +222,73 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
           )}
         </section>
       </WorkspacePanel>
+
+      <Modal
+        open={registrationOpen}
+        modalHeading="Connect daemon"
+        passiveModal
+        onRequestClose={closeRegistrationModal}
+      >
+        <div className="grid gap-3">
+          {registrationError && (
+            <InlineNotification
+              kind="error"
+              title="Command was not generated"
+              subtitle={registrationError}
+              lowContrast
+              hideCloseButton
+            />
+          )}
+
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+            <div className="min-w-0">
+              <div className="agenthub-command-markdown">
+                <ReactMarkdown
+                  components={{
+                    code: MarkdownCodeBlock,
+                  }}
+                  remarkPlugins={[remarkGfm]}
+                >
+                  {registrationCommand
+                    ? `\`\`\`${registrationCommand.shell}\n${registrationCommand.command}\n\`\`\``
+                    : registrationLoading
+                      ? 'Generating command...'
+                      : 'Command unavailable.'}
+                </ReactMarkdown>
+              </div>
+            </div>
+
+            <button
+              className="grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-[#d8dee6] bg-white text-[#596171] shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:border-[#c7d0dc] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              aria-label="Copy daemon command"
+              title={commandCopied ? 'Copied' : 'Copy'}
+              disabled={!registrationCommand?.command}
+              onClick={() => {
+                void copyRegistrationCommand()
+              }}
+            >
+              {commandCopied ? <Checkmark size={16} /> : <Copy size={16} />}
+            </button>
+          </div>
+
+          <p className="text-sm leading-5 text-[#69707d]">Copy and run it in your terminal.</p>
+
+          {registrationCommand && (
+            <InlineNotification
+              kind={registrationConnected ? 'success' : 'warning'}
+              title={registrationConnected ? 'Daemon connected' : 'Waiting for daemon connection'}
+              subtitle={
+                registrationConnected
+                  ? `${registrationCommand.deviceId} is online.`
+                  : `Run the command and wait for ${registrationCommand.deviceId} to connect.`
+              }
+              lowContrast
+              hideCloseButton
+            />
+          )}
+        </div>
+      </Modal>
     </section>
   )
 }

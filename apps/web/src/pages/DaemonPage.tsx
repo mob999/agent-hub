@@ -18,15 +18,15 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
       aria-label="Daemon management"
     >
       <aside
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171] max-[671px]:hidden"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:hidden"
         aria-label="Daemon list"
       >
-        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[#eef0f3] px-4">
-          <h1 className="truncate text-base font-semibold leading-snug text-[#161616]">Daemon</h1>
+        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
+          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">Daemon</h1>
           <button
             className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"

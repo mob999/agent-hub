@@ -1,10 +1,11 @@
-import { InlineNotification, Modal, TextArea, TextInput } from '@carbon/react'
-import { useState } from 'react'
+import { InlineNotification, Modal, Select, SelectItem, TextArea, TextInput } from '@carbon/react'
+import { useMemo, useState } from 'react'
 import { AgentMemberSelector } from './AgentMemberSelector'
-import type { AgentDetails } from '../lib/api'
+import type { AgentDetails, DaemonDevice } from '../lib/api'
 
 interface ProjectCreateModalProps {
   agents: AgentDetails[]
+  devices: DaemonDevice[]
   error: string | null
   isCreating: boolean
   open: boolean
@@ -20,6 +21,7 @@ interface ProjectCreateModalProps {
 
 export function ProjectCreateModal({
   agents,
+  devices,
   error,
   isCreating,
   open,
@@ -31,9 +33,36 @@ export function ProjectCreateModal({
   const [remoteUrl, setRemoteUrl] = useState('')
   const [orchestratorAgentId, setOrchestratorAgentId] = useState('')
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
+  const availableDevices = useMemo(
+    () => devices.filter((device) => device.status === 'online'),
+    [devices],
+  )
+  const initialDaemonDeviceId = availableDevices[0]?.id ?? ''
+  const [daemonDeviceId, setDaemonDeviceId] = useState(initialDaemonDeviceId)
+  const selectedDaemonDeviceId =
+    availableDevices.some((device) => device.id === daemonDeviceId)
+      ? daemonDeviceId
+      : initialDaemonDeviceId
+  const selectedDaemonAgents = useMemo(
+    () =>
+      agents.filter(
+        (agent) =>
+          agent.runtimeBinding.daemonDeviceId === selectedDaemonDeviceId &&
+          agent.runtimeBinding.status === 'ready' &&
+          agent.workspace.status === 'ready',
+      ),
+    [agents, selectedDaemonDeviceId],
+  )
+  const selectedDaemonAgentIds = useMemo(
+    () => new Set(selectedDaemonAgents.map((agent) => agent.agent.id)),
+    [selectedDaemonAgents],
+  )
+  const validSelectedAgentIds = selectedAgentIds.filter((agentId) => selectedDaemonAgentIds.has(agentId))
+  const validOrchestratorAgentId = validSelectedAgentIds.includes(orchestratorAgentId) ? orchestratorAgentId : ''
   const canCreate =
     remoteUrl.trim().length > 0 &&
-    selectedAgentIds.length > 0 &&
+    selectedDaemonDeviceId.length > 0 &&
+    validSelectedAgentIds.length > 0 &&
     !isCreating
 
   const toggleAgent = (agentId: string, checked: boolean) => {
@@ -74,8 +103,8 @@ export function ProjectCreateModal({
           title: title.trim() || undefined,
           description: description.trim() || undefined,
           remoteUrl: remoteUrl.trim(),
-          agentIds: selectedAgentIds,
-          orchestratorAgentId: orchestratorAgentId || undefined,
+          agentIds: validSelectedAgentIds,
+          orchestratorAgentId: validOrchestratorAgentId || undefined,
         })
       }}
     >
@@ -89,11 +118,20 @@ export function ProjectCreateModal({
             hideCloseButton
           />
         )}
-        {agents.length === 0 && (
+        {availableDevices.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No agents available"
-            subtitle="Create ready agents before creating a project."
+            title="No daemon available"
+            subtitle="Connect an online daemon before creating a project."
+            lowContrast
+            hideCloseButton
+          />
+        )}
+        {availableDevices.length > 0 && selectedDaemonAgents.length === 0 && (
+          <InlineNotification
+            kind="warning"
+            title="No ready agents on this daemon"
+            subtitle="Select a daemon with ready agents, or create one on this daemon first."
             lowContrast
             hideCloseButton
           />
@@ -123,13 +161,32 @@ export function ProjectCreateModal({
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
         />
+        <Select
+          id="project-daemon"
+          labelText="Daemon"
+          value={selectedDaemonDeviceId}
+          disabled={isCreating || availableDevices.length === 0}
+          onChange={(event) => {
+            setDaemonDeviceId(event.target.value)
+            setSelectedAgentIds([])
+            setOrchestratorAgentId('')
+          }}
+        >
+          {availableDevices.length === 0 ? (
+            <SelectItem value="" text="No daemon available" />
+          ) : (
+            availableDevices.map((device) => (
+              <SelectItem key={device.id} value={device.id} text={device.id} />
+            ))
+          )}
+        </Select>
         <AgentMemberSelector
-          agents={agents}
-          disabled={isCreating}
-          helpText="Project agents must be ready on the same daemon."
+          agents={selectedDaemonAgents}
+          disabled={isCreating || selectedDaemonDeviceId.length === 0}
+          helpText="Only ready agents on the selected daemon are shown."
           idPrefix="project-agent"
-          orchestratorAgentId={orchestratorAgentId}
-          selectedAgentIds={selectedAgentIds}
+          orchestratorAgentId={validOrchestratorAgentId}
+          selectedAgentIds={validSelectedAgentIds}
           onSelectOrchestrator={selectOrchestrator}
           onToggleAgent={toggleAgent}
         />

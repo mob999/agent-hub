@@ -1,5 +1,5 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, SendAltFilled, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -1193,7 +1193,7 @@ export function ChannelWorkspace({
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[#f7f8fa]"
+      className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[#fafafa]"
       aria-label={chatAriaLabel}
     >
       <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
@@ -1585,7 +1585,7 @@ export function ChannelWorkspace({
 
       {!showWorkspacePage && (
       <Form
-        className="grid gap-2 bg-[#f7f8fa] px-2 pb-2 pt-2 max-[671px]:px-1.5 max-[671px]:pb-2"
+        className="grid gap-2 bg-[#fafafa] px-2 pb-2 pt-2 max-[671px]:px-1.5 max-[671px]:pb-2"
         aria-label="Create run"
         onSubmit={handleSubmit}
       >
@@ -1800,23 +1800,25 @@ export function ChannelWorkspace({
                 })}
               </div>
             )}
-            <div className="ml-auto flex items-center gap-3">
-              <span className="hidden text-xs text-[var(--cds-text-secondary)] sm:inline">
-                Ctrl+Enter
-              </span>
+            <div className="ml-auto flex items-center">
           {isCreatingRun ? (
             <InlineLoading description="Queueing run..." status="active" />
           ) : (
-            <IconButton
+            <button
               type="submit"
-              label="Send"
-              kind="primary"
-              size="md"
-              align="top-end"
+              aria-label="Send"
+              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                canSendMessage
+                  ? 'cursor-pointer border-[#c7d0dc] bg-white text-[#161616] shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-[#b9c3cf] hover:bg-[#eef0f4]'
+                  : 'cursor-not-allowed border-[#eef0f4] bg-[#f7f8fa] text-[#c1c7d0]'
+              }`}
               disabled={!canSendMessage}
             >
-              <SendAltFilled size={18} />
-            </IconButton>
+              <span className="hidden text-xs font-semibold text-current sm:inline">
+                Ctrl + Enter
+              </span>
+              <Return size={16} />
+            </button>
           )}
             </div>
           </div>

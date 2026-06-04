@@ -125,15 +125,15 @@ export function RunsPage({
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
       aria-label="Runs management"
     >
       <aside
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171] max-[671px]:h-auto max-[671px]:max-h-72"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:h-auto max-[671px]:max-h-72"
         aria-label="Run list"
       >
-        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-[#eef0f3] px-4">
-          <h1 className="truncate text-base font-semibold leading-snug text-[#161616]">Runs</h1>
+        <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
+          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">Runs</h1>
           <span className="rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
             {activeRunCount} active
           </span>

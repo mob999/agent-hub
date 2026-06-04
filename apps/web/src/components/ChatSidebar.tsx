@@ -135,11 +135,11 @@ export function ChatSidebar({
 
   return (
     <aside
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#eef0f3] bg-[#f7f8fa] text-[#596171]"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#fafafa] text-[#596171]"
       aria-label="Chat navigation"
     >
-      <header className="flex min-h-16 items-center border-b border-[#eef0f3] px-4">
-        <h2 className="min-w-0 truncate text-base font-semibold text-[#161616]">Chat</h2>
+      <header className="flex min-h-16 items-center px-4">
+        <h2 className="min-w-0 truncate text-lg font-semibold text-[#161616]">Chat</h2>
       </header>
 
       <section className="grid shrink-0 gap-1 px-3 pb-3 pt-2" aria-label="Quick actions">

@@ -1949,8 +1949,8 @@ export function WorkspacePage({
     <main
       className={
         activeView === 'chat'
-          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
-          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
       }
       aria-label="AgentHub workspace"
     >
@@ -2138,6 +2138,7 @@ export function WorkspacePage({
         <ProjectCreateModal
           open={projectModalOpen}
           agents={agents}
+          devices={devices}
           error={projectCreateError}
           isCreating={isCreatingProject}
           onClose={() => setProjectModalOpen(false)}

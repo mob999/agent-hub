@@ -164,8 +164,8 @@ export function RunsPage({
                   <JobRun size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
-                  <strong className="truncate">{runDisplayTitle(localRun)}</strong>
-                  <small className="truncate font-normal text-[#69707d]">
+                  <strong className="truncate leading-6">{runDisplayTitle(localRun)}</strong>
+                  <small className="truncate font-normal leading-5 text-[#69707d]">
                     Run {localRun.run.id.slice(0, 8)} · {formatTime(localRun.run.createdAt)}
                   </small>
                 </span>
@@ -186,7 +186,7 @@ export function RunsPage({
               >
                 <JobRun size={18} />
               </span>
-              <strong className="truncate">
+              <strong className="truncate leading-6">
                 {selectedRunTitle}
               </strong>
             </div>
@@ -205,7 +205,7 @@ export function RunsPage({
                   <JobRun size={28} />
                 </span>
               <div className="min-w-0">
-                <h2 className="truncate text-xl font-semibold leading-snug">
+                <h2 className="truncate text-xl font-semibold leading-7">
                   {selectedRunTitle}
                 </h2>
                 <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">

@@ -46,7 +46,7 @@ const transparentListItem =
   'bg-transparent hover:bg-[#eef0f4] hover:text-[#161616]'
 const selectedListItem =
   'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
-const sectionHeadingText = 'truncate text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[#344054]'
+const sectionHeadingText = 'truncate text-[0.82rem] font-semibold leading-5 tracking-[0.02em] text-[#344054]'
 const sidebarItemLabelClass = (selected: boolean) =>
   `min-w-0 truncate text-base leading-5 ${
     selected ? 'font-semibold text-[#161616]' : 'font-medium text-[#475467]'
@@ -64,7 +64,7 @@ const archivedDeleteButton =
 const archivedConfirmDeleteButton =
   'grid h-7 w-7 place-items-center rounded-lg border border-[var(--cds-support-error)] bg-[var(--cds-support-error)] p-0 text-[var(--cds-text-on-color)] hover:bg-[var(--cds-support-error)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const sidebarSectionToggle =
-  'group inline-grid min-w-0 grid-cols-[4.75rem_1rem] items-center gap-1 rounded-lg border-0 bg-transparent p-0 text-left text-[#8a94a6] hover:text-[#4b5565] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+  'group inline-grid min-w-0 grid-cols-[4.75rem_1rem] items-center gap-1 rounded-lg border-0 bg-transparent py-0.5 pl-0 pr-0 text-left text-[#8a94a6] hover:text-[#4b5565] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const sidebarSectionChevron =
   'grid h-4 w-4 place-items-center text-[#a4acba] transition-colors group-hover:text-[#4b5565]'
 const shortcutBadge =

@@ -1585,7 +1585,7 @@ export function ChannelWorkspace({
 
       {!showWorkspacePage && (
       <Form
-        className="grid gap-2 bg-[#f7f8fa] px-4 pb-4 pt-2 max-[671px]:px-2 max-[671px]:pb-3"
+        className="grid gap-2 bg-[#f7f8fa] px-2 pb-2 pt-2 max-[671px]:px-1.5 max-[671px]:pb-2"
         aria-label="Create run"
         onSubmit={handleSubmit}
       >

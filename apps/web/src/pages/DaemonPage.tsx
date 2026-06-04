@@ -1,5 +1,5 @@
-import { InlineNotification, Modal } from '@carbon/react'
-import { Add, Checkmark, Copy, Devices } from '@carbon/react/icons'
+import { Button, InlineNotification, Modal, TextInput } from '@carbon/react'
+import { Add, Checkmark, Copy, Devices, Renew, TrashCan } from '@carbon/react/icons'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -11,6 +11,7 @@ import { formatTime } from '../lib/format'
 interface DaemonPageProps {
   devices: DaemonDevice[]
   deviceError: string | null
+  onDevicesChanged: () => void
 }
 
 function detectDaemonCommandPlatform(): 'windows' | 'posix' {
@@ -21,35 +22,64 @@ function detectDaemonCommandPlatform(): 'windows' | 'posix' {
   return /Win/i.test(navigator.platform) ? 'windows' : 'posix'
 }
 
-export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
+export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPageProps) {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [registrationMode, setRegistrationMode] = useState<'create' | 'reconnect'>('create')
+  const [registrationName, setRegistrationName] = useState('')
   const [registrationCommand, setRegistrationCommand] = useState<DaemonRegistrationCommandResponse | null>(null)
   const [registrationError, setRegistrationError] = useState<string | null>(null)
   const [registrationLoading, setRegistrationLoading] = useState(false)
   const [commandCopied, setCommandCopied] = useState(false)
+  const [deviceNameDraft, setDeviceNameDraft] = useState<{ deviceId: string | null; value: string }>({
+    deviceId: null,
+    value: '',
+  })
+  const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null)
+  const [deviceSaving, setDeviceSaving] = useState(false)
+  const [deleteConfirming, setDeleteConfirming] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
   const registeredDevice = registrationCommand
     ? devices.find((device) => device.id === registrationCommand.deviceId)
     : null
   const registrationConnected = registeredDevice?.status === 'online'
+  const activeDeviceNameDraft =
+    selectedDevice && deviceNameDraft.deviceId === selectedDevice.id
+      ? deviceNameDraft.value
+      : selectedDevice?.name ?? ''
 
-  const loadRegistrationCommand = async () => {
+  const loadRegistrationCommand = async (input: {
+    deviceId?: string
+    mode: 'create' | 'reconnect'
+    name?: string
+  }) => {
     setRegistrationLoading(true)
     setRegistrationError(null)
     setRegistrationCommand(null)
     setCommandCopied(false)
 
     try {
-      const params = new URLSearchParams({ platform: detectDaemonCommandPlatform() })
-      const response = await apiRequest<DaemonRegistrationCommandResponse>(
-        `/daemon/registration-command?${params.toString()}`,
-        {
-          method: 'POST',
-        },
-      )
+      const platform = detectDaemonCommandPlatform()
+      const response =
+        input.mode === 'reconnect' && input.deviceId
+          ? await apiRequest<DaemonRegistrationCommandResponse>(
+              `/daemon/devices/${encodeURIComponent(input.deviceId)}/reconnect-command`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ platform }),
+              },
+            )
+          : await apiRequest<DaemonRegistrationCommandResponse>('/daemon/devices', {
+              method: 'POST',
+              body: JSON.stringify({ name: input.name, platform }),
+            })
       setRegistrationCommand(response)
+      if (response.device?.id) {
+        setSelectedDeviceId(response.device.id)
+      }
+      onDevicesChanged()
     } catch (error) {
       setRegistrationError(error instanceof Error ? error.message : 'Unable to generate daemon command.')
     } finally {
@@ -58,8 +88,26 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
   }
 
   const openRegistrationModal = () => {
+    setRegistrationMode('create')
+    setRegistrationName('')
     setRegistrationOpen(true)
-    void loadRegistrationCommand()
+    setRegistrationCommand(null)
+    setRegistrationError(null)
+    setCommandCopied(false)
+  }
+
+  const openReconnectModal = () => {
+    if (!selectedDevice) {
+      return
+    }
+
+    setRegistrationMode('reconnect')
+    setRegistrationName(selectedDevice.name)
+    setRegistrationOpen(true)
+    void loadRegistrationCommand({
+      deviceId: selectedDevice.id,
+      mode: 'reconnect',
+    })
   }
 
   const closeRegistrationModal = () => {
@@ -76,6 +124,66 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
       setCommandCopied(true)
     } catch {
       setRegistrationError('Copy failed. Select the command and copy it manually.')
+    }
+  }
+
+  const createNamedDevice = () => {
+    const name = registrationName.trim().replace(/\s+/g, ' ')
+
+    if (name.length === 0 || name.length > 80) {
+      setRegistrationError('Device name must be 1-80 characters.')
+      return
+    }
+
+    void loadRegistrationCommand({ mode: 'create', name })
+  }
+
+  const saveDeviceName = async () => {
+    if (!selectedDevice) {
+      return
+    }
+
+    const name = activeDeviceNameDraft.trim().replace(/\s+/g, ' ')
+
+    if (name.length === 0 || name.length > 80) {
+      setDeviceSaveError('Device name must be 1-80 characters.')
+      return
+    }
+
+    setDeviceSaving(true)
+    setDeviceSaveError(null)
+    try {
+      await apiRequest(`/daemon/devices/${encodeURIComponent(selectedDevice.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      })
+      onDevicesChanged()
+    } catch (error) {
+      setDeviceSaveError(error instanceof Error ? error.message : 'Unable to update device.')
+    } finally {
+      setDeviceSaving(false)
+    }
+  }
+
+  const deleteDevice = async () => {
+    if (!selectedDevice) {
+      return
+    }
+
+    if (!deleteConfirming) {
+      setDeleteConfirming(true)
+      return
+    }
+
+    setDeleteError(null)
+    try {
+      await apiRequest(`/daemon/devices/${encodeURIComponent(selectedDevice.id)}`, {
+        method: 'DELETE',
+      })
+      setSelectedDeviceId(null)
+      onDevicesChanged()
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Unable to delete device.')
     }
   }
 
@@ -114,7 +222,12 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                 }`}
                 key={device.id}
                 type="button"
-                onClick={() => setSelectedDeviceId(device.id)}
+                onClick={() => {
+                  setSelectedDeviceId(device.id)
+                  setDeviceSaveError(null)
+                  setDeleteError(null)
+                  setDeleteConfirming(false)
+                }}
               >
                 <span
                   className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
@@ -123,7 +236,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                   <Devices size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
-                  <strong className="truncate">{device.id}</strong>
+                  <strong className="truncate">{device.name}</strong>
                   <small className="truncate font-normal text-[#69707d]">
                     daemon {device.status}
                   </small>
@@ -145,7 +258,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
               >
                 <Devices size={18} />
               </span>
-              <strong className="truncate">{selectedDevice?.id ?? 'No daemon selected'}</strong>
+              <strong className="truncate">{selectedDevice?.name ?? 'No daemon selected'}</strong>
             </div>
           </header>
 
@@ -173,7 +286,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                   <Devices size={28} />
                 </span>
                 <div className="min-w-0">
-                  <h2 className="truncate text-xl font-semibold leading-snug">{selectedDevice.id}</h2>
+                  <h2 className="truncate text-xl font-semibold leading-snug">{selectedDevice.name}</h2>
                   <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
                     <StatusDot status={selectedDevice.status} />
                     <span>{selectedDevice.status}</span>
@@ -193,7 +306,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                       className="grid grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] gap-4 border-b border-[#eef0f3] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)] max-[760px]:hidden"
                       aria-hidden="true"
                     >
-                      <span>Runtime</span>
+                      <span>Runtimes</span>
                       <span>Version</span>
                       <span>Status</span>
                     </div>
@@ -210,6 +323,102 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
                   </div>
                 )}
               </section>
+
+              <section className="daemon-device-settings border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label="Device settings">
+                <div className="grid max-w-xl gap-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
+                    Settings
+                  </h3>
+                  {deviceSaveError && (
+                    <InlineNotification
+                      kind="error"
+                      title="Device was not updated"
+                      subtitle={deviceSaveError}
+                      lowContrast
+                      hideCloseButton
+                    />
+                  )}
+                  {deleteError && (
+                    <InlineNotification
+                      kind="error"
+                      title="Device was not deleted"
+                      subtitle={deleteError}
+                      lowContrast
+                      hideCloseButton
+                    />
+                  )}
+                  <div className="grid border-t border-[#eef0f3]">
+                    <div className="grid gap-2 border-b border-[#eef0f3] py-3">
+                      <label
+                        className="text-sm font-semibold text-[#161616]"
+                        htmlFor="daemon-device-name"
+                      >
+                        Name
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <TextInput
+                          className="w-56 max-w-[calc(100%-2.5rem)]"
+                          id="daemon-device-name"
+                          labelText=""
+                          hideLabel
+                          size="sm"
+                          value={activeDeviceNameDraft}
+                          maxLength={80}
+                          onChange={(event) =>
+                            setDeviceNameDraft({
+                              deviceId: selectedDevice.id,
+                              value: event.target.value,
+                            })}
+                        />
+                        <button
+                          type="button"
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#bfe8c8] bg-[#eefbf1] text-[#198038] transition hover:border-[#8ed99f] hover:bg-[#ddf7e4] disabled:cursor-not-allowed disabled:border-[#e1e5ea] disabled:bg-[#f4f4f4] disabled:text-[#a2a9b0]"
+                          disabled={deviceSaving || activeDeviceNameDraft.trim().length === 0}
+                          onClick={() => {
+                            void saveDeviceName()
+                          }}
+                          title={deviceSaving ? 'Saving' : 'Save name'}
+                          aria-label={deviceSaving ? 'Saving device name' : 'Save device name'}
+                        >
+                          <Checkmark size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-[#eef0f3] py-3">
+                      <p className="text-sm font-semibold text-[#161616]">Reconnect</p>
+                      <span aria-hidden="true" />
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#f1d27a] bg-[#fff8df] text-[#b28600] transition hover:border-[#d7af2f] hover:bg-[#fff1bf]"
+                        onClick={openReconnectModal}
+                        title="Reconnect"
+                        aria-label="Reconnect daemon device"
+                      >
+                        <Renew size={16} />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 py-3">
+                      <p className="text-sm font-semibold text-[#161616]">
+                        {deleteConfirming ? 'Confirm delete' : 'Delete'}
+                      </p>
+                      <span aria-hidden="true" />
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#ffd7d9] bg-[#fff1f1] text-[#da1e28] transition hover:border-[#ffb3b8] hover:bg-[#ffe0e2]"
+                        onClick={() => {
+                          void deleteDevice()
+                        }}
+                        title={deleteConfirming ? 'Confirm delete' : 'Delete'}
+                        aria-label={deleteConfirming ? 'Confirm delete daemon device' : 'Delete daemon device'}
+                      >
+                        <TrashCan size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </>
           ) : (
             <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 text-center">
@@ -225,11 +434,35 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
 
       <Modal
         open={registrationOpen}
-        modalHeading="Connect daemon"
+        modalHeading={registrationMode === 'create' ? 'Create daemon' : 'Reconnect daemon'}
         passiveModal
         onRequestClose={closeRegistrationModal}
       >
         <div className="grid gap-3">
+          {registrationMode === 'create' && !registrationCommand && (
+            <div className="grid gap-3">
+              <TextInput
+                id="daemon-registration-name"
+                labelText="Device name"
+                value={registrationName}
+                maxLength={80}
+                onChange={(event) => setRegistrationName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    createNamedDevice()
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                disabled={registrationLoading || registrationName.trim().length === 0}
+                onClick={createNamedDevice}
+              >
+                Generate command
+              </Button>
+            </div>
+          )}
+
           {registrationError && (
             <InlineNotification
               kind="error"
@@ -240,6 +473,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
             />
           )}
 
+          {(registrationCommand || registrationMode === 'reconnect' || registrationLoading) && (
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
             <div className="min-w-0">
               <div className="agenthub-command-markdown">
@@ -271,8 +505,11 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
               {commandCopied ? <Checkmark size={16} /> : <Copy size={16} />}
             </button>
           </div>
+          )}
 
-          <p className="text-sm leading-5 text-[#69707d]">Copy and run it in your terminal.</p>
+          {registrationCommand && (
+            <p className="text-sm leading-5 text-[#69707d]">Copy and run it in your terminal.</p>
+          )}
 
           {registrationCommand && (
             <InlineNotification
@@ -280,8 +517,8 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
               title={registrationConnected ? 'Daemon connected' : 'Waiting for daemon connection'}
               subtitle={
                 registrationConnected
-                  ? `${registrationCommand.deviceId} is online.`
-                  : `Run the command and wait for ${registrationCommand.deviceId} to connect.`
+                  ? 'Device is online.'
+                  : 'Run the command and wait for this device to connect.'
               }
               lowContrast
               hideCloseButton

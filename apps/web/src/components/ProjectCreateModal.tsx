@@ -176,7 +176,7 @@ export function ProjectCreateModal({
             <SelectItem value="" text="No daemon available" />
           ) : (
             availableDevices.map((device) => (
-              <SelectItem key={device.id} value={device.id} text={device.id} />
+              <SelectItem key={device.id} value={device.id} text={device.name} />
             ))
           )}
         </Select>

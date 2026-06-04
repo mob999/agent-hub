@@ -48,14 +48,21 @@ interface ApiErrorPayload {
 
 export interface DaemonDevice {
   id: string
+  ownerUserId?: string
+  name: string
   status: DeviceStatus
+  registrationShell?: string
   lastSeenAt: string | null
+  createdAt?: string
+  updatedAt?: string
+  deletedAt?: string
   runningRunIds: string[]
   runtimes: DaemonRuntime[]
 }
 
 export interface DaemonRegistrationCommandResponse {
   command: string
+  device?: DaemonDevice
   deviceId: string
   gatewayUrl: string
   shell: 'powershell' | 'sh' | string

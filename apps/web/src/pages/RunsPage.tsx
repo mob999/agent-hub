@@ -1,7 +1,7 @@
 import { InlineNotification, Tag } from '@carbon/react'
 import { ChevronDown, ChevronRight, JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
-import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
+import type { DaemonDevice, LocalRun, RunEvent, RunStatus } from '../lib/api'
 import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
   eventLogLine,
@@ -17,6 +17,7 @@ import { parsePromptSections, type PromptSection } from '../lib/promptSections'
 interface RunsPageProps {
   runs: LocalRun[]
   activeRunCount: number
+  devices: DaemonDevice[]
   eventsByRun: Record<string, RunEvent[]>
   selectedRunId: string | null
   selectRun: (runId: string) => void
@@ -103,6 +104,7 @@ function eventDetails(event: RunEvent): EventDetail[] {
 export function RunsPage({
   runs,
   activeRunCount,
+  devices,
   eventsByRun,
   selectedRunId,
   selectRun,
@@ -117,6 +119,9 @@ export function RunsPage({
     .filter(Boolean)
     .join('')
   const selectedRunTitle = selectedRun ? runDisplayTitle(selectedRun) : 'No run selected'
+  const selectedRunDeviceName = selectedRun
+    ? devices.find((device) => device.id === selectedRun.run.daemonDeviceId)?.name ?? selectedRun.run.daemonDeviceId
+    : ''
   const promptLength = selectedRun?.prompt.length ?? 0
   const promptExpanded = selectedRun ? expandedPromptByRunId[selectedRun.run.id] === true : false
   const promptView = selectedRun ? promptViewByRunId[selectedRun.run.id] ?? 'structured' : 'structured'
@@ -293,7 +298,7 @@ export function RunsPage({
                   )}
                 </span>
                 <span className="text-[var(--cds-text-secondary)]">Daemon</span>
-                <strong className="truncate">{selectedRun.run.daemonDeviceId}</strong>
+                <strong className="truncate">{selectedRunDeviceName}</strong>
                 <span className="text-[var(--cds-text-secondary)]">Created</span>
                 <strong className="truncate">{formatTime(selectedRun.run.createdAt)}</strong>
                 <span className="text-[var(--cds-text-secondary)]">Updated</span>

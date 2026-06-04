@@ -107,6 +107,7 @@ describeDb("conversation repository integration", () => {
 
     await db.insert(daemonDevices).values({
       id: daemonDeviceId,
+      name: daemonDeviceId,
       status: "online",
       createdAt: now,
       updatedAt: now,

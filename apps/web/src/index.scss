@@ -94,6 +94,36 @@ textarea {
   box-shadow: none;
 }
 
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input) {
+  background: #fff;
+  border: 1px solid #d8dee6;
+  border-bottom-color: #d8dee6;
+  border-radius: 0.625rem;
+  box-shadow: none;
+}
+
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):hover {
+  border-color: #c7d0dc;
+  border-bottom-color: #c7d0dc;
+  box-shadow: none;
+}
+
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):focus {
+  border-color: #b9c3cf;
+  border-bottom-color: #b9c3cf;
+  box-shadow: none;
+  outline-offset: 2px;
+}
+
+.daemon-device-settings .cds--text-input__field-wrapper,
+.daemon-device-settings .cds--select-input__wrapper {
+  border-radius: 0.625rem;
+  box-shadow: none;
+}
+
 .agenthub-markdown {
   display: grid;
   gap: 0.5rem;

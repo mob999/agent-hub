@@ -43,11 +43,14 @@ export interface Agent {
 
 export interface DaemonDevice {
   id: DaemonDeviceId;
-  ownerUserId: UserId;
+  ownerUserId?: UserId;
   name: string;
   status: "online" | "offline" | "disabled";
+  registrationShell?: "powershell" | "sh" | string;
   createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
   lastSeenAt?: IsoDateTime;
+  deletedAt?: IsoDateTime;
 }
 
 export interface DaemonRuntime {

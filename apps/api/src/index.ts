@@ -32,6 +32,7 @@ import {
   archiveGroupConversationForUser,
   createAgentProvisioningRecords,
   createAgentHubRedisClient,
+  createDaemonDeviceForUser,
   createLogger,
   applyRunDispatchPreparation,
   buildAgentIdentityInstructions,
@@ -68,6 +69,7 @@ import {
   getProjectForConversation,
   getProjectChangeWithDiffForConversation,
   getSiteArtifactZipForUser,
+  getDaemonDeviceForUser,
   getReadyDaemonRuntime,
   getRunnableAgentForUser,
   listConversationMessagesForUser,
@@ -96,12 +98,14 @@ import {
   conversationArtifactStorageKey,
   restoreAgentForUser,
   restoreGroupConversationForUser,
+  softDeleteDaemonDeviceForUser,
   searchConversationsForUser,
   resolveTextMentionedAgentIds,
   sanitizeArtifactFilename,
   subscribeRealtimeEvents,
   toAgentRun,
   updateConversationOrchestrator,
+  updateDaemonDeviceForUser,
   updateAgentProfileForUser,
   updateGroupConversation,
   updateProjectConversation,
@@ -181,6 +185,59 @@ function buildDaemonSourceCommand(input: {
     `$env:AGENTHUB_DEVICE_ID=${powerShellQuote(input.deviceId)}`,
     "pnpm --filter @agent-hub/daemon dev",
   ].join("; ");
+}
+
+function parseDaemonCommandPlatform(value: string | undefined): "windows" | "posix" {
+  return value === "posix" ? "posix" : "windows";
+}
+
+function normalizeDaemonDeviceName(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const name = value.trim().replace(/\s+/g, " ");
+  return name.length > 0 && name.length <= 80 ? name : null;
+}
+
+function daemonDeviceCommandResponse(input: {
+  device: {
+    id: string;
+    name: string;
+    ownerUserId: string | null;
+    registrationShell: string | null;
+    status: string;
+    lastSeenAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    deletedAt: Date | null;
+  };
+  platform: "windows" | "posix";
+}) {
+  const gatewayUrl = env.AGENTHUB_DAEMON_GATEWAY_URL;
+
+  return {
+    command: buildDaemonSourceCommand({
+      deviceId: input.device.id,
+      gatewayUrl,
+      token: env.AGENTHUB_DAEMON_TOKEN,
+      platform: input.platform,
+    }),
+    device: {
+      id: input.device.id,
+      ownerUserId: input.device.ownerUserId ?? undefined,
+      name: input.device.name,
+      status: input.device.status,
+      registrationShell: input.device.registrationShell ?? undefined,
+      lastSeenAt: input.device.lastSeenAt?.toISOString() ?? null,
+      createdAt: input.device.createdAt.toISOString(),
+      updatedAt: input.device.updatedAt.toISOString(),
+      deletedAt: input.device.deletedAt?.toISOString(),
+    },
+    deviceId: input.device.id,
+    gatewayUrl,
+    shell: input.platform === "windows" ? "powershell" : "sh",
+  };
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -1362,25 +1419,234 @@ app.get("/events", async (c) => {
 });
 
 app.use("/daemon/devices", requireAuth);
+app.use("/daemon/devices/*", requireAuth);
 app.get("/daemon/devices", async (c) => {
-  const devices = await listDaemonDevicesWithRuntimes(c.get("db"));
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const devices = await listDaemonDevicesWithRuntimes(c.get("db"), {
+    ownerUserId: user.id,
+  });
   const runningRunIdsByDevice = await listRunningRunIdsByDaemonDevice(c.get("db"));
 
   return c.json({
     devices: devices.map((device) => ({
       id: device.id,
+      ownerUserId: device.ownerUserId ?? undefined,
+      name: device.name,
       status: device.status,
+      registrationShell: device.registrationShell ?? undefined,
       lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+      createdAt: device.createdAt.toISOString(),
+      updatedAt: device.updatedAt.toISOString(),
+      deletedAt: device.deletedAt?.toISOString(),
       runningRunIds: runningRunIdsByDevice.get(device.id) ?? [],
       runtimes: device.runtimes,
     })),
   });
 });
 
+app.post("/daemon/devices", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    name?: unknown;
+    platform?: unknown;
+  };
+  const name = normalizeDaemonDeviceName(body.name);
+
+  if (name === null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_DAEMON_DEVICE_NAME",
+          message: "Device name must be 1-80 characters.",
+        },
+      },
+      400,
+    );
+  }
+
+  const platform = parseDaemonCommandPlatform(
+    typeof body.platform === "string" ? body.platform : undefined,
+  );
+  const shell = platform === "windows" ? "powershell" : "sh";
+  const device = await createDaemonDeviceForUser(c.get("db"), {
+    id: `device-${randomUUID().slice(0, 8)}`,
+    name,
+    ownerUserId: user.id,
+    registrationShell: shell,
+  });
+
+  return c.json(daemonDeviceCommandResponse({ device, platform }), 201);
+});
+
+app.patch("/daemon/devices/:deviceId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const deviceId = c.req.param("deviceId");
+  const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+  const name = normalizeDaemonDeviceName(body.name);
+
+  if (name === null) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_DAEMON_DEVICE_NAME",
+          message: "Device name must be 1-80 characters.",
+        },
+      },
+      400,
+    );
+  }
+
+  const device = await updateDaemonDeviceForUser(c.get("db"), {
+    deviceId,
+    name,
+    ownerUserId: user.id,
+  });
+
+  if (device === null) {
+    return c.json(
+      {
+        error: {
+          code: "DAEMON_DEVICE_NOT_FOUND",
+          message: "Daemon device was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({
+    device: {
+      id: device.id,
+      ownerUserId: device.ownerUserId ?? undefined,
+      name: device.name,
+      status: device.status,
+      registrationShell: device.registrationShell ?? undefined,
+      lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+      createdAt: device.createdAt.toISOString(),
+      updatedAt: device.updatedAt.toISOString(),
+      deletedAt: device.deletedAt?.toISOString(),
+    },
+  });
+});
+
+app.delete("/daemon/devices/:deviceId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const device = await softDeleteDaemonDeviceForUser(c.get("db"), {
+    deviceId: c.req.param("deviceId"),
+    ownerUserId: user.id,
+  });
+
+  if (device === null) {
+    return c.json(
+      {
+        error: {
+          code: "DAEMON_DEVICE_NOT_FOUND",
+          message: "Daemon device was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json({ deleted: true });
+});
+
+app.post("/daemon/devices/:deviceId/reconnect-command", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    platform?: unknown;
+  };
+  const platform = parseDaemonCommandPlatform(
+    typeof body.platform === "string" ? body.platform : undefined,
+  );
+  const device = await getDaemonDeviceForUser(c.get("db"), {
+    deviceId: c.req.param("deviceId"),
+    ownerUserId: user.id,
+  });
+
+  if (device === null) {
+    return c.json(
+      {
+        error: {
+          code: "DAEMON_DEVICE_NOT_FOUND",
+          message: "Daemon device was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  return c.json(daemonDeviceCommandResponse({ device, platform }));
+});
+
 app.use("/daemon/registration-command", requireAuth);
 app.post("/daemon/registration-command", (c) => {
-  const platformQuery = c.req.query("platform");
-  const platform = platformQuery === "posix" ? "posix" : "windows";
+  const platform = parseDaemonCommandPlatform(c.req.query("platform"));
   const requestedDeviceId = c.req.query("deviceId")?.trim();
 
   if (

@@ -2098,11 +2098,15 @@ export function WorkspacePage({
         <DaemonPage
           devices={devices}
           deviceError={deviceError}
+          onDevicesChanged={() => {
+            void loadDevices()
+          }}
         />
       ) : (
         <RunsPage
           runs={orderedRuns}
           activeRunCount={activeRunCount}
+          devices={devices}
           eventsByRun={eventsByRun}
           selectedRunId={selectedRunId}
           selectRun={setSelectedRunId}

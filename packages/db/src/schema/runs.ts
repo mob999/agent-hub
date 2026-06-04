@@ -11,17 +11,32 @@ import {
 import { users } from "./auth.js";
 import { conversations } from "./conversations.js";
 
-export const daemonDevices = pgTable("daemon_devices", {
-  id: varchar("id", { length: 120 }).primaryKey(),
-  status: varchar("status", { length: 32 }).notNull().default("offline"),
-  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const daemonDevices = pgTable(
+  "daemon_devices",
+  {
+    id: varchar("id", { length: 120 }).primaryKey(),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    name: varchar("name", { length: 120 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("offline"),
+    registrationShell: varchar("registration_shell", { length: 16 }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    daemonDevicesOwnerDeletedIdx: index("daemon_devices_owner_deleted_idx").on(
+      table.ownerUserId,
+      table.deletedAt,
+    ),
+  }),
+);
 
 export const runs = pgTable(
   "runs",

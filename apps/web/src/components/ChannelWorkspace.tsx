@@ -1,5 +1,5 @@
 import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, WarningSquare } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, UserAdmin, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -1475,17 +1475,29 @@ export function ChannelWorkspace({
                   key={message.id}
                 >
                   <span
-                    className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white text-sm font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset] max-[671px]:h-9 max-[671px]:w-9"
+                    className="group relative grid h-10 w-10 place-items-center rounded-md border border-[#d8dee6] bg-white text-sm font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset] max-[671px]:h-9 max-[671px]:w-9"
                     aria-hidden="true"
                   >
-                    {senderAvatar ? (
-                      <img
-                        src={senderAvatar}
-                        alt={senderName}
-                        className="h-9 w-9 rounded-[3px] object-cover max-[671px]:h-8 max-[671px]:w-8"
-                      />
-                    ) : (
-                      avatarInitial
+                    <span className="grid h-full w-full place-items-center overflow-hidden rounded-md">
+                      {senderAvatar ? (
+                        <img
+                          src={senderAvatar}
+                          alt={senderName}
+                          className="h-9 w-9 rounded-[3px] object-cover max-[671px]:h-8 max-[671px]:w-8"
+                        />
+                      ) : (
+                        avatarInitial
+                      )}
+                    </span>
+                    {senderIsOrchestrator && (
+                      <>
+                        <span className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full border-2 border-white bg-[var(--cds-support-success)] text-white shadow-[0_1px_2px_rgba(15,23,42,0.2)]">
+                          <UserAdmin size={10} />
+                        </span>
+                        <span className="pointer-events-none absolute -right-2 -top-7 whitespace-nowrap rounded-full border border-[#bfe8c8] bg-[#defbe6] px-2 py-0.5 text-[0.65rem] font-semibold leading-4 text-[#0e6027] opacity-0 shadow-[0_4px_12px_rgba(15,23,42,0.12)] transition-opacity group-hover:opacity-100">
+                          Orchestrator
+                        </span>
+                      </>
                     )}
                   </span>
                   <span className="grid min-w-0 gap-1">
@@ -1500,13 +1512,19 @@ export function ChannelWorkspace({
                           {senderName}
                         </button>
                       ) : (
-                        <strong className="leading-5">{senderName}</strong>
+                        <strong
+                          className={`leading-5 ${
+                            message.senderType === 'user'
+                              ? 'text-[#0f62fe]'
+                              : message.senderType === 'system'
+                                ? 'text-[#697386]'
+                                : ''
+                          }`}
+                        >
+                          {senderName}
+                        </strong>
                       )}
-                        {senderIsOrchestrator && (
-                          <Tag className="m-0" type="green" size="sm">
-                            Orch
-                          </Tag>
-                        )}
+                        {senderIsOrchestrator && <span className="sr-only">Orchestrator</span>}
                       </span>
                       <time className="text-xs leading-4 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
                         {formatMessageTime(message.updatedAt)}

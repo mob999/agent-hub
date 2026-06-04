@@ -2,6 +2,7 @@ import { InlineNotification, Tag } from '@carbon/react'
 import { ChevronDown, ChevronRight, JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
 import type { LocalRun, RunEvent, RunStatus } from '../lib/api'
+import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
   eventLogLine,
   eventMessageContent,
@@ -124,7 +125,7 @@ export function RunsPage({
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[671px]:grid-cols-1"
       aria-label="Runs management"
     >
       <aside
@@ -175,33 +176,34 @@ export function RunsPage({
         )}
       </aside>
 
-      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[#f7f8fa]" aria-label="Run detail">
-        <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
-              aria-hidden="true"
-            >
-              <JobRun size={18} />
-            </span>
-            <strong className="truncate">
-              {selectedRunTitle}
-            </strong>
-          </div>
-        </header>
-
-        {selectedRun ? (
-          <>
-            <section
-              className="mx-6 mt-6 grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-4 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:mx-4 max-[671px]:grid-cols-[4rem_minmax(0,1fr)]"
-              aria-label="Selected run"
-            >
+      <WorkspacePanel>
+        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label="Run detail">
+          <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
+            <div className="flex min-w-0 items-center gap-3">
               <span
-                className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"
               >
-                <JobRun size={28} />
+                <JobRun size={18} />
               </span>
+              <strong className="truncate">
+                {selectedRunTitle}
+              </strong>
+            </div>
+          </header>
+
+          {selectedRun ? (
+            <>
+              <section
+                className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-4 p-6 max-[671px]:grid-cols-[4rem_minmax(0,1fr)] max-[671px]:p-4"
+                aria-label="Selected run"
+              >
+                <span
+                  className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
+                  aria-hidden="true"
+                >
+                  <JobRun size={28} />
+                </span>
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-semibold leading-snug">
                   {selectedRunTitle}
@@ -221,9 +223,9 @@ export function RunsPage({
               >
                 {runStatusLabel(selectedRun.run.status)}
               </Tag>
-            </section>
+              </section>
 
-            <DetailSection title="Prompt">
+              <DetailSection title="Prompt">
               <details
                 className="overflow-hidden rounded-xl border border-[#e1e5ea] bg-[#f7f8fa]"
                 open={promptExpanded}
@@ -279,9 +281,9 @@ export function RunsPage({
                   )}
                 </div>
               </details>
-            </DetailSection>
+              </DetailSection>
 
-            <DetailSection title="Info">
+              <DetailSection title="Info">
               <div className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-3 max-[671px]:grid-cols-1">
                 <span className="text-[var(--cds-text-secondary)]">Agent</span>
                 <span className="grid min-w-0 gap-0.5">
@@ -297,9 +299,9 @@ export function RunsPage({
                 <span className="text-[var(--cds-text-secondary)]">Updated</span>
                 <strong className="truncate">{formatTime(selectedRun.run.updatedAt)}</strong>
               </div>
-            </DetailSection>
+              </DetailSection>
 
-            <DetailSection
+              <DetailSection
               title="Events"
               aside={<span className="text-sm text-[var(--cds-text-secondary)]">{displayEvents.length}</span>}
             >
@@ -322,9 +324,9 @@ export function RunsPage({
                   ))}
                 </ol>
               )}
-            </DetailSection>
+              </DetailSection>
 
-            <DetailSection title="Output">
+              <DetailSection title="Output">
               <div className="grid min-h-20 grid-cols-[1.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-3">
                 <Terminal size={20} />
                 {agentOutput ? (
@@ -335,18 +337,19 @@ export function RunsPage({
                   <p className="text-[var(--cds-text-secondary)]">No agent output yet.</p>
                 )}
               </div>
-            </DetailSection>
-          </>
-        ) : (
-          <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 px-6 text-center max-[671px]:px-4">
-            <ListBoxes size={32} />
-            <h2 className="cds--type-heading-compact-02">No runs yet</h2>
-            <p className="max-w-md text-[var(--cds-text-secondary)]">
-              Send a message in Chat. Runs created from that conversation will appear here.
-            </p>
-          </div>
-        )}
-      </section>
+              </DetailSection>
+            </>
+          ) : (
+            <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 px-6 text-center max-[671px]:px-4">
+              <ListBoxes size={32} />
+              <h2 className="cds--type-heading-compact-02">No runs yet</h2>
+              <p className="max-w-md text-[var(--cds-text-secondary)]">
+                Send a message in Chat. Runs created from that conversation will appear here.
+              </p>
+            </div>
+          )}
+        </section>
+      </WorkspacePanel>
     </section>
   )
 }
@@ -483,7 +486,7 @@ interface DetailSectionProps {
 
 function DetailSection({ title, children, aside }: DetailSectionProps) {
   return (
-    <section className="mx-6 mt-4 grid gap-3 rounded-2xl border border-[#e1e5ea] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] last:mb-6 max-[671px]:mx-4">
+    <section className="grid gap-3 border-t border-[#eef0f3] bg-white p-6 max-[671px]:p-4">
       <div className="flex items-center justify-between gap-4">
         <h3 className="text-xs font-semibold uppercase leading-snug text-[var(--cds-text-secondary)]">
           {title}

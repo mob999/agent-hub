@@ -12,6 +12,7 @@ import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
 import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
+import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
   ApiRequestError,
   apiRequest,
@@ -1842,8 +1843,8 @@ export function WorkspacePage({
     <main
       className={
         activeView === 'chat'
-          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
-          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
       }
       aria-label="AgentHub workspace"
     >
@@ -1894,94 +1895,96 @@ export function WorkspacePage({
               void selectAgentConversation(agentId)
             }}
           />
-          {isSearchRoute ? (
-            <SearchWorkspace
-              agents={agents}
-              conversations={conversations}
-              error={searchError}
-              isLoading={isSearchLoading}
-              query={searchQuery}
-              results={searchResults}
-              selectedChannelId={searchSelectedChannelId}
-              selectedSender={searchSelectedSender}
-              sort={searchSort}
-              time={searchTime}
-              onChannelChange={(value) => updateSearchFilters({ channelId: value })}
-              onOpenConversation={(conversationId) => {
-                selectConversation(conversationId)
-              }}
-              onOpenMessage={(conversationId, messageId) => {
-                openMessageRoute(conversationId, messageId)
-              }}
-              onQueryChange={(value) => updateSearchFilters({ query: value })}
-              onSenderChange={(value) => updateSearchFilters({ sender: value })}
-              onSortChange={(value) => updateSearchFilters({ sort: value })}
-              onTimeChange={(value) => updateSearchFilters({ time: value })}
-            />
-          ) : (
-            <ChannelWorkspace
-              activeConversation={activeConversation}
-              messages={activeConversationMessages}
-              goals={activeConversationGoals}
-              artifacts={activeConversationArtifacts}
-              deployments={activeConversationDeployments}
-              agents={agents}
-              user={user}
-              prompt={prompt}
-              isCreatingRun={isCreatingRun}
-              runError={runError ?? agentError}
-              readyAgentCount={readyAgentCount}
-              canEditConversation={canEditActiveConversation}
-              setPrompt={updatePrompt}
-              submitRun={submitRun}
-              openCreateAgent={() => openCreateAgent()}
-              openAgentConversation={(agentId) => {
-                void selectAgentConversation(agentId)
-              }}
-              openEditConversation={openEditActiveConversation}
-              openArtifactEditor={openArtifactEditor}
-              openRun={openRun}
-              focusedGoalRoute={focusedGoalRoute}
-              focusedMessageId={focusedMessageId}
-              taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
-              deploymentRouteActive={chatPanelRoute === 'deployments'}
-              openGoalRoute={(goalId, taskIndex) => {
-                if (activeConversation?.id) {
-                  openGoalRoute(activeConversation.id, goalId, taskIndex)
-                }
-              }}
-              openTasksRoute={() => {
-                if (activeConversation?.id) {
-                  openTasksRoute(activeConversation.id)
-                }
-              }}
-              openDeploymentsRoute={() => {
-                if (activeConversation?.id) {
-                  openDeploymentsRoute(activeConversation.id)
-                }
-              }}
-              closeConversationRoute={() => {
-                if (activeConversation?.id) {
-                  closeConversationRoute(activeConversation.id)
-                }
-              }}
-              openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
-              closeArtifactEditor={closeArtifactEditor}
-              activeEditorArtifactId={editorRoute?.artifactId ?? null}
-              editorConversationId={editorRoute?.conversationId ?? null}
-              onActiveEditorArtifactChange={openArtifactEditor}
-              refreshArtifacts={() => {
-                if (activeConversation?.id) {
-                  void loadArtifacts(activeConversation.id)
-                }
-              }}
-              refreshDeployments={() => {
-                if (activeConversation?.id) {
-                  void loadDeployments(activeConversation.id)
-                }
-              }}
-            />
-          )}
+          <WorkspacePanel>
+            {isSearchRoute ? (
+              <SearchWorkspace
+                agents={agents}
+                conversations={conversations}
+                error={searchError}
+                isLoading={isSearchLoading}
+                query={searchQuery}
+                results={searchResults}
+                selectedChannelId={searchSelectedChannelId}
+                selectedSender={searchSelectedSender}
+                sort={searchSort}
+                time={searchTime}
+                onChannelChange={(value) => updateSearchFilters({ channelId: value })}
+                onOpenConversation={(conversationId) => {
+                  selectConversation(conversationId)
+                }}
+                onOpenMessage={(conversationId, messageId) => {
+                  openMessageRoute(conversationId, messageId)
+                }}
+                onQueryChange={(value) => updateSearchFilters({ query: value })}
+                onSenderChange={(value) => updateSearchFilters({ sender: value })}
+                onSortChange={(value) => updateSearchFilters({ sort: value })}
+                onTimeChange={(value) => updateSearchFilters({ time: value })}
+              />
+            ) : (
+              <ChannelWorkspace
+                activeConversation={activeConversation}
+                messages={activeConversationMessages}
+                goals={activeConversationGoals}
+                artifacts={activeConversationArtifacts}
+                deployments={activeConversationDeployments}
+                agents={agents}
+                user={user}
+                prompt={prompt}
+                isCreatingRun={isCreatingRun}
+                runError={runError ?? agentError}
+                readyAgentCount={readyAgentCount}
+                canEditConversation={canEditActiveConversation}
+                setPrompt={updatePrompt}
+                submitRun={submitRun}
+                openCreateAgent={() => openCreateAgent()}
+                openAgentConversation={(agentId) => {
+                  void selectAgentConversation(agentId)
+                }}
+                openEditConversation={openEditActiveConversation}
+                openArtifactEditor={openArtifactEditor}
+                openRun={openRun}
+                focusedGoalRoute={focusedGoalRoute}
+                focusedMessageId={focusedMessageId}
+                taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+                deploymentRouteActive={chatPanelRoute === 'deployments'}
+                openGoalRoute={(goalId, taskIndex) => {
+                  if (activeConversation?.id) {
+                    openGoalRoute(activeConversation.id, goalId, taskIndex)
+                  }
+                }}
+                openTasksRoute={() => {
+                  if (activeConversation?.id) {
+                    openTasksRoute(activeConversation.id)
+                  }
+                }}
+                openDeploymentsRoute={() => {
+                  if (activeConversation?.id) {
+                    openDeploymentsRoute(activeConversation.id)
+                  }
+                }}
+                closeConversationRoute={() => {
+                  if (activeConversation?.id) {
+                    closeConversationRoute(activeConversation.id)
+                  }
+                }}
+                openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
+                closeArtifactEditor={closeArtifactEditor}
+                activeEditorArtifactId={editorRoute?.artifactId ?? null}
+                editorConversationId={editorRoute?.conversationId ?? null}
+                onActiveEditorArtifactChange={openArtifactEditor}
+                refreshArtifacts={() => {
+                  if (activeConversation?.id) {
+                    void loadArtifacts(activeConversation.id)
+                  }
+                }}
+                refreshDeployments={() => {
+                  if (activeConversation?.id) {
+                    void loadDeployments(activeConversation.id)
+                  }
+                }}
+              />
+            )}
+          </WorkspacePanel>
         </>
       ) : activeView === 'daemon' ? (
         <DaemonPage

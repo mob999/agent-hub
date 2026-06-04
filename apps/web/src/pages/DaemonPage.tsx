@@ -1,6 +1,7 @@
 import { InlineNotification } from '@carbon/react'
 import { Add, Devices } from '@carbon/react/icons'
 import { useState } from 'react'
+import { WorkspacePanel } from '../components/WorkspacePanel'
 import type { DaemonDevice, DaemonRuntime, DeviceStatus, RuntimeKind } from '../lib/api'
 import { formatTime } from '../lib/format'
 
@@ -17,7 +18,7 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
   return (
     <section
       id="main-content"
-      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[671px]:grid-cols-1"
+      className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa] max-[671px]:grid-cols-1"
       aria-label="Daemon management"
     >
       <aside
@@ -69,91 +70,93 @@ export function DaemonPage({ devices, deviceError }: DaemonPageProps) {
         )}
       </aside>
 
-      <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-[#f7f8fa]" aria-label="Daemon detail">
-        <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
-              aria-hidden="true"
-            >
-              <Devices size={18} />
-            </span>
-            <strong className="truncate">{selectedDevice?.id ?? 'No daemon selected'}</strong>
-          </div>
-        </header>
-
-        {deviceError && (
-          <InlineNotification
-            className="mx-6 mt-4 max-w-none max-[671px]:mx-4"
-            kind="error"
-            title="Daemon unavailable"
-            subtitle={deviceError}
-            lowContrast
-            aria-label="Close notification"
-          />
-        )}
-
-        {selectedDevice ? (
-          <section
-            className="mx-6 mt-6 grid overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:mx-4"
-            aria-label="Selected daemon"
-          >
-            <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 p-5">
+      <WorkspacePanel>
+        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label="Daemon detail">
+          <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
+            <div className="flex min-w-0 items-center gap-3">
               <span
-                className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"
               >
-                <Devices size={28} />
+                <Devices size={18} />
               </span>
-              <div className="min-w-0">
-                <h2 className="truncate text-xl font-semibold leading-snug">{selectedDevice.id}</h2>
-                <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
-                  <StatusDot status={selectedDevice.status} />
-                  <span>{selectedDevice.status}</span>
-                </p>
-                <small className="mt-1 block truncate text-[var(--cds-text-secondary)]">
-                  Last seen {formatTime(selectedDevice.lastSeenAt)}
-                </small>
-              </div>
+              <strong className="truncate">{selectedDevice?.id ?? 'No daemon selected'}</strong>
             </div>
+          </header>
 
-            <div className="px-5 pb-5">
-              {selectedDevice.runtimes.length === 0 ? (
-                <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
-              ) : (
-                <div className="grid">
-                  <div
-                    className="grid grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] gap-4 border-b border-[#eef0f3] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)] max-[760px]:hidden"
-                    aria-hidden="true"
-                  >
-                    <span>Runtime</span>
-                    <span>Version</span>
-                    <span>Status</span>
-                  </div>
-                  {selectedDevice.runtimes.map((runtime) => (
-                    <div
-                      className="grid min-h-16 grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] items-center gap-4 border-b border-[#eef0f3] py-3 last:border-b-0 max-[760px]:grid-cols-1"
-                      key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
-                    >
-                      <RuntimeIdentity runtimeKind={runtime.runtimeKind} />
-                      <RuntimeVersion runtime={runtime} />
-                      <RuntimeStatus status={runtime.status} />
-                    </div>
-                  ))}
+          {deviceError && (
+            <InlineNotification
+              className="mx-6 mt-4 max-w-none max-[671px]:mx-4"
+              kind="error"
+              title="Daemon unavailable"
+              subtitle={deviceError}
+              lowContrast
+              aria-label="Close notification"
+            />
+          )}
+
+          {selectedDevice ? (
+            <>
+              <section
+                className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 p-6 max-[671px]:p-4"
+                aria-label="Selected daemon"
+              >
+                <span
+                  className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
+                  aria-hidden="true"
+                >
+                  <Devices size={28} />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="truncate text-xl font-semibold leading-snug">{selectedDevice.id}</h2>
+                  <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
+                    <StatusDot status={selectedDevice.status} />
+                    <span>{selectedDevice.status}</span>
+                  </p>
+                  <small className="mt-1 block truncate text-[var(--cds-text-secondary)]">
+                    Last seen {formatTime(selectedDevice.lastSeenAt)}
+                  </small>
                 </div>
-              )}
+              </section>
+
+              <section className="border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label="Runtimes">
+                {selectedDevice.runtimes.length === 0 ? (
+                  <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
+                ) : (
+                  <div className="grid">
+                    <div
+                      className="grid grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] gap-4 border-b border-[#eef0f3] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)] max-[760px]:hidden"
+                      aria-hidden="true"
+                    >
+                      <span>Runtime</span>
+                      <span>Version</span>
+                      <span>Status</span>
+                    </div>
+                    {selectedDevice.runtimes.map((runtime) => (
+                      <div
+                        className="grid min-h-16 grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] items-center gap-4 border-b border-[#eef0f3] py-3 last:border-b-0 max-[760px]:grid-cols-1"
+                        key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
+                      >
+                        <RuntimeIdentity runtimeKind={runtime.runtimeKind} />
+                        <RuntimeVersion runtime={runtime} />
+                        <RuntimeStatus status={runtime.status} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          ) : (
+            <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 text-center">
+              <Devices size={32} />
+              <h2 className="cds--type-heading-compact-02">No daemon connected</h2>
+              <p className="text-[var(--cds-text-secondary)]">
+                Start a local daemon and it will appear in this page.
+              </p>
             </div>
-          </section>
-        ) : (
-          <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 text-center">
-            <Devices size={32} />
-            <h2 className="cds--type-heading-compact-02">No daemon connected</h2>
-            <p className="text-[var(--cds-text-secondary)]">
-              Start a local daemon and it will appear in this page.
-            </p>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      </WorkspacePanel>
     </section>
   )
 }

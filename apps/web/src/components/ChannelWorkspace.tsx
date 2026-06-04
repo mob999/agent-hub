@@ -526,9 +526,7 @@ export function ChannelWorkspace({
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
   const canOpenWorkspacePanel = hasSelectedConversation
   const chatTitleClassName =
-    hasSelectedConversation && !isAgentDirectMessage
-      ? 'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
-      : 'min-w-0 truncate text-xl font-semibold leading-tight'
+    'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionSuggestions.length > 0) {
       if (event.key === 'ArrowDown') {
@@ -1174,10 +1172,10 @@ export function ChannelWorkspace({
       className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-[#f7f8fa]"
       aria-label={chatAriaLabel}
     >
-      <header className="flex min-h-18 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
-        <div className="flex min-w-0 items-start gap-3">
+      <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span
-            className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
+            className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
             aria-hidden="true"
           >
             {!hasSelectedConversation ? (
@@ -1187,7 +1185,7 @@ export function ChannelWorkspace({
                 <img
                   src={selectedAgent.agent.avatar}
                   alt={selectedAgent.agent.name}
-                  className="h-11 w-11 rounded-[3px] object-cover"
+                  className="h-9 w-9 rounded-[2px] object-cover"
                 />
               ) : (
                 <ChatBot size={20} />
@@ -1210,7 +1208,7 @@ export function ChannelWorkspace({
               )}
             </div>
             {chatDescription.length > 0 && (
-              <p className="truncate text-sm leading-snug text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
+              <p className="truncate text-sm leading-5 text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
                 {chatDescription}
               </p>
             )}
@@ -1313,7 +1311,7 @@ export function ChannelWorkspace({
 
       <div
         ref={scrollContainerRef}
-        className={`min-h-0 p-4 max-[671px]:p-2 ${
+        className={`min-h-0 p-4 max-[671px]:p-2 ${showWorkspacePage ? '' : 'bg-white'} ${
           showFiles || (showWorkspacePage && showTasks && taskAggregationMode === 'status')
             ? 'overflow-hidden'
             : 'overflow-y-auto'
@@ -1385,8 +1383,8 @@ export function ChannelWorkspace({
             </p>
           </div>
         ) : (
-          <div className="grid w-full gap-4">
-            {visibleMessages.map((message) => {
+          <div className="grid w-full">
+            {visibleMessages.map((message, messageIndex) => {
               const senderAgent =
                 message.senderAgentId === undefined
                   ? null
@@ -1416,7 +1414,9 @@ export function ChannelWorkspace({
               return (
                 <article
                   id={`message-${message.id}`}
-                  className={`grid min-w-0 scroll-mt-6 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 p-3 text-left text-[var(--cds-text-primary)] transition-colors max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1 ${
+                  className={`grid min-w-0 scroll-mt-6 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 px-3 py-4 text-left text-[var(--cds-text-primary)] transition-colors first:pt-2 last:pb-2 max-[671px]:grid-cols-[2.25rem_minmax(0,1fr)] max-[671px]:px-1 ${
+                    messageIndex > 0 ? 'shadow-[inset_0_1px_0_rgba(15,23,42,0.045)]' : ''
+                  } ${
                     focusedMessageId === message.id
                       ? 'bg-[var(--cds-layer-selected-01)] outline outline-2 outline-offset-[-2px] outline-[var(--cds-focus)]'
                       : ''

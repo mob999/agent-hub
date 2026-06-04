@@ -6,7 +6,6 @@ import {
   Checkmark,
   ChevronDown,
   ChevronRight,
-  Folder,
   Search,
   TrashCan,
   Undo,
@@ -14,6 +13,7 @@ import {
 import { useState } from 'react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
+import { getProjectIcon } from '../lib/projectIcon'
 
 interface ChatSidebarProps {
   conversations: Conversation[]
@@ -46,6 +46,10 @@ const transparentListItem =
 const selectedListItem =
   'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
 const sectionHeadingText = 'truncate text-[0.82rem] font-semibold uppercase tracking-[0.08em] text-[#344054]'
+const sidebarItemLabelClass = (selected: boolean) =>
+  `min-w-0 truncate text-base leading-5 ${
+    selected ? 'font-semibold text-[#161616]' : 'font-medium text-[#475467]'
+  }`
 const agentAvatarFrame =
   'grid h-6 w-6 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]'
 const unreadBadge =
@@ -352,7 +356,7 @@ export function ChatSidebar({
                       >
                         #
                       </span>
-                      <span className="min-w-0 truncate text-base leading-5">
+                      <span className={sidebarItemLabelClass(groupChatSelected)}>
                         {conversation.title}
                       </span>
                       <span className="flex min-w-6 justify-end">
@@ -404,6 +408,7 @@ export function ChatSidebar({
                 {projectConversations.map((conversation) => {
                   const projectSelected = activeConversationId === conversation.id
                   const cloneStatus = conversation.project?.cloneStatus
+                  const projectIcon = getProjectIcon(conversation)
 
                   return (
                     <button
@@ -415,8 +420,14 @@ export function ChatSidebar({
                       aria-current={projectSelected ? 'page' : undefined}
                       onClick={() => selectProject(conversation.id)}
                     >
-                      <Folder size={18} />
-                      <span className="min-w-0 truncate text-base leading-5">
+                      <span
+                        className="grid h-6 w-6 place-items-center rounded-md border text-xs font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.8)_inset]"
+                        style={projectIcon.style}
+                        aria-hidden="true"
+                      >
+                        {projectIcon.initial}
+                      </span>
+                      <span className={sidebarItemLabelClass(projectSelected)}>
                         {conversation.title}
                         {cloneStatus && cloneStatus !== 'ready' ? (
                           <span className="ml-2 text-xs font-normal text-[#69707d]">
@@ -499,7 +510,7 @@ export function ChatSidebar({
                           <ChatBot size={16} />
                         )}
                       </span>
-                      <span className="min-w-0 truncate text-base leading-5">{agent.agent.name}</span>
+                      <span className={sidebarItemLabelClass(agentSelected)}>{agent.agent.name}</span>
                       <span className="flex min-w-6 items-center justify-end gap-2">
                         <UnreadBadge count={unreadCount} />
                         <AgentStatusIndicator agent={agent} />

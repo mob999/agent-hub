@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, ConversationProjectChange, GetConversationProjectChangeResponse, GetProjectFileContentResponse, ListConversationProjectChangesResponse, ListProjectFilesResponse, ProjectFileEntry, User } from '../lib/api'
 import { apiRequest, apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
+import { getProjectIcon } from '../lib/projectIcon'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 import { MessageContent } from './MessageContent'
 
@@ -529,6 +530,9 @@ export function ChannelWorkspace({
       : isProjectConversation
         ? `Project ${chatDisplayName}`
         : `Group ${chatDisplayName}`
+  const projectIcon = isProjectConversation && activeConversation !== null
+    ? getProjectIcon(activeConversation)
+    : null
   const isAgentTyping =
     isAgentDirectMessage &&
     messages.some(
@@ -1598,6 +1602,7 @@ export function ChannelWorkspace({
         <div className="flex min-w-0 items-center gap-3">
           <span
             className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
+            style={projectIcon?.style}
             aria-hidden="true"
           >
             {!hasSelectedConversation ? (
@@ -1613,7 +1618,7 @@ export function ChannelWorkspace({
                 <ChatBot size={20} />
               )
             ) : (
-              '#'
+              projectIcon?.initial ?? '#'
             )}
           </span>
           <div className="grid min-w-0 gap-0.5">

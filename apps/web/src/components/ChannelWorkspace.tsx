@@ -1088,8 +1088,8 @@ export function ChannelWorkspace({
   )
 
   const renderStatusBoardView = () => (
-    <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-3">
-      <div className="grid h-full min-h-0 grid-flow-col auto-cols-[17rem] gap-4 pr-2">
+    <div className="h-full min-h-0 min-w-0 overflow-x-scroll overflow-y-hidden pb-3">
+      <div className="flex h-full min-h-0 w-max min-w-full gap-4 pr-2">
         {taskStatusOrder.map((status) => {
           const statusTasks = goalTasksByStatus.get(status) ?? []
           const style = taskStatusBoardStyle(status)
@@ -1097,7 +1097,7 @@ export function ChannelWorkspace({
           return (
             <section
               key={status}
-              className={`grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-2xl border p-4 ${style.column}`}
+              className={`grid min-h-0 w-[15.3rem] shrink-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-2xl border p-4 ${style.column}`}
             >
               <div className="flex items-center justify-between gap-3">
                 <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--cds-text-primary)]">
@@ -1369,11 +1369,7 @@ export function ChannelWorkspace({
       >
         {showWorkspacePage && showTasks ? (
           <div
-            className={
-              taskAggregationMode === 'status'
-                ? 'grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-4'
-                : 'grid w-full content-start gap-4'
-            }
+            className="grid h-full min-h-0 min-w-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-4"
           >
             <div
               className="inline-flex h-8 w-fit items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
@@ -1400,14 +1396,16 @@ export function ChannelWorkspace({
                 )
               })}
             </div>
-            {goals.length === 0 ? (
-              <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
-                <Task size={32} />
-                <h2 className="cds--type-heading-compact-02">No goals yet</h2>
-              </div>
-            ) : (
-              taskAggregationMode === 'goal' ? renderGoalListView() : renderStatusBoardView()
-            )}
+            <div className="h-full min-h-0 min-w-0 overflow-hidden">
+              {goals.length === 0 ? (
+                <div className="grid h-full min-h-[22rem] place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+                  <Task size={32} />
+                  <h2 className="cds--type-heading-compact-02">No goals yet</h2>
+                </div>
+              ) : (
+                taskAggregationMode === 'goal' ? renderGoalListView() : renderStatusBoardView()
+              )}
+            </div>
           </div>
         ) : showWorkspacePage && showFiles ? (
           <div className="grid h-full min-h-0 w-full">

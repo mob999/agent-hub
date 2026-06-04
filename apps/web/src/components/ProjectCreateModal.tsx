@@ -1,14 +1,6 @@
-import {
-  Checkbox,
-  InlineNotification,
-  Modal,
-  Select,
-  SelectItem,
-  TextArea,
-  TextInput,
-} from '@carbon/react'
+import { InlineNotification, Modal, TextArea, TextInput } from '@carbon/react'
 import { useState } from 'react'
-import { AgentStatusIndicator } from './AgentStatusIndicator'
+import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails } from '../lib/api'
 
 interface ProjectCreateModalProps {
@@ -52,6 +44,15 @@ export function ProjectCreateModal({
     )
     if (!checked && orchestratorAgentId === agentId) {
       setOrchestratorAgentId('')
+    }
+  }
+
+  const selectOrchestrator = (agentId: string | null) => {
+    setOrchestratorAgentId(agentId ?? '')
+    if (agentId) {
+      setSelectedAgentIds((current) =>
+        current.includes(agentId) ? current : [...current, agentId],
+      )
     }
   }
 
@@ -122,45 +123,16 @@ export function ProjectCreateModal({
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
         />
-        <Select
-          id="project-orchestrator"
-          labelText="Orchestrator"
-          value={orchestratorAgentId}
-          disabled={isCreating || selectedAgentIds.length === 0}
-          onChange={(event) => setOrchestratorAgentId(event.target.value)}
-        >
-          <SelectItem value="" text="No orchestrator" />
-          {agents
-            .filter((agent) => selectedAgentIds.includes(agent.agent.id))
-            .map((agent) => (
-              <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
-            ))}
-        </Select>
-        <div className="grid gap-2" aria-label="Agents">
-          <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
-            Agents
-          </p>
-          <div className="grid max-h-64 overflow-y-auto rounded-xl border border-[#d8dee6] bg-white">
-            {agents.map((agent) => (
-              <div
-                className="grid min-h-12 grid-cols-[minmax(0,1fr)_1.5rem] items-center gap-3 border-b border-[#eef0f3] px-3 py-2 last:border-b-0 hover:bg-[#f7f8fa]"
-                key={agent.agent.id}
-              >
-                <Checkbox
-                  id={`project-agent-${agent.agent.id}`}
-                  labelText={agent.agent.name}
-                  checked={selectedAgentIds.includes(agent.agent.id)}
-                  disabled={isCreating}
-                  onChange={(_, data) => toggleAgent(agent.agent.id, data.checked)}
-                />
-                <AgentStatusIndicator agent={agent} />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-[#69707d]">
-            Project agents must be ready on the same daemon.
-          </p>
-        </div>
+        <AgentMemberSelector
+          agents={agents}
+          disabled={isCreating}
+          helpText="Project agents must be ready on the same daemon."
+          idPrefix="project-agent"
+          orchestratorAgentId={orchestratorAgentId}
+          selectedAgentIds={selectedAgentIds}
+          onSelectOrchestrator={selectOrchestrator}
+          onToggleAgent={toggleAgent}
+        />
       </div>
     </Modal>
   )

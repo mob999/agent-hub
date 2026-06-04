@@ -103,6 +103,7 @@ import {
   updateConversationOrchestrator,
   updateAgentProfileForUser,
   updateGroupConversation,
+  updateProjectConversation,
   type RunnableAgent,
   type RunQueueJob,
   type UserMessageAttachmentUpload,
@@ -2218,6 +2219,113 @@ app.patch("/conversations/groups/:conversationId", async (c) => {
         error: {
           code: "ORCHESTRATOR_NOT_IN_GROUP",
           message: "Orchestrator must be a member of this group.",
+        },
+      },
+      400,
+    );
+  }
+
+  return c.json({ conversation: result.conversation });
+});
+
+app.patch("/conversations/projects/:conversationId", async (c) => {
+  const user = c.get("user");
+
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Authentication required.",
+        },
+      },
+      401,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agentIds?: unknown;
+    description?: unknown;
+    orchestratorAgentId?: unknown;
+    title?: unknown;
+  };
+  const title = typeof body.title === "string"
+    ? normalizeGroupConversationTitle(body.title)
+    : "";
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+  const orchestratorAgentId = parseOptionalAgentId(body.orchestratorAgentId);
+
+  if (
+    title.length === 0 ||
+    title.length > 160 ||
+    !isValidAgentIdList(body.agentIds) ||
+    (body.orchestratorAgentId !== undefined && orchestratorAgentId === undefined)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "INVALID_PROJECT_REQUEST",
+          message:
+            "title, 1-20 unique agentIds, and an optional valid orchestratorAgentId are required.",
+        },
+      },
+      400,
+    );
+  }
+
+  const result = await updateProjectConversation(db, {
+    conversationId: c.req.param("conversationId"),
+    ownerUserId: user.id,
+    title,
+    description: description.length > 0 ? description : undefined,
+    agentIds: body.agentIds,
+    orchestratorAgentId,
+  });
+
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        error: {
+          code: "CONVERSATION_NOT_FOUND",
+          message: "Conversation was not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-found") {
+    return c.json(
+      {
+        error: {
+          code: "AGENTS_NOT_FOUND",
+          message: "One or more ready agents were not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  if (result.status === "agents-not-same-daemon") {
+    return c.json(
+      {
+        error: {
+          code: "PROJECT_AGENTS_NOT_SAME_DAEMON",
+          message: "Project agents must be ready on the same daemon.",
+        },
+      },
+      400,
+    );
+  }
+
+  if (result.status === "orchestrator-not-in-project") {
+    return c.json(
+      {
+        error: {
+          code: "ORCHESTRATOR_NOT_IN_PROJECT",
+          message: "Orchestrator must be a member of this project.",
         },
       },
       400,

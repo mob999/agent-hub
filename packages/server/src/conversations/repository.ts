@@ -279,6 +279,13 @@ export type UpdateGroupConversationResult =
   | { status: "agents-not-found" }
   | { status: "orchestrator-not-in-group" };
 
+export type UpdateProjectConversationResult =
+  | { status: "updated"; conversation: Conversation }
+  | { status: "not-found" }
+  | { status: "agents-not-found" }
+  | { status: "orchestrator-not-in-project" }
+  | { status: "agents-not-same-daemon" };
+
 export type UpdateConversationOrchestratorResult =
   | { status: "updated"; conversation: Conversation }
   | { status: "not-found" }
@@ -1643,6 +1650,115 @@ export async function updateGroupConversation(
     return {
       status: "updated",
       conversation: toConversation(updated, input.agentIds),
+    };
+  });
+}
+
+export async function updateProjectConversation(
+  db: Db,
+  input: {
+    conversationId: ConversationId;
+    ownerUserId: string;
+    title: string;
+    description?: string;
+    agentIds: string[];
+    orchestratorAgentId?: string;
+  },
+): Promise<UpdateProjectConversationResult> {
+  const title = normalizeGroupConversationTitle(input.title).slice(0, 160);
+  const description = normalizeProjectDescription(input.description);
+  const agentIds = [...new Set(input.agentIds)];
+
+  if (title.length === 0 || !includesOrNoOrchestrator({ agentIds, orchestratorAgentId: input.orchestratorAgentId })) {
+    return { status: "orchestrator-not-in-project" };
+  }
+
+  const runnableAgents = await Promise.all(
+    agentIds.map((agentId) =>
+      getRunnableAgentForUser(db, {
+        agentId,
+        ownerUserId: input.ownerUserId,
+      }),
+    ),
+  );
+
+  if (runnableAgents.some((agent) => agent === null)) {
+    return { status: "agents-not-found" };
+  }
+
+  const daemonDeviceIds = new Set(
+    runnableAgents.map((agent) => agent?.daemonDeviceId),
+  );
+
+  if (daemonDeviceIds.size !== 1) {
+    return { status: "agents-not-same-daemon" };
+  }
+
+  return db.transaction(async (tx) => {
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.type, "project"),
+          eq(conversations.status, "active"),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) {
+      return { status: "not-found" };
+    }
+
+    const [project] = await tx
+      .select()
+      .from(conversationProjects)
+      .where(
+        and(
+          eq(conversationProjects.conversationId, input.conversationId),
+          eq(conversationProjects.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (project === undefined) {
+      return { status: "not-found" };
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(conversations)
+      .set({
+        title,
+        description,
+        orchestratorAgentId: input.orchestratorAgentId ?? null,
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, input.conversationId))
+      .returning();
+
+    if (updated === undefined) {
+      return { status: "not-found" };
+    }
+
+    await tx
+      .delete(conversationAgentMembers)
+      .where(eq(conversationAgentMembers.conversationId, input.conversationId));
+
+    await tx.insert(conversationAgentMembers).values(
+      agentIds.map((agentId, position) => ({
+        conversationId: input.conversationId,
+        agentId,
+        position,
+        createdAt: now,
+      })),
+    );
+
+    return {
+      status: "updated",
+      conversation: toConversation(updated, agentIds, toConversationProject(project)),
     };
   });
 }

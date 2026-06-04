@@ -9,6 +9,11 @@ describe("artifact file inference", () => {
     ["changes.patch", "diff", "Diff", "text/x-diff; charset=utf-8", true, false],
     ["screen.png", "image", "Image", "image/png", true, false],
     ["src/app.tsx", "text", "File", "text/typescript; charset=utf-8", false, true],
+    ["Makefile", "text", "File", "text/x-makefile; charset=utf-8", false, true],
+    [".gitignore", "text", "File", "text/plain; charset=utf-8", false, true],
+    ["LICENSE", "text", "File", "text/plain; charset=utf-8", false, true],
+    ["Dockerfile", "text", "File", "text/plain; charset=utf-8", false, true],
+    ["README", "markdown", "File", "text/markdown; charset=utf-8", true, true],
     ["archive.zip", "binary", "File", "application/octet-stream", false, false],
   ])(
     "infers %s",

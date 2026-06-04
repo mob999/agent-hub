@@ -47,12 +47,14 @@ function buildProjectTree(files: TreeFile[]): ProjectTreeNode[] {
   for (const file of files) {
     const filePath = file.path
     const parts = filePath.split('/').filter(Boolean)
+    const entryIsDirectory = isProjectFileEntry(file) && file.type === 'directory'
     let current = root
     let currentPath = ''
 
     parts.forEach((part, index) => {
       currentPath = currentPath.length === 0 ? part : `${currentPath}/${part}`
-      const isFile = index === parts.length - 1
+      const isLastPart = index === parts.length - 1
+      const isFile = isLastPart && !entryIsDirectory
       let node = current.find((child) => child.name === part)
 
       if (node === undefined) {
@@ -70,7 +72,11 @@ function buildProjectTree(files: TreeFile[]): ProjectTreeNode[] {
         node.file = file
         node.id = filePath
         node.type = 'file'
-      } else {
+      }
+
+      if (!isFile) {
+        node.id = `dir:${currentPath}`
+        node.type = 'directory'
         current = node.children
       }
     })

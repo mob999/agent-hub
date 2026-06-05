@@ -553,6 +553,7 @@ export function ChannelWorkspace({
     !isCreatingRun
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
   const canOpenWorkspacePanel = hasSelectedConversation
+  const showConversationToolbar = !welcomeActive
   const chatTitleClassName =
     'min-w-0 truncate text-base font-semibold leading-5 text-[var(--cds-text-primary)]'
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -730,6 +731,7 @@ export function ChannelWorkspace({
   const showWorkspacePage =
     (showTasks || showFiles || showDeployments || showProjectWorkspace) &&
     canOpenWorkspacePanel
+  const showComposer = !showWorkspacePage && !welcomeActive
   const lastVisibleMessage = visibleMessages.at(-1)
   const openArtifactEditorPanel = (artifactId: string) => {
     setWorkspacePanel(null)
@@ -1249,6 +1251,7 @@ export function ChannelWorkspace({
             )}
           </div>
         </div>
+        {showConversationToolbar && (
         <div className="flex min-w-0 items-center gap-3">
           <IconButton
             kind={showTasks ? 'secondary' : 'ghost'}
@@ -1352,6 +1355,7 @@ export function ChannelWorkspace({
             </IconButton>
           )}
         </div>
+        )}
       </header>
 
       <div className={runError ? 'grid gap-2 px-4 pt-3' : 'p-0'}>
@@ -1611,7 +1615,7 @@ export function ChannelWorkspace({
         )}
       </div>
 
-      {!showWorkspacePage && (
+      {showComposer && (
       <Form
         className="grid gap-2 bg-[#fafafa] px-2 pb-2 pt-2 max-[671px]:px-1.5 max-[671px]:pb-2"
         aria-label="Create run"

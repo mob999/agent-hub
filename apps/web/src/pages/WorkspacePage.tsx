@@ -57,7 +57,7 @@ import type { ChatPanelRoute, GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
 const workspaceRouteByView: Record<WorkspaceView, WorkspaceRoutePath> = {
-  chat: '/chat',
+  chat: '/welcome',
   runs: '/runs',
   daemon: '/daemon',
 }
@@ -458,13 +458,7 @@ export function WorkspacePage({
       const nextConversationId =
         routeConversationId !== null && conversationIds.has(routeConversationId)
           ? routeConversationId
-          : routeConversationId === null && route === '/chat'
-            ? conversations[0]?.id ?? null
-            : null
-
-      if (routeConversationId === null && route === '/chat' && nextConversationId !== null) {
-        navigate(`/chat/${encodeURIComponent(nextConversationId)}` as RoutePath)
-      }
+          : null
 
       if (nextConversationId !== activeConversationId) {
         if (nextConversationId === null || !user) {

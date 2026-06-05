@@ -23,6 +23,10 @@ export type CreatedApiApp = {
   services: ApiServices;
 };
 
+function urlOrigin(value: string): string {
+  return new URL(value).origin;
+}
+
 export function createApiApp(context: ApiContext): CreatedApiApp {
   const services = createApiServices(context);
   const routeContext: ApiRouteContext = {
@@ -40,7 +44,10 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
   app.use(
     "*",
     cors({
-      origin: ["http://localhost:5173"],
+      origin: [
+        "http://localhost:5173",
+        urlOrigin(context.env.AGENTHUB_PUBLIC_WEB_URL),
+      ],
       credentials: true,
     }),
   );

@@ -23,6 +23,7 @@ interface ChatSidebarProps {
   activeRunCount: number
   agents: AgentDetails[]
   activeConversationId: string | null
+  isCatalogLoading: boolean
   unreadCounts: Record<string, number>
   savedOpen: boolean
   onCreateAgent: () => void
@@ -89,6 +90,7 @@ export function ChatSidebar({
   activeRunCount,
   agents,
   activeConversationId,
+  isCatalogLoading,
   unreadCounts,
   savedOpen,
   onCreateAgent,
@@ -306,6 +308,16 @@ export function ChatSidebar({
       </section>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        {isCatalogLoading ? (
+          <div className="grid h-full min-h-60 place-items-center content-center gap-3 text-center text-[#69707d]">
+            <Loading
+              small
+              withOverlay={false}
+              description="Loading Coversations"
+            />
+            <p className="text-sm font-medium leading-5">Loading Coversations</p>
+          </div>
+        ) : (
         <div className="grid gap-2">
         <section
           className="grid gap-1"
@@ -538,6 +550,7 @@ export function ChatSidebar({
           ))}
         </section>
         </div>
+        )}
       </div>
     </aside>
   )

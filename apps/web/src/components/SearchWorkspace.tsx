@@ -57,7 +57,15 @@ function highlightText(text: string, query: string): ReactNode {
 }
 
 function conversationKindLabel(hit: ConversationSearchHit): string {
-  return hit.conversationType === 'group' ? 'Group' : 'Direct'
+  if (hit.conversationType === 'group') {
+    return 'Group'
+  }
+
+  if (hit.conversationType === 'project') {
+    return 'Project'
+  }
+
+  return 'Agent'
 }
 
 const filterSelectClass =
@@ -270,9 +278,6 @@ export function SearchWorkspace({
                     <span className="shrink-0 rounded-md border border-[#dde1e6] bg-[#f7f8fa] px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-4 text-[#69707d]">
                       {conversationKindLabel(hit)}
                     </span>
-                  </div>
-                  <div className="truncate text-sm leading-5 text-[#69707d]">
-                    {highlightText(hit.subtitle, query)}
                   </div>
                 </button>
               ))}

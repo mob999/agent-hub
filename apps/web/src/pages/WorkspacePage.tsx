@@ -214,6 +214,7 @@ export function WorkspacePage({
   const [devices, setDevices] = useState<DaemonDevice[]>([])
   const [deviceError, setDeviceError] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDetails[]>([])
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
   const [archivedAgents, setArchivedAgents] = useState<AgentDetails[]>([])
   const [agentError, setAgentError] = useState<string | null>(null)
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
@@ -234,6 +235,7 @@ export function WorkspacePage({
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
@@ -425,6 +427,8 @@ export function WorkspacePage({
       } else {
         setAgentError('Unable to load agents.')
       }
+    } finally {
+      setAgentsLoaded(true)
     }
   }, [])
 
@@ -474,6 +478,8 @@ export function WorkspacePage({
       } else {
         setRunError('Unable to load conversations.')
       }
+    } finally {
+      setConversationsLoaded(true)
     }
   }, [activateConversation, activeConversationId, navigate, route, routeConversationId, user])
 
@@ -1971,6 +1977,7 @@ export function WorkspacePage({
             activeRunCount={activeRunCount}
             agents={agents}
             activeConversationId={activeConversationId}
+            isCatalogLoading={!agentsLoaded || !conversationsLoaded}
             unreadCounts={unreadByConversationId}
             savedOpen={savedOpen}
             onOpenSearch={openSearch}

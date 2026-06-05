@@ -27,14 +27,15 @@ export function verifyDaemonDeviceToken(input: {
   secret: string;
   token: string;
 }): boolean {
-  const [prefix, tokenDeviceId, signature, ...extra] = input.token.split("_");
+  const tokenPrefixWithDevice = `${tokenPrefix}_${input.deviceId}_`;
 
-  if (
-    prefix !== tokenPrefix ||
-    tokenDeviceId !== input.deviceId ||
-    signature === undefined ||
-    extra.length > 0
-  ) {
+  if (!input.token.startsWith(tokenPrefixWithDevice)) {
+    return false;
+  }
+
+  const signature = input.token.slice(tokenPrefixWithDevice.length);
+
+  if (signature.length === 0) {
     return false;
   }
 

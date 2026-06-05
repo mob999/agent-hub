@@ -27,6 +27,22 @@ describe("daemon device token", () => {
     ).toBe(true);
   });
 
+  it("verifies tokens whose base64url signature contains underscores", () => {
+    const token = createDaemonDeviceToken({
+      deviceId: "device-test",
+      secret: "secret-0",
+    });
+
+    expect(token).toContain("_J");
+    expect(
+      verifyDaemonDeviceToken({
+        deviceId: "device-test",
+        secret: "secret-0",
+        token,
+      }),
+    ).toBe(true);
+  });
+
   it("rejects tokens for another device or secret", () => {
     const token = createDaemonDeviceToken({
       deviceId: "device-123",

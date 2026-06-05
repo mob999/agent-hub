@@ -37,6 +37,7 @@ import {
   type RunQueueJob,
   type UserMessageAttachmentUpload,
   createDaemonDeviceToken,
+  invalidateCachesForRealtimeEvents,
   writeArtifactBuffer,
 } from "@agent-hub/server";
 
@@ -270,6 +271,7 @@ export function createApiServices(context: ApiContext) {
   }
   
   async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
+    await invalidateCachesForRealtimeEvents(redis, events, logger);
     await Promise.all(
       events.map(async (event) => {
         try {

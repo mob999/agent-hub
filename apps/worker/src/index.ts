@@ -35,6 +35,9 @@ import {
   getActiveDaemonDeviceById,
   getConversationForUser,
   getRunById,
+  invalidateCachesForRealtimeEvents,
+  invalidateConversationCache,
+  invalidateUserSidebarCache,
   markConversationArtifactActionRunning,
   markAgentProvisioningFailed,
   markAgentProvisioningReady,
@@ -101,6 +104,7 @@ async function publishConversationUpdated(input: {
 }
 
 async function publishRealtimeEvents(events: RealtimeEvent[]): Promise<void> {
+  await invalidateCachesForRealtimeEvents(redis, events, logger);
   await Promise.all(
     events.map(async (event) => {
       try {
@@ -320,7 +324,7 @@ const gateway = new DaemonGateway({
     return artifact;
   },
   onStaticSiteDeploy: async (message) => {
-    return persistStaticSiteDeployment(db, {
+    const deployment = await persistStaticSiteDeployment(db, {
       entrypoint: message.entrypoint,
       files: message.files,
       goalId: message.goalId,
@@ -330,6 +334,13 @@ const gateway = new DaemonGateway({
       taskIndex: message.taskIndex,
       title: message.title,
     });
+    await invalidateConversationCache(redis, {
+      conversationId: deployment.conversationId,
+      logger,
+      ownerUserId: deployment.ownerUserId,
+    });
+
+    return deployment;
   },
   onArtifactActionCompleted: async (message) => {
     const result = await completeConversationArtifactAction(db, {
@@ -551,6 +562,10 @@ while (!shuttingDown) {
         "Failed to provision agent workspace",
       );
     }
+    await invalidateUserSidebarCache(redis, {
+      logger,
+      userId: message.job.agent.ownerUserId,
+    });
 
     await ackAgentProvisioningQueueMessage(redis, message.id);
   }

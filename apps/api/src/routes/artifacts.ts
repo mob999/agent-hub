@@ -62,6 +62,7 @@ import {
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
+  invalidateConversationCache,
   listAgentsForUser,
   listDaemonDevicesWithRuntimes,
   listRecentDirectConversationMessagesForAgent,
@@ -103,6 +104,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
     deploymentResponse,
     getDeploymentRequestedPath,
   } = context.services;
+  const invalidateArtifactConversation = (input: {
+    conversationId: string;
+    ownerUserId: string;
+  }) => invalidateConversationCache(redis, { ...input, logger });
 
   app.use("/artifacts/*", requireAuth);
   openApiRoute(app, "get", "/artifacts/:artifactId", async (c) => {
@@ -547,6 +552,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
         404,
       );
     }
+    await invalidateArtifactConversation({
+      conversationId: revision.conversationId,
+      ownerUserId: user.id,
+    });
   
     return c.json({ revision }, 201);
   });
@@ -607,6 +616,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
         404,
       );
     }
+    await invalidateArtifactConversation({
+      conversationId: revision.conversationId,
+      ownerUserId: user.id,
+    });
   
     return c.json({ revision }, 201);
   });
@@ -677,6 +690,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
                   }),
                 ]),
           ]);
+          await invalidateArtifactConversation({
+            conversationId: artifactRecord.artifact.conversationId,
+            ownerUserId: user.id,
+          });
   
           return c.json(
             {
@@ -723,6 +740,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
             type: "artifact.action.updated",
           }),
         ]);
+        await invalidateArtifactConversation({
+          conversationId: artifactRecord.artifact.conversationId,
+          ownerUserId: user.id,
+        });
       }
   
       return c.json({ action: result.action }, 202);

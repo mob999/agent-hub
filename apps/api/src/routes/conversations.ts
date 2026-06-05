@@ -26,6 +26,12 @@ import {
   createConversationArtifactAction,
   createConversationArtifactFileRevision,
   createConversationArtifactRevision,
+  cacheTtlSeconds,
+  cachedJson,
+  conversationArtifactsCacheKey,
+  conversationDeploymentsCacheKey,
+  conversationMessagesCacheKey,
+  conversationTasksCacheKey,
   createGroupConversation,
   createProjectConversation,
   createUserMessageAndRun,
@@ -62,6 +68,8 @@ import {
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
+  invalidateConversationCache,
+  invalidateUserConversationListCache,
   listAgentsForUser,
   listDaemonDevicesWithRuntimes,
   listRecentDirectConversationMessagesForAgent,
@@ -83,6 +91,7 @@ import {
   updateAgentProfileForUser,
   updateGroupConversation,
   updateProjectConversation,
+  userConversationsCacheKey,
   type RunnableAgent,
   type RunQueueJob,
   type UserMessageAttachmentUpload,
@@ -101,6 +110,12 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
     parseOptionalAgentId,
     parseRecordStatusFilter,
   } = context.services;
+  const invalidateConversationLists = (userId: string) =>
+    invalidateUserConversationListCache(redis, { logger, userId });
+  const invalidateConversationDetails = (input: {
+    conversationId: string;
+    ownerUserId: string;
+  }) => invalidateConversationCache(redis, { ...input, logger });
 
   app.use("/conversations", requireAuth);
   app.use("/conversations/*", requireAuth);
@@ -134,10 +149,18 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
     }
   
     return c.json({
-      conversations: await listConversationsForUser(db, {
-        ownerUserId: user.id,
-        status,
-      }),
+      conversations: await cachedJson(
+        redis,
+        {
+          key: userConversationsCacheKey({ status: status ?? "default", userId: user.id }),
+          logger,
+          ttlSeconds: cacheTtlSeconds.sidebar,
+        },
+        () => listConversationsForUser(db, {
+          ownerUserId: user.id,
+          status,
+        }),
+      ),
     });
   });
   
@@ -159,6 +182,7 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
     const conversation = await ensureDefaultGroupConversation(db, {
       ownerUserId: user.id,
     });
+    await invalidateConversationLists(user.id);
   
     return c.json({ conversation }, 200);
   });
@@ -267,6 +291,7 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         400,
       );
     }
+    await invalidateConversationLists(user.id);
   
     return c.json({ conversation: result.conversation }, 201);
   });
@@ -373,6 +398,7 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
       daemonDeviceId: result.daemonDeviceId,
       remoteUrl,
     });
+    await invalidateConversationLists(user.id);
   
     return c.json({ conversation: result.conversation }, 201);
   });
@@ -494,6 +520,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         400,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json({ conversation: result.conversation });
   });
@@ -601,6 +631,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         400,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json({ conversation: result.conversation });
   });
@@ -648,6 +682,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         409,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json({ conversation: result.conversation });
   });
@@ -695,6 +733,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         409,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json({ conversation: result.conversation });
   });
@@ -754,6 +796,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         400,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: c.req.param("conversationId"),
+      ownerUserId: user.id,
+    });
   
     return c.json({ ok: true });
   });
@@ -834,6 +880,10 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         400,
       );
     }
+    await invalidateConversationDetails({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json({ conversation: result.conversation });
   });
@@ -885,6 +935,7 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
         404,
       );
     }
+    await invalidateConversationLists(user.id);
   
     return c.json({ conversation }, 200);
   });
@@ -926,14 +977,27 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
       );
     }
   
-    const messages = await listConversationMessagesForUser(db, {
-      conversationId: c.req.param("conversationId"),
-      ownerUserId: user.id,
-      limit,
-      before,
-      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
-      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
-    });
+    const conversationId = c.req.param("conversationId");
+    const messages = await cachedJson(
+      redis,
+      {
+        key: conversationMessagesCacheKey({
+          before: before?.toISOString(),
+          conversationId,
+          limit,
+        }),
+        logger,
+        ttlSeconds: cacheTtlSeconds.conversationDetail,
+      },
+      () => listConversationMessagesForUser(db, {
+        conversationId,
+        ownerUserId: user.id,
+        limit,
+        before,
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      }),
+    );
   
     if (messages === null) {
       return c.json(
@@ -965,12 +1029,21 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
       );
     }
   
-    const goals = await listConversationGoalsForUser(db, {
-      conversationId: c.req.param("conversationId"),
-      ownerUserId: user.id,
-      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
-      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
-    });
+    const conversationId = c.req.param("conversationId");
+    const goals = await cachedJson(
+      redis,
+      {
+        key: conversationTasksCacheKey(conversationId),
+        logger,
+        ttlSeconds: cacheTtlSeconds.conversationDetail,
+      },
+      () => listConversationGoalsForUser(db, {
+        conversationId,
+        ownerUserId: user.id,
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      }),
+    );
   
     if (goals === null) {
       return c.json(
@@ -1002,12 +1075,21 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
       );
     }
   
-    const artifacts = await listConversationArtifactsForUser(db, {
-      conversationId: c.req.param("conversationId"),
-      ownerUserId: user.id,
-      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
-      publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
-    });
+    const conversationId = c.req.param("conversationId");
+    const artifacts = await cachedJson(
+      redis,
+      {
+        key: conversationArtifactsCacheKey(conversationId),
+        logger,
+        ttlSeconds: cacheTtlSeconds.conversationDetail,
+      },
+      () => listConversationArtifactsForUser(db, {
+        conversationId,
+        ownerUserId: user.id,
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+        publicWebBaseUrl: env.AGENTHUB_PUBLIC_WEB_URL,
+      }),
+    );
   
     if (artifacts === null) {
       return c.json(
@@ -1039,11 +1121,20 @@ export function createConversationsRoutes(context: ApiRouteContext): OpenAPIHono
       );
     }
   
-    const deployments = await listConversationDeploymentsForUser(db, {
-      conversationId: c.req.param("conversationId"),
-      ownerUserId: user.id,
-      publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
-    });
+    const conversationId = c.req.param("conversationId");
+    const deployments = await cachedJson(
+      redis,
+      {
+        key: conversationDeploymentsCacheKey(conversationId),
+        logger,
+        ttlSeconds: cacheTtlSeconds.conversationDetail,
+      },
+      () => listConversationDeploymentsForUser(db, {
+        conversationId,
+        ownerUserId: user.id,
+        publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
+      }),
+    );
   
     if (deployments === null) {
       return c.json(

@@ -38,6 +38,8 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
   app.use("*", async (c, next) => {
     c.set("env", context.env);
     c.set("db", context.db);
+    c.set("logger", context.logger);
+    c.set("redis", context.redis);
     return next();
   });
 

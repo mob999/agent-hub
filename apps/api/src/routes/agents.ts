@@ -26,6 +26,8 @@ import {
   createConversationArtifactAction,
   createConversationArtifactFileRevision,
   createConversationArtifactRevision,
+  cacheTtlSeconds,
+  cachedJson,
   createGroupConversation,
   createProjectConversation,
   createUserMessageAndRun,
@@ -62,6 +64,7 @@ import {
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
+  invalidateUserSidebarCache,
   listAgentsForUser,
   listDaemonDevicesWithRuntimes,
   listRecentDirectConversationMessagesForAgent,
@@ -83,6 +86,7 @@ import {
   updateAgentProfileForUser,
   updateGroupConversation,
   updateProjectConversation,
+  userAgentsCacheKey,
   type RunnableAgent,
   type RunQueueJob,
   type UserMessageAttachmentUpload,
@@ -137,10 +141,18 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     }
   
     return c.json({
-      agents: await listAgentsForUser(db, {
-        ownerUserId: user.id,
-        status,
-      }),
+      agents: await cachedJson(
+        redis,
+        {
+          key: userAgentsCacheKey({ status: status ?? "default", userId: user.id }),
+          logger,
+          ttlSeconds: cacheTtlSeconds.sidebar,
+        },
+        () => listAgentsForUser(db, {
+          ownerUserId: user.id,
+          status,
+        }),
+      ),
     });
   });
   
@@ -235,6 +247,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         updatedAt: createdAt.toISOString(),
       },
     });
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ agent, queueMessageId }, 202);
   });
@@ -270,6 +283,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         404,
       );
     }
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ agent });
   });
@@ -454,6 +468,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         404,
       );
     }
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ agent: result.agent });
   });
@@ -489,6 +504,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         404,
       );
     }
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ agent: result.agent });
   });
@@ -536,6 +552,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         400,
       );
     }
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ ok: true });
   });

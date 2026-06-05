@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { oauthAccounts, users } from "@agent-hub/db";
 import { isDefaultAvatarPath, pickRandomDefaultAvatar } from "@agent-hub/core";
+import { deleteCacheKeys, sessionCacheKey } from "@agent-hub/server";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { and, eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -423,10 +424,13 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
 authRoutes.openapi(logoutRoute, async (c) => {
   const db = c.get("db");
   const env = c.get("env");
+  const logger = c.get("logger");
+  const redis = c.get("redis");
   const token = getCookie(c, env.AUTH_SESSION_COOKIE);
 
   if (token) {
     await revokeSession(db, token);
+    await deleteCacheKeys(redis, [sessionCacheKey(token)], logger);
   }
 
   deleteCookie(c, env.AUTH_SESSION_COOKIE, clearSessionCookieOptions(env));
@@ -459,6 +463,9 @@ authRoutes.openapi(meRoute, async (c) => {
 
 authRoutes.openapi(updateMeRoute, async (c) => {
   const db = c.get("db");
+  const env = c.get("env");
+  const logger = c.get("logger");
+  const redis = c.get("redis");
   const user = c.get("user");
 
   if (!user) {
@@ -514,6 +521,11 @@ authRoutes.openapi(updateMeRoute, async (c) => {
       },
       404,
     );
+  }
+
+  const token = getCookie(c, env.AUTH_SESSION_COOKIE);
+  if (token) {
+    await deleteCacheKeys(redis, [sessionCacheKey(token)], logger);
   }
 
   return c.json({ user: updatedUser }, 200);

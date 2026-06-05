@@ -31,6 +31,10 @@ function createAuthTestApp() {
   app.use("*", async (c, next) => {
     c.set("env", testEnv);
     c.set("db", {} as AppBindings["Variables"]["db"]);
+    c.set("logger", { warn: () => undefined } as unknown as AppBindings["Variables"]["logger"]);
+    c.set("redis", {
+      del: async () => 0,
+    } as unknown as AppBindings["Variables"]["redis"]);
     c.set("user", null);
     await next();
   });

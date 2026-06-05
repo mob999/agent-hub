@@ -62,6 +62,7 @@ import {
   listConversationsForUser,
   getRunEventsForUser,
   getRunForUser,
+  invalidateConversationCache,
   listAgentsForUser,
   listDaemonDevicesWithRuntimes,
   listRecentDirectConversationMessagesForAgent,
@@ -115,6 +116,10 @@ export function createConversationMessageRoutes(context: ApiRouteContext): OpenA
     buildGroupTaskOrchestratorInstructions,
     buildGroupTaskOrchestratorPrompt,
   } = context.services;
+  const invalidateActiveConversation = (input: {
+    conversationId: string;
+    ownerUserId: string;
+  }) => invalidateConversationCache(redis, { ...input, logger });
 
   app.use("/conversations/*", requireAuth);
 
@@ -388,6 +393,10 @@ export function createConversationMessageRoutes(context: ApiRouteContext): OpenA
           }),
         ],
       );
+      await invalidateActiveConversation({
+        conversationId: result.conversation.id,
+        ownerUserId: user.id,
+      });
   
       return c.json(
         {
@@ -573,6 +582,10 @@ export function createConversationMessageRoutes(context: ApiRouteContext): OpenA
           }),
         ],
       );
+      await invalidateActiveConversation({
+        conversationId: result.conversation.id,
+        ownerUserId: user.id,
+      });
   
       return c.json(
         {
@@ -759,6 +772,10 @@ export function createConversationMessageRoutes(context: ApiRouteContext): OpenA
         }),
       ],
     );
+    await invalidateActiveConversation({
+      conversationId: result.conversation.id,
+      ownerUserId: user.id,
+    });
   
     return c.json(
       {

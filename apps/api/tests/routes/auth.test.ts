@@ -18,7 +18,7 @@ const testEnv: ApiEnv = {
   AGENTHUB_DAEMON_GATEWAY_URL: "http://localhost:3001",
   GITHUB_CLIENT_ID: "github-client-id",
   GITHUB_CLIENT_SECRET: "github-client-secret",
-  GITHUB_OAUTH_CALLBACK_URL: "http://127.0.0.1:3000/auth/github/callback",
+  GITHUB_OAUTH_CALLBACK_URL: "http://localhost:3000/auth/github/callback",
   AGENTHUB_DEFAULT_WORKSPACE_PATH: "/tmp/agent-hub",
   AGENTHUB_STORAGE_ROOT: "/tmp/agent-hub/storage",
   AGENTHUB_PUBLIC_API_URL: "http://localhost:3000",
@@ -70,7 +70,7 @@ describe("auth routes", () => {
     );
     expect(location.searchParams.get("client_id")).toBe("github-client-id");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://127.0.0.1:3000/auth/github/callback",
+      "http://localhost:3000/auth/github/callback",
     );
     expect(location.searchParams.get("scope")).toBe("read:user user:email");
     expect(location.searchParams.get("state")).toBeTruthy();

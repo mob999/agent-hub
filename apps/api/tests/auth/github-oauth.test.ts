@@ -14,7 +14,7 @@ describe("GitHub OAuth helpers", () => {
     const url = new URL(
       buildGitHubAuthorizeUrl({
         clientId: "github-client-id",
-        callbackUrl: "http://127.0.0.1:3000/auth/github/callback",
+        callbackUrl: "http://localhost:3000/auth/github/callback",
         state: "state-token",
       }),
     );
@@ -22,7 +22,7 @@ describe("GitHub OAuth helpers", () => {
     expect(url.origin + url.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("github-client-id");
     expect(url.searchParams.get("redirect_uri")).toBe(
-      "http://127.0.0.1:3000/auth/github/callback",
+      "http://localhost:3000/auth/github/callback",
     );
     expect(url.searchParams.get("scope")).toBe("read:user user:email");
     expect(url.searchParams.get("state")).toBe("state-token");

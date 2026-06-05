@@ -1674,24 +1674,27 @@ export function ChannelWorkspace({
                       }
                     }}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-xs font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]">
-                      {agent.agent.avatar ? (
-                        <img
-                          src={agent.agent.avatar}
-                          alt={agent.agent.name}
-                          className="h-6 w-6 rounded-[3px] object-cover"
-                        />
-                      ) : (
-                        displayNameInitial(agent.agent.name)
+                    <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-xs font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.75)_inset]">
+                      <span className="grid h-full w-full place-items-center overflow-hidden rounded-md">
+                        {agent.agent.avatar ? (
+                          <img
+                            src={agent.agent.avatar}
+                            alt={agent.agent.name}
+                            className="h-6 w-6 rounded-[3px] object-cover"
+                          />
+                        ) : (
+                          displayNameInitial(agent.agent.name)
+                        )}
+                      </span>
+                      {agentIsOrchestrator && (
+                        <span className="absolute -bottom-1 -right-1 grid h-3.5 w-3.5 place-items-center rounded-full border-2 border-white bg-[var(--cds-support-success)] text-white shadow-[0_1px_2px_rgba(15,23,42,0.2)]" aria-hidden="true">
+                          <UserAdmin size={8} />
+                        </span>
                       )}
                     </span>
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="min-w-0 truncate font-semibold">@{agent.agent.name}</span>
-                      {agentIsOrchestrator && (
-                        <Tag className="m-0" type="green" size="sm">
-                          Orch
-                        </Tag>
-                      )}
+                      {agentIsOrchestrator && <span className="sr-only">Orchestrator</span>}
                     </span>
                     <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--cds-support-success)]" aria-hidden="true" />
                   </button>

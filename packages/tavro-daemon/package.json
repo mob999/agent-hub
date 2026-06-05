@@ -15,9 +15,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "pnpm --filter @agent-hub/daemon build && tsup",
+    "build": "pnpm --filter @agent-hub/core build && pnpm --filter @agent-hub/config build && pnpm --filter @agent-hub/daemon build && tsup",
     "pack:dry-run": "npm pack --dry-run",
-    "typecheck": "pnpm --filter @agent-hub/daemon build && tsc --noEmit"
+    "typecheck": "pnpm --filter @agent-hub/core build && pnpm --filter @agent-hub/config build && pnpm --filter @agent-hub/daemon build && tsc --noEmit"
   },
   "type": "module",
   "dependencies": {

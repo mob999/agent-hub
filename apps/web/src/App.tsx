@@ -91,7 +91,6 @@ function getRoutePath(): RoutePath {
 
   if (
     path === '/login' ||
-    path === '/register' ||
     path === '/chat' ||
     path === '/chat/search' ||
     chatStateFromPath(path).conversationId !== null ||
@@ -99,6 +98,9 @@ function getRoutePath(): RoutePath {
     path === '/daemon'
   ) {
     return path as RoutePath
+  }
+  if (path === '/register') {
+    return '/login'
   }
   return '/chat'
 }
@@ -143,8 +145,8 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState)
   }, [route])
 
-  if (route === '/login' || route === '/register') {
-    return <AuthPage mode={route === '/login' ? 'login' : 'register'} navigate={navigate} />
+  if (route === '/login') {
+    return <AuthPage />
   }
 
   return (

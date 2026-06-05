@@ -1,28 +1,24 @@
 import {
   Button,
-  Form,
   InlineLoading,
   InlineNotification,
-  Link,
-  PasswordInput,
   Stack,
   Tag,
-  TextInput,
   Theme,
 } from '@carbon/react'
 import { ChatBot } from '@carbon/react/icons'
-import { useState, type FormEvent, type MouseEvent } from 'react'
-import { ApiRequestError, apiRequest, type AuthResponse } from '../lib/api'
+import { useState, type SVGProps } from 'react'
+import { apiUrl } from '../lib/api'
 
 export type ChatRoutePath = '/chat' | `/chat/${string}`
 export type WorkspaceRoutePath = ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
-export type AuthRoutePath = '/login' | '/register'
+export type AuthRoutePath = '/login'
 export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
 
 const authRedirectStorageKey = 'agenthub.auth.redirect'
 
-function readPendingAuthRedirect(): RoutePath | null {
+function getPendingAuthRedirect(): WorkspaceRoutePath | EditorRoutePath | null {
   const value = window.sessionStorage.getItem(authRedirectStorageKey)
   const isChatConversationRoute = value?.startsWith('/chat/') === true &&
     (
@@ -42,116 +38,67 @@ function readPendingAuthRedirect(): RoutePath | null {
     value === '/daemon' ||
     isEditorRoute
   ) {
-    window.sessionStorage.removeItem(authRedirectStorageKey)
-    return value as RoutePath
+    return value as WorkspaceRoutePath | EditorRoutePath
   }
 
   return null
 }
 
-interface AuthPageProps {
-  mode: 'login' | 'register'
-  navigate: (path: RoutePath) => void
-}
-
-function isEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-}
-
-export function AuthPage({ mode, navigate }: AuthPageProps) {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [serverError, setServerError] = useState<string | null>(null)
-
-  const isRegister = mode === 'register'
-  const emailError = submitted
-    ? email.trim().length === 0
-      ? 'Email address is required.'
-      : !isEmail(email)
-        ? 'Enter a valid email address.'
-        : ''
-    : ''
-  const passwordError = submitted
-    ? password.length === 0
-      ? 'Password is required.'
-      : isRegister && password.length < 8
-        ? 'Use at least 8 characters.'
-        : ''
-    : ''
-  const confirmPasswordError =
-    submitted && isRegister && confirmPassword !== password ? 'Passwords must match.' : ''
-
-  const validate = () => {
-    if (!isEmail(email)) {
-      return false
-    }
-
-    if (password.length === 0) {
-      return false
-    }
-
-    if (isRegister && (password.length < 8 || confirmPassword !== password)) {
-      return false
-    }
-
-    return true
+function readOAuthError(): string | null {
+  const error = new URLSearchParams(window.location.search).get('error')
+  if (!error) {
+    return null
   }
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSubmitted(true)
+  const messages: Record<string, string> = {
+    github_email_unavailable: 'GitHub did not return a verified primary email.',
+    github_invalid_state: 'The GitHub login session expired. Try again.',
+    github_profile_unavailable: 'GitHub profile details could not be loaded.',
+    github_token_exchange_failed: 'GitHub authorization could not be completed.',
+    github_user_create_failed: 'Your Tavro account could not be created.',
+  }
+
+  return messages[error] ?? 'GitHub login could not be completed.'
+}
+
+function GitHubIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} aria-hidden="true" focusable="false" viewBox="0 0 19 19">
+      <use href="/icons.svg#github-icon" />
+    </svg>
+  )
+}
+
+export function AuthPage() {
+  const [submitting, setSubmitting] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(() => readOAuthError())
+
+  const startGitHubLogin = () => {
+    setSubmitting(true)
     setServerError(null)
 
-    if (!validate()) {
-      return
-    }
-
-    setSubmitting(true)
-
-    try {
-      await apiRequest<AuthResponse>(isRegister ? '/auth/register' : '/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(
-          isRegister
-            ? { email: email.trim(), password, name: name.trim() || undefined }
-            : { email: email.trim(), password },
-        ),
-      })
-      navigate(readPendingAuthRedirect() ?? '/chat')
-    } catch (error) {
-      if (error instanceof ApiRequestError) {
-        setServerError(error.message)
-      } else {
-        setServerError('We could not reach AgentHub. Try again in a moment.')
-      }
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const goTo = (path: RoutePath) => (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault()
-    navigate(path)
+    const redirect = getPendingAuthRedirect() ?? '/chat'
+    const url = new URL(apiUrl('/auth/github/start'))
+    url.searchParams.set('redirect', redirect)
+    url.searchParams.set('web_origin', window.location.origin)
+    window.sessionStorage.removeItem(authRedirectStorageKey)
+    window.location.assign(url.toString())
   }
 
   return (
     <main
       className="grid min-h-screen grid-cols-[minmax(24rem,0.95fr)_minmax(28rem,1.05fr)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1"
-      aria-label={isRegister ? 'Create account' : 'Log in'}
+      aria-label="Log in"
     >
       <Theme
         theme="g100"
         as="section"
         className="flex min-h-screen flex-col justify-between gap-16 p-12 text-[var(--cds-text-primary)] max-[1055px]:min-h-0 max-[1055px]:p-8 max-[671px]:p-4"
-        aria-label="AgentHub preview"
+        aria-label="Tavro preview"
       >
         <div className="inline-flex items-center gap-3">
           <ChatBot size={32} />
-          <span className="font-semibold">AgentHub</span>
+          <span className="font-semibold">Tavro</span>
         </div>
         <div className="grid max-w-[38rem] gap-4">
           <p className="cds--type-label-01">Human + agent workspace</p>
@@ -184,94 +131,32 @@ export function AuthPage({ mode, navigate }: AuthPageProps) {
 
       <section className="grid min-h-screen items-center bg-[var(--cds-background)] p-12 max-[1055px]:min-h-0 max-[1055px]:p-8 max-[671px]:p-4">
         <div className="w-full max-w-[28rem]">
-          <Form aria-label={isRegister ? 'Create account' : 'Log in'} onSubmit={submit}>
-            <Stack gap={7}>
-              <div>
-                <h2 className="cds--type-heading-05">
-                  {isRegister ? 'Create an account' : 'Log in'}
-                </h2>
-                <p className="cds--type-body-01 mt-3 text-[var(--cds-text-secondary)]">
-                  {isRegister
-                    ? 'Start a workspace for local and cloud agents.'
-                    : 'Continue to your AgentHub workspace.'}
-                </p>
-              </div>
-
-              {serverError && (
-                <InlineNotification
-                  kind="error"
-                  title={isRegister ? 'Registration failed' : 'Login failed'}
-                  subtitle={serverError}
-                  lowContrast
-                  aria-label="Close notification"
-                />
-              )}
-
-              {isRegister && (
-                <TextInput
-                  id="register-name"
-                  labelText="Name (optional)"
-                  value={name}
-                  autoComplete="name"
-                  onChange={(event) => setName(event.target.value)}
-                />
-              )}
-
-              <TextInput
-                id={`${mode}-email`}
-                labelText="Email address"
-                type="email"
-                value={email}
-                autoComplete="email"
-                invalid={Boolean(emailError)}
-                invalidText={emailError}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-
-              <PasswordInput
-                id={`${mode}-password`}
-                labelText="Password"
-                value={password}
-                autoComplete={isRegister ? 'new-password' : 'current-password'}
-                invalid={Boolean(passwordError)}
-                invalidText={passwordError}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-
-              {isRegister && (
-                <PasswordInput
-                  id="register-confirm-password"
-                  labelText="Confirm password"
-                  value={confirmPassword}
-                  autoComplete="new-password"
-                  invalid={Boolean(confirmPasswordError)}
-                  invalidText={confirmPasswordError}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                />
-              )}
-
-              {submitting ? (
-                <InlineLoading
-                  description={isRegister ? 'Creating account...' : 'Logging in...'}
-                  status="active"
-                />
-              ) : (
-                <Button type="submit" size="lg">
-                  {isRegister ? 'Create account' : 'Log in'}
-                </Button>
-              )}
-
-              <p className="cds--type-body-01">
-                {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
-                <Link
-                  href={isRegister ? '/login' : '/register'}
-                  onClick={goTo(isRegister ? '/login' : '/register')}
-                >
-                  {isRegister ? 'Log in' : 'Create an account'}
-                </Link>
+          <Stack gap={7}>
+            <div>
+              <h2 className="cds--type-heading-05">Log in</h2>
+              <p className="cds--type-body-01 mt-3 text-[var(--cds-text-secondary)]">
+                Continue to your Tavro workspace with GitHub.
               </p>
-            </Stack>
-          </Form>
+            </div>
+
+            {serverError && (
+              <InlineNotification
+                kind="error"
+                title="Login failed"
+                subtitle={serverError}
+                lowContrast
+                aria-label="Close notification"
+              />
+            )}
+
+            {submitting ? (
+              <InlineLoading description="Opening GitHub..." status="active" />
+            ) : (
+              <Button type="button" size="lg" renderIcon={GitHubIcon} onClick={startGitHubLogin}>
+                Continue with GitHub
+              </Button>
+            )}
+          </Stack>
         </div>
       </section>
     </main>

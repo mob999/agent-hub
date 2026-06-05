@@ -46,6 +46,7 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
     cors({
       origin: [
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         urlOrigin(context.env.AGENTHUB_PUBLIC_WEB_URL),
       ],
       credentials: true,

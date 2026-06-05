@@ -9,21 +9,6 @@ export const UserSchema = z
   })
   .openapi("User");
 
-export const RegisterRequestSchema = z
-  .object({
-    email: z.string().email().max(320).openapi({ example: "test@example.com" }),
-    password: z.string().min(8).max(128).openapi({ example: "12345678" }),
-    name: z.string().min(1).max(120).optional().openapi({ example: "Manual Test" }),
-  })
-  .openapi("RegisterRequest");
-
-export const LoginRequestSchema = z
-  .object({
-    email: z.string().email().max(320).openapi({ example: "test@example.com" }),
-    password: z.string().min(1).max(128).openapi({ example: "12345678" }),
-  })
-  .openapi("LoginRequest");
-
 export const AuthUserResponseSchema = z
   .object({
     user: UserSchema,

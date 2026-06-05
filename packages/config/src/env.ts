@@ -90,6 +90,12 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DAEMON_GATEWAY_URL: z.string().url().default("http://localhost:3001"),
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  GITHUB_OAUTH_CALLBACK_URL: z
+    .string()
+    .url()
+    .default("http://127.0.0.1:3000/auth/github/callback"),
   AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
   AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),

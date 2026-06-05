@@ -41,7 +41,7 @@ jobs:
 
       - name: Verify requested version
         run: |
-          node -e "const pkg = require('./packages/tavro-daemon/package.json'); if (pkg.version !== process.env.VERSION) { console.error(`Input version ${process.env.VERSION} does not match package version ${pkg.version}.`); process.exit(1); }"
+          node -e 'const pkg = require("./packages/tavro-daemon/package.json"); if (pkg.version !== process.env.VERSION) { console.error("Input version " + process.env.VERSION + " does not match package version " + pkg.version + "."); process.exit(1); }'
           if npm view "@tavro-ai/daemon@${VERSION}" version >/dev/null 2>&1; then
             echo "@tavro-ai/daemon@${VERSION} is already published."
             exit 1

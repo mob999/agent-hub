@@ -1,4 +1,5 @@
 import { InlineNotification, SkeletonText } from '@carbon/react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgentCreateModal } from '../components/AgentCreateModal'
@@ -22,7 +23,6 @@ import {
   type ArchiveAgentResponse,
   type ArchiveGroupConversationResponse,
   type AgentDetails,
-  type AgentRun,
   type AgentRunSummary,
   type AuthResponse,
   type Conversation,
@@ -46,10 +46,23 @@ import {
   type SearchTimeFilter,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
-  type User,
   type WorkspaceView,
 } from '../lib/api'
 import { writePendingAuthRedirect } from '../lib/auth-redirect'
+import {
+  fetchAgents,
+  fetchAuthMe,
+  fetchConversationArtifacts,
+  fetchConversationDeployments,
+  fetchConversationMessages,
+  fetchConversations,
+  fetchConversationTasks,
+  fetchDaemonDevices,
+  fetchRun,
+  fetchRunEvents,
+  fetchRuns,
+  queryKeys,
+} from '../lib/query'
 import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
@@ -207,10 +220,20 @@ export function WorkspacePage({
   editorRoute = null,
   navigate,
 }: WorkspacePageProps) {
+  const queryClient = useQueryClient()
+  const authQuery = useQuery({
+    queryFn: fetchAuthMe,
+    queryKey: queryKeys.authMe(),
+    retry: false,
+  })
   const initialSearchRouteState = readCurrentSearchRouteState()
-  const [user, setUser] = useState<User | null>(null)
-  const [authLoading, setAuthLoading] = useState(true)
-  const [authError, setAuthError] = useState<string | null>(null)
+  const user = authQuery.data?.user ?? null
+  const authLoading = authQuery.isPending
+  const authError =
+    authQuery.error === null ||
+    (authQuery.error instanceof ApiRequestError && authQuery.error.status === 401)
+      ? null
+      : 'Unable to load your session.'
   const [devices, setDevices] = useState<DaemonDevice[]>([])
   const [deviceError, setDeviceError] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDetails[]>([])
@@ -396,8 +419,11 @@ export function WorkspacePage({
 
   const loadDevices = useCallback(async () => {
     try {
-      const response = await apiRequest<{ devices: DaemonDevice[] }>('/daemon/devices')
-      setDevices(response.devices)
+      const devices = await queryClient.fetchQuery({
+        queryFn: fetchDaemonDevices,
+        queryKey: queryKeys.daemonDevices(),
+      })
+      setDevices(devices)
       setDeviceError(null)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -406,16 +432,19 @@ export function WorkspacePage({
         setDeviceError('Unable to load daemon devices.')
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadAgents = useCallback(async () => {
     try {
-      const response = await apiRequest<{ agents: AgentDetails[] }>('/agents')
-      setAgents(response.agents)
-      agentsRef.current = response.agents
+      const agents = await queryClient.fetchQuery({
+        queryFn: () => fetchAgents('default'),
+        queryKey: queryKeys.agents('default'),
+      })
+      setAgents(agents)
+      agentsRef.current = agents
       setRuns((current) =>
         current.map((localRun) => {
-          const runAgent = response.agents.find((agent) => agent.agent.id === localRun.run.agentId)
+          const runAgent = agents.find((agent) => agent.agent.id === localRun.run.agentId)
 
           return {
             ...localRun,
@@ -433,12 +462,15 @@ export function WorkspacePage({
     } finally {
       setAgentsLoaded(true)
     }
-  }, [])
+  }, [queryClient])
 
   const loadArchivedAgents = useCallback(async () => {
     try {
-      const response = await apiRequest<{ agents: AgentDetails[] }>('/agents?status=archived')
-      setArchivedAgents(response.agents)
+      const agents = await queryClient.fetchQuery({
+        queryFn: () => fetchAgents('archived'),
+        queryKey: queryKeys.agents('archived'),
+      })
+      setArchivedAgents(agents)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setAgentError(error.message)
@@ -446,19 +478,14 @@ export function WorkspacePage({
         setAgentError('Unable to load archived agents.')
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadConversations = useCallback(async () => {
     try {
-      const defaultResponse = await apiRequest<{ conversation: Conversation }>('/conversations/default-group', {
-        method: 'POST',
+      const conversations = await queryClient.fetchQuery({
+        queryFn: () => fetchConversations('default'),
+        queryKey: queryKeys.conversations('default'),
       })
-      const response = await apiRequest<{ conversations: Conversation[] }>('/conversations')
-      const conversations = response.conversations.some(
-        (conversation) => conversation.id === defaultResponse.conversation.id,
-      )
-        ? response.conversations
-        : [defaultResponse.conversation, ...response.conversations]
 
       setConversations(conversations)
       const conversationIds = new Set(conversations.map((conversation) => conversation.id))
@@ -484,12 +511,15 @@ export function WorkspacePage({
     } finally {
       setConversationsLoaded(true)
     }
-  }, [activateConversation, activeConversationId, navigate, route, routeConversationId, user])
+  }, [activateConversation, activeConversationId, queryClient, routeConversationId, user])
 
   const loadArchivedConversations = useCallback(async () => {
     try {
-      const response = await apiRequest<{ conversations: Conversation[] }>('/conversations?status=archived')
-      setArchivedConversations(response.conversations)
+      const conversations = await queryClient.fetchQuery({
+        queryFn: () => fetchConversations('archived'),
+        queryKey: queryKeys.conversations('archived'),
+      })
+      setArchivedConversations(conversations)
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
@@ -497,58 +527,68 @@ export function WorkspacePage({
         setRunError('Unable to load archived conversations.')
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ messages: ConversationMessage[] }>(
-        `/conversations/${conversationId}/messages`,
-      )
+      const messages = await queryClient.fetchQuery({
+        queryFn: () => fetchConversationMessages(conversationId),
+        queryKey: queryKeys.conversationMessages(conversationId),
+      })
       setMessagesByConversation((current) => ({
         ...current,
-        [conversationId]: response.messages,
+        [conversationId]: messages,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadTasks = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ goals: ConversationGoal[] }>(
-        `/conversations/${conversationId}/tasks`,
-      )
+      const goals = await queryClient.fetchQuery({
+        queryFn: () => fetchConversationTasks(conversationId),
+        queryKey: queryKeys.conversationTasks(conversationId),
+      })
       setGoalsByConversation((current) => ({
         ...current,
-        [conversationId]: response.goals,
+        [conversationId]: goals,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadArtifacts = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ artifacts: ConversationArtifact[] }>(
-        `/conversations/${conversationId}/artifacts`,
-      )
+      const artifacts = await queryClient.fetchQuery({
+        queryFn: () => fetchConversationArtifacts(conversationId),
+        queryKey: queryKeys.conversationArtifacts(conversationId),
+      })
       setArtifactsByConversation((current) => ({
         ...current,
-        [conversationId]: response.artifacts,
+        [conversationId]: artifacts,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadConversationDetails = useCallback(async (conversationId: string) => {
-    setLoadingConversationIds((current) => ({ ...current, [conversationId]: true }))
+    const hasCachedDetails =
+      queryClient.getQueryData(queryKeys.conversationMessages(conversationId)) !== undefined &&
+      queryClient.getQueryData(queryKeys.conversationTasks(conversationId)) !== undefined &&
+      queryClient.getQueryData(queryKeys.conversationArtifacts(conversationId)) !== undefined
+
+    if (!hasCachedDetails) {
+      setLoadingConversationIds((current) => ({ ...current, [conversationId]: true }))
+    }
 
     try {
       await Promise.all([
@@ -562,33 +602,37 @@ export function WorkspacePage({
           return current
         }
 
-        const next = { ...current }
-        delete next[conversationId]
-        return next
-      })
-    }
-  }, [loadArtifacts, loadMessages, loadTasks])
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+  }
+  }, [loadArtifacts, loadMessages, loadTasks, queryClient])
 
   const loadDeployments = useCallback(async (conversationId: string) => {
     try {
-      const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
-        `/conversations/${conversationId}/deployments`,
-      )
+      const deployments = await queryClient.fetchQuery({
+        queryFn: () => fetchConversationDeployments(conversationId),
+        queryKey: queryKeys.conversationDeployments(conversationId),
+      })
       setDeploymentsByConversation((current) => ({
         ...current,
-        [conversationId]: response.deployments,
+        [conversationId]: deployments,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
       }
     }
-  }, [])
+  }, [queryClient])
 
   const loadRuns = useCallback(async () => {
     try {
-      const response = await apiRequest<{ runs: AgentRunSummary[] }>('/runs')
-      const loadedRuns = response.runs.map((run) => toLocalRun(run, agentsRef.current))
+      const runs = await queryClient.fetchQuery({
+        queryFn: fetchRuns,
+        queryKey: queryKeys.runs(),
+      })
+      const loadedRuns = runs.map((run) => toLocalRun(run, agentsRef.current))
 
       setRuns(loadedRuns)
       setSelectedRunId((current) => {
@@ -606,13 +650,19 @@ export function WorkspacePage({
         setRunError('Unable to load runs.')
       }
     }
-  }, [])
+  }, [queryClient])
 
   const refreshRun = useCallback(async (runId: string) => {
     try {
-      const [runResponse, eventResponse] = await Promise.all([
-        apiRequest<{ run: AgentRun }>(`/runs/${runId}`),
-        apiRequest<{ events: RunEvent[] }>(`/runs/${runId}/events`),
+      const [run, events] = await Promise.all([
+        queryClient.fetchQuery({
+          queryFn: () => fetchRun(runId),
+          queryKey: queryKeys.run(runId),
+        }),
+        queryClient.fetchQuery({
+          queryFn: () => fetchRunEvents(runId),
+          queryKey: queryKeys.runEvents(runId),
+        }),
       ])
 
       setRuns((current) =>
@@ -620,56 +670,46 @@ export function WorkspacePage({
           localRun.run.id === runId
             ? {
                 ...localRun,
-                run: runResponse.run,
+                run,
               }
             : localRun,
         ),
       )
       setEventsByRun((current) => ({
         ...current,
-        [runId]: eventResponse.events,
+        [runId]: events,
       }))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status !== 404) {
         setRunError(error.message)
       }
     }
-  }, [])
+  }, [queryClient])
+
+  const invalidateAgentCatalog = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['agents'] })
+    void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+  }, [queryClient])
+
+  const invalidateConversationCatalog = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+  }, [queryClient])
+
+  const invalidateConversationDetail = useCallback((conversationId: string) => {
+    void queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] })
+  }, [queryClient])
 
   useEffect(() => {
-    let active = true
-
-    const loadUser = async () => {
-      try {
-        const response = await apiRequest<AuthResponse>('/auth/me')
-        if (!active) {
-          return
-        }
-        setUser(response.user)
-        setAuthError(null)
-      } catch (error) {
-        if (!active) {
-          return
-        }
-        if (error instanceof ApiRequestError && error.status === 401) {
-          writePendingAuthRedirect(window.location.pathname)
-          navigate('/login')
-          return
-        }
-        setAuthError('Unable to load your session.')
-      } finally {
-        if (active) {
-          setAuthLoading(false)
-        }
-      }
+    if (!authQuery.error) {
+      return
     }
 
-    void loadUser()
-
-    return () => {
-      active = false
+    if (authQuery.error instanceof ApiRequestError && authQuery.error.status === 401) {
+      writePendingAuthRedirect(window.location.pathname)
+      navigate('/login')
+      return
     }
-  }, [navigate])
+  }, [authQuery.error, navigate])
 
   useEffect(() => {
     if (!user) {
@@ -865,11 +905,12 @@ export function WorkspacePage({
     }
 
     const timer = window.setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents('default') })
       void loadAgents()
     }, 2000)
 
     return () => window.clearInterval(timer)
-  }, [agents, loadAgents])
+  }, [agents, loadAgents, queryClient])
 
   useEffect(() => {
     if (selectedRunId === null) {
@@ -964,6 +1005,10 @@ export function WorkspacePage({
         response.conversation,
         ...current.filter((conversation) => conversation.id !== response.conversation.id),
       ])
+      queryClient.setQueryData<Conversation[]>(queryKeys.conversations('default'), (current = []) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
       setMessagesByConversation((current) => {
         const currentMessages = current[activeConversation.id] ?? []
         const nextMessages = [
@@ -981,6 +1026,24 @@ export function WorkspacePage({
           [activeConversation.id]: nextMessages,
         }
       })
+      queryClient.setQueryData<ConversationMessage[]>(
+        queryKeys.conversationMessages(activeConversation.id),
+        (currentMessages = []) => [
+          ...currentMessages.filter(
+            (message) =>
+              message.id !== response.messages.user.id &&
+              !assistantMessages.some((assistant) => assistant.id === message.id),
+          ),
+          response.messages.user,
+          ...assistantMessages,
+        ],
+      )
+      responseRuns.forEach((run) => {
+        queryClient.setQueryData(queryKeys.run(run.id), run)
+      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationTasks(activeConversation.id) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationArtifacts(activeConversation.id) })
       setRuns((current) => [
         ...responseRuns.map((run) => {
           const runAgent = agents.find((agent) => agent.agent.id === run.agentId)
@@ -1020,6 +1083,7 @@ export function WorkspacePage({
 
   const logout = async () => {
     await apiRequest<{ ok: true }>('/auth/logout', { method: 'POST' }).catch(() => null)
+    queryClient.clear()
     notifiedMessageIdsRef.current.clear()
     setUnreadByConversationId({})
     setRealtimeToasts([])
@@ -1036,7 +1100,7 @@ export function WorkspacePage({
         body: JSON.stringify(input),
       })
 
-      setUser(response.user)
+      queryClient.setQueryData(queryKeys.authMe(), response)
       setSettingsOpen(false)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1050,6 +1114,10 @@ export function WorkspacePage({
   }
 
   const refreshWorkspace = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
+    invalidateAgentCatalog()
+    invalidateConversationCatalog()
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
     void loadDevices()
     void loadAgents()
     void loadArchivedAgents()
@@ -1057,6 +1125,7 @@ export function WorkspacePage({
     void loadArchivedConversations()
     void loadRuns()
     if (activeConversationId !== null) {
+      invalidateConversationDetail(activeConversationId)
       void loadMessages(activeConversationId)
       void loadTasks(activeConversationId)
       void loadArtifacts(activeConversationId)
@@ -1072,11 +1141,14 @@ export function WorkspacePage({
     }
 
     const refreshAfterReconnect = () => {
+      invalidateConversationCatalog()
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
       void loadConversations()
       void loadArchivedConversations()
       void loadRuns()
 
       if (activeConversationId !== null) {
+        invalidateConversationDetail(activeConversationId)
         void loadMessages(activeConversationId)
         void loadTasks(activeConversationId)
         void loadArtifacts(activeConversationId)
@@ -1097,6 +1169,15 @@ export function WorkspacePage({
           [message.conversationId]: nextMessages,
         }
       })
+      queryClient.setQueryData<ConversationMessage[]>(
+        queryKeys.conversationMessages(message.conversationId),
+        (currentMessages = []) => [
+          ...currentMessages.filter((item) => item.id !== message.id),
+          message,
+        ].sort((first, second) =>
+          new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
+        ),
+      )
     }
     const notifyRealtimeMessage = (message: ConversationMessage) => {
       if (notifiedMessageIdsRef.current.has(message.id)) {
@@ -1151,6 +1232,8 @@ export function WorkspacePage({
           ...current.filter((localRun) => localRun.run.id !== event.run.id),
         ]
       })
+      queryClient.setQueryData(queryKeys.run(event.run.id), event.run)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
     }
     const upsertRunEvent = (event: Extract<RealtimeEvent, { type: 'run.event.created' }>) => {
       setEventsByRun((current) => {
@@ -1167,6 +1250,16 @@ export function WorkspacePage({
           [event.runId]: exists ? currentEvents : [...currentEvents, event.event],
         }
       })
+      queryClient.setQueryData<RunEvent[]>(queryKeys.runEvents(event.runId), (currentEvents = []) => {
+        const exists = currentEvents.some(
+          (item) =>
+            item.type === event.event.type &&
+            item.createdAt === event.event.createdAt &&
+            item.runId === event.event.runId,
+        )
+
+        return exists ? currentEvents : [...currentEvents, event.event]
+      })
     }
     const upsertGoal = (goal: ConversationGoal) => {
       setGoalsByConversation((current) => {
@@ -1180,6 +1273,13 @@ export function WorkspacePage({
           ],
         }
       })
+      queryClient.setQueryData<ConversationGoal[]>(
+        queryKeys.conversationTasks(goal.conversationId),
+        (currentGoals = []) => [
+          goal,
+          ...currentGoals.filter((item) => item.id !== goal.id),
+        ],
+      )
     }
     const upsertArtifact = (artifact: ConversationArtifact) => {
       setArtifactsByConversation((current) => {
@@ -1193,6 +1293,13 @@ export function WorkspacePage({
           ],
         }
       })
+      queryClient.setQueryData<ConversationArtifact[]>(
+        queryKeys.conversationArtifacts(artifact.conversationId),
+        (currentArtifacts = []) => [
+          artifact,
+          ...currentArtifacts.filter((item) => item.id !== artifact.id),
+        ],
+      )
     }
     const handleRealtimeEvent = (event: RealtimeEvent) => {
       switch (event.type) {
@@ -1202,16 +1309,37 @@ export function WorkspacePage({
               event.conversation as Conversation,
               ...current.filter((conversation) => conversation.id !== event.conversationId),
             ])
+            queryClient.setQueryData<Conversation[]>(queryKeys.conversations('default'), (current = []) => [
+              event.conversation as Conversation,
+              ...current.filter((conversation) => conversation.id !== event.conversationId),
+            ])
           } else {
             const existingConversation = conversationsRef.current.find(
               (conversation) => conversation.id === event.conversationId,
             )
 
             if (existingConversation === undefined || existingConversation.type === 'project') {
+              invalidateConversationCatalog()
               void loadConversations()
             }
 
             setConversations((current) => {
+              const existing = current.find((conversation) => conversation.id === event.conversationId)
+
+              if (existing === undefined) {
+                return current
+              }
+
+              return [
+                {
+                  ...existing,
+                  lastMessageAt: event.createdAt,
+                  updatedAt: event.createdAt,
+                },
+                ...current.filter((conversation) => conversation.id !== event.conversationId),
+              ]
+            })
+            queryClient.setQueryData<Conversation[]>(queryKeys.conversations('default'), (current = []) => {
               const existing = current.find((conversation) => conversation.id === event.conversationId)
 
               if (existing === undefined) {
@@ -1243,6 +1371,7 @@ export function WorkspacePage({
           if (event.goal !== undefined) {
             upsertGoal(event.goal)
           } else {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.conversationTasks(event.conversationId) })
             void loadTasks(event.conversationId)
           }
           break
@@ -1250,6 +1379,7 @@ export function WorkspacePage({
           upsertArtifact(event.artifact)
           break
         case 'artifact.action.updated':
+          void queryClient.invalidateQueries({ queryKey: queryKeys.conversationArtifacts(event.conversationId) })
           void loadArtifacts(event.conversationId)
           break
       }
@@ -1279,12 +1409,15 @@ export function WorkspacePage({
   }, [
     activeConversationId,
     agents,
+    invalidateConversationCatalog,
+    invalidateConversationDetail,
     loadArchivedConversations,
     loadArtifacts,
     loadConversations,
     loadMessages,
     loadRuns,
     loadTasks,
+    queryClient,
     user,
   ])
 
@@ -1394,6 +1527,7 @@ export function WorkspacePage({
         response.conversation,
         ...current.filter((conversation) => conversation.id !== response.conversation.id),
       ])
+      invalidateConversationCatalog()
       selectConversation(response.conversation.id)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1475,6 +1609,8 @@ export function WorkspacePage({
         ...current,
         [response.conversation.id]: [],
       }))
+      queryClient.setQueryData(queryKeys.conversationMessages(response.conversation.id), [])
+      invalidateConversationCatalog()
       if (user) {
         writeConversationDraft(user.id, response.conversation.id, '')
       }
@@ -1519,6 +1655,7 @@ export function WorkspacePage({
       ])
       activateConversation(response.conversation.id)
       setEditingGroupId(null)
+      invalidateConversationCatalog()
       void loadConversations()
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1557,6 +1694,7 @@ export function WorkspacePage({
       ])
       activateConversation(response.conversation.id)
       setEditingProjectId(null)
+      invalidateConversationCatalog()
       void loadConversations()
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1591,6 +1729,7 @@ export function WorkspacePage({
         ),
       )
       setEditingGroupId(null)
+      invalidateConversationCatalog()
       void loadConversations()
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1628,6 +1767,7 @@ export function WorkspacePage({
         clearActiveConversation()
       }
       setEditingGroupId(null)
+      invalidateConversationCatalog()
       void loadConversations()
       void loadArchivedConversations()
     } catch (error) {
@@ -1656,6 +1796,7 @@ export function WorkspacePage({
         response.conversation,
         ...current.filter((conversation) => conversation.id !== conversationId),
       ])
+      invalidateConversationCatalog()
       void loadConversations()
       void loadArchivedConversations()
     } catch (error) {
@@ -1690,6 +1831,8 @@ export function WorkspacePage({
         ...current,
         [response.conversation.id]: [],
       }))
+      queryClient.setQueryData(queryKeys.conversationMessages(response.conversation.id), [])
+      invalidateConversationCatalog()
       if (user) {
         writeConversationDraft(user.id, response.conversation.id, '')
       }
@@ -1721,6 +1864,7 @@ export function WorkspacePage({
       setArchivedConversations((current) =>
         current.filter((item) => item.id !== conversationId),
       )
+      invalidateConversationCatalog()
       void loadArchivedConversations()
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1747,6 +1891,7 @@ export function WorkspacePage({
       })
 
       setAgents((current) => [response.agent, ...current])
+      invalidateAgentCatalog()
       setSelectedRunId(null)
       const conversationResponse = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
         method: 'POST',
@@ -1756,6 +1901,7 @@ export function WorkspacePage({
         conversationResponse.conversation,
         ...current.filter((conversation) => conversation.id !== conversationResponse.conversation.id),
       ])
+      invalidateConversationCatalog()
       if (user) {
         writeConversationDraft(user.id, conversationResponse.conversation.id, '')
       }
@@ -1807,6 +1953,7 @@ export function WorkspacePage({
         ),
       )
       setEditingAgentId(null)
+      invalidateAgentCatalog()
       void loadAgents()
       void loadConversations()
     } catch (error) {
@@ -1846,6 +1993,7 @@ export function WorkspacePage({
         clearActiveConversation()
       }
       setEditingAgentId(null)
+      invalidateAgentCatalog()
       void loadAgents()
       void loadArchivedAgents()
       void loadConversations()
@@ -1874,6 +2022,7 @@ export function WorkspacePage({
         response.agent,
         ...current.filter((agent) => agent.agent.id !== agentId),
       ])
+      invalidateAgentCatalog()
       void loadAgents()
       void loadArchivedAgents()
       void loadConversations()
@@ -1899,6 +2048,7 @@ export function WorkspacePage({
       setArchivedConversations((current) =>
         current.filter((conversation) => conversation.directAgentId !== agentId),
       )
+      invalidateAgentCatalog()
       void loadArchivedAgents()
       void loadArchivedConversations()
     } catch (error) {
@@ -2104,11 +2254,13 @@ export function WorkspacePage({
                 onActiveEditorArtifactChange={openArtifactEditor}
                 refreshArtifacts={() => {
                   if (activeConversation?.id) {
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.conversationArtifacts(activeConversation.id) })
                     void loadArtifacts(activeConversation.id)
                   }
                 }}
                 refreshDeployments={() => {
                   if (activeConversation?.id) {
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.conversationDeployments(activeConversation.id) })
                     void loadDeployments(activeConversation.id)
                   }
                 }}
@@ -2121,6 +2273,7 @@ export function WorkspacePage({
           devices={devices}
           deviceError={deviceError}
           onDevicesChanged={() => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
             void loadDevices()
           }}
         />

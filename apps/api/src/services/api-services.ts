@@ -109,7 +109,7 @@ export function createApiServices(context: ApiContext) {
     return [
       "npx",
       "-y",
-      "@tavro/daemon@latest",
+      "@tavro-ai/daemon@latest",
       "connect",
       "--gateway-url",
       quote(input.gatewayUrl),

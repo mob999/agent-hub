@@ -200,7 +200,7 @@ pnpm --filter @agent-hub/daemon dev
 生产环境中，Web 端生成的 daemon 注册命令会使用 npm 包：
 
 ```bash
-npx -y @tavro/daemon@latest connect --gateway-url <worker-url> --device-id <device-id> --token <device-token>
+npx -y @tavro-ai/daemon@latest connect --gateway-url <worker-url> --device-id <device-id> --token <device-token>
 ```
 
 本地开发仍保留源码调试命令，方便直接在 monorepo 中运行 daemon。生产 API 和 Worker 需要配置相同的 `AGENTHUB_DAEMON_TOKEN_SECRET`，用于派生和校验每个 daemon device 的 token。

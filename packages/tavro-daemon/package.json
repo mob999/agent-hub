@@ -1,5 +1,5 @@
 {
-  "name": "@tavro/daemon",
+  "name": "@tavro-ai/daemon",
   "version": "0.1.0",
   "description": "Tavro local daemon",
   "main": "dist/index.js",

@@ -3,8 +3,17 @@ import postgres from "postgres";
 
 import * as schema from "./schema/index.js";
 
-export function createDb(databaseUrl: string) {
-  const client = postgres(databaseUrl, { max: 10 });
+export interface CreateDbOptions {
+  maxConnections?: number;
+}
+
+export function createDb(
+  databaseUrl: string,
+  options: CreateDbOptions = {},
+) {
+  const client = postgres(databaseUrl, {
+    max: options.maxConnections ?? 3,
+  });
   return drizzle(client, { schema });
 }
 

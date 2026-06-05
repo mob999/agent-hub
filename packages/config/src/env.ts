@@ -15,6 +15,8 @@ const nodeEnvSchema = z
 
 const portSchema = z.coerce.number().int().min(1).max(65535).default(3000);
 
+const databasePoolMaxSchema = z.coerce.number().int().min(1).max(20).default(3);
+
 const sessionTtlDaysSchema = z.coerce.number().int().positive().default(30);
 
 function normalizeWorkspaceRoot(value: unknown): string {
@@ -78,6 +80,7 @@ export const apiEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema,
   PORT: portSchema,
   DATABASE_URL: z.string().min(1),
+  DATABASE_POOL_MAX: databasePoolMaxSchema,
   REDIS_URL: z.string().min(1),
   AUTH_SESSION_COOKIE: z.string().min(1).default("agent_hub_session"),
   AUTH_SESSION_TTL_DAYS: sessionTtlDaysSchema,
@@ -108,6 +111,7 @@ export const workerEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema,
   WORKER_PORT: portSchema.default(3001),
   DATABASE_URL: z.string().min(1),
+  DATABASE_POOL_MAX: databasePoolMaxSchema,
   REDIS_URL: z.string().min(1),
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DAEMON_TOKEN_SECRET: z.string().min(1).optional(),

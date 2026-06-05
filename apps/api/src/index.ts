@@ -14,7 +14,9 @@ import { createApiApp } from "./app.js";
 import type { ApiContext } from "./context.js";
 
 const env = loadApiEnv();
-const db = createDb(env.DATABASE_URL);
+const db = createDb(env.DATABASE_URL, {
+  maxConnections: env.DATABASE_POOL_MAX,
+});
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const realtimeSubscriber = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({ bindings: { service: "api" } });

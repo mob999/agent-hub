@@ -59,7 +59,9 @@ import {
 import { DaemonGateway } from "./daemon/gateway.js";
 
 const env = loadWorkerEnv();
-const db = createDb(env.DATABASE_URL);
+const db = createDb(env.DATABASE_URL, {
+  maxConnections: env.DATABASE_POOL_MAX,
+});
 const redis = createAgentHubRedisClient(env.REDIS_URL);
 const logger = createLogger({
   bindings: {

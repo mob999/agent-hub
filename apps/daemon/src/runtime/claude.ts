@@ -26,6 +26,7 @@ import {
   attachJsonLineRuntimeOutput,
   createLogLineEvent,
   createRuntimeEvent,
+  createRuntimeProcessSpawner,
   createRuntimeSpawnOptions,
   mapAbortReasonToRunStatus,
   nowIsoDateTime,
@@ -252,10 +253,11 @@ async function runHiddenClaudePrompt(input: {
           "--append-system-prompt-file",
           tempFiles.write("append-system-prompt.txt", appendSystemPrompt),
         ]),
+    input.prompt,
   ], {
     ...createRuntimeSpawnOptions({
       cwd: input.workspacePath,
-      stdio: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     }),
   });
   const stdout = new LineDecoder();
@@ -280,9 +282,6 @@ async function runHiddenClaudePrompt(input: {
     }
   });
   childProcess.stderr.on("data", (chunk) => errors.push(...stderr.push(chunk)));
-
-  childProcess.stdin.write(input.prompt);
-  childProcess.stdin.end();
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     childProcess.once("error", reject);
@@ -329,16 +328,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     this.#mcpRelay = options.mcpRelay;
     this.#mcpServerCommand =
       options.mcpServerCommand ?? createAgentHubMcpServerCommand();
-    this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
+    this.#spawnProcess =
+      options.spawnProcess ?? createRuntimeProcessSpawner(spawnChildProcess);
   }
 
   async detect(): Promise<DaemonRuntime> {
     const childProcess = this.#spawnProcess(this.#executablePath, ["--version"], {
       ...createRuntimeSpawnOptions({
-        stdio: "pipe",
+        stdio: ["ignore", "pipe", "pipe"],
       }),
     });
-    childProcess.stdin.end();
     const stdout = new LineDecoder();
     const stderr = new LineDecoder();
     const output: string[] = [];
@@ -421,7 +420,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       input.run.dispatchMode === "resume"
         ? input.run.runtimeSessionId
         : undefined;
-    const args = [
+    const createArgs = (prompt: string): string[] => [
       "-p",
       ...(resumeSessionId === undefined ? [] : ["--resume", resumeSessionId]),
       "--verbose",
@@ -434,18 +433,14 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         : createClaudeAllowedToolsArg(input.agentHubMcpTools)),
       ...appendSystemPromptArgs,
       ...mcpConfigArgs,
+      prompt,
     ];
-    const childProcess = this.#spawnProcess(this.#executablePath, args, {
-      ...createRuntimeSpawnOptions({
-        cwd: input.workspacePath,
-        stdio: "pipe",
-      }),
-    });
     let completed = false;
     let aborted = false;
     let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
       "cancelled";
     let runtimeSessionStarted = false;
+    let childProcess: ReturnType<SpawnRuntimeProcess> | undefined;
 
     const complete = (
       status: Extract<RunEvent, { type: "run.completed" }>["status"],
@@ -468,45 +463,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       queue.end();
     };
 
-    attachJsonLineRuntimeOutput({
-      eventSink: queue,
-      mapJsonValue: (value) => {
-        const sessionId = readClaudeSessionId(value);
-        const emitRuntimeSessionStarted =
-          !runtimeSessionStarted && sessionId !== undefined;
-
-        if (emitRuntimeSessionStarted) {
-          runtimeSessionStarted = true;
-        }
-
-        return mapClaudeJsonEvents(value, input.run.id, {
-          emitRuntimeSessionStarted,
-        });
-      },
-      process: childProcess,
-      runId: input.run.id,
-    });
-
-    childProcess.once("error", (error) => {
-      complete("failed", error instanceof Error ? error.message : String(error));
-    });
-    childProcess.once("close", (exitCode) => {
-      if (aborted) {
-        complete(abortStatus);
-        return;
-      }
-
-      complete(
-        exitCode === 0 ? "succeeded" : "failed",
-        exitCode === 0 ? undefined : `Claude Code exited with code ${exitCode}`,
-      );
-    });
-
     input.abortSignal?.addEventListener(
       "abort",
       () => {
         aborted = true;
         abortStatus = mapAbortReasonToRunStatus(input.abortSignal?.reason);
+        if (childProcess === undefined) {
+          complete(abortStatus);
+          return;
+        }
+
         childProcess.kill("SIGTERM");
       },
       { once: true },
@@ -520,8 +486,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     });
 
     void (async () => {
+      let runPrompt = input.prompt;
+
       try {
-        const runPrompt = await buildPromptWithRuntimeMemory({
+        runPrompt = await buildPromptWithRuntimeMemory({
           agentInstructions: input.agentInstructions,
           basePrompt: input.prompt,
           contextCompression: input.contextCompression,
@@ -542,12 +510,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           runtimeKind: "claude-code",
           workspacePath: input.memoryWorkspacePath ?? input.workspacePath,
         });
-
-        childProcess.stdin.write(runPrompt);
-        childProcess.stdin.end();
       } catch (error) {
-        childProcess.stdin.write(input.prompt);
-        childProcess.stdin.end();
         queue.push(
           createLogLineEvent(
             input.run.id,
@@ -557,6 +520,57 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             }`,
           ),
         );
+      }
+
+      if (completed) {
+        return;
+      }
+
+      childProcess = this.#spawnProcess(this.#executablePath, createArgs(runPrompt), {
+        ...createRuntimeSpawnOptions({
+          cwd: input.workspacePath,
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+      });
+
+      attachJsonLineRuntimeOutput({
+        eventSink: queue,
+        mapJsonValue: (value) => {
+          const sessionId = readClaudeSessionId(value);
+          const emitRuntimeSessionStarted =
+            !runtimeSessionStarted && sessionId !== undefined;
+
+          if (emitRuntimeSessionStarted) {
+            runtimeSessionStarted = true;
+          }
+
+          return mapClaudeJsonEvents(value, input.run.id, {
+            emitRuntimeSessionStarted,
+          });
+        },
+        process: childProcess,
+        runId: input.run.id,
+      });
+
+      childProcess.once("error", (error) => {
+        complete("failed", error instanceof Error ? error.message : String(error));
+      });
+      childProcess.once("close", (exitCode) => {
+        if (aborted) {
+          complete(abortStatus);
+          return;
+        }
+
+        complete(
+          exitCode === 0 ? "succeeded" : "failed",
+          exitCode === 0 ? undefined : `Claude Code exited with code ${exitCode}`,
+        );
+      });
+
+      if (input.abortSignal?.aborted === true) {
+        aborted = true;
+        abortStatus = mapAbortReasonToRunStatus(input.abortSignal.reason);
+        childProcess.kill("SIGTERM");
       }
     })();
 

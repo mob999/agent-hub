@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import type { SpawnOptionsWithoutStdio } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 
 import type { AgentRunInput, RunEvent } from "@agent-hub/core";
 import { describe, expect, it } from "vitest";
@@ -39,7 +39,7 @@ class MockCodexProcess extends EventEmitter {
 interface SpawnCall {
   args: string[];
   command: string;
-  options: SpawnOptionsWithoutStdio;
+  options: SpawnOptions;
   process: MockCodexProcess;
 }
 
@@ -105,6 +105,10 @@ async function waitFor(
   throw new Error(message);
 }
 
+function promptArg(call: SpawnCall | undefined): string {
+  return call?.args.at(-1) ?? "";
+}
+
 describe("runtime context compression integration", () => {
   it("runs hidden compaction, writes daily memory, and injects the summary into the normal run", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-context-compression-"));
@@ -135,14 +139,13 @@ describe("runtime context compression integration", () => {
     );
 
     try {
-      await waitFor(() => calls.length === 2, "Expected hidden compaction process to spawn.");
-      const normalRun = calls[0]?.process;
-      const hiddenCompaction = calls[1]?.process;
+      await waitFor(() => calls.length === 1, "Expected hidden compaction process to spawn.");
+      const hiddenCompaction = calls[0]?.process;
 
-      expect(normalRun).toBeDefined();
       expect(hiddenCompaction).toBeDefined();
-      expect(calls[1]?.args).toContain("-c");
-      expect(hiddenCompaction?.stdinText).toBe(compressibleText);
+      expect(calls[0]?.args).toContain("-c");
+      expect(hiddenCompaction?.stdinText).toBe("");
+      expect(promptArg(calls[0])).toBe(compressibleText);
 
       hiddenCompaction?.stdout.write(
         `${JSON.stringify({
@@ -156,16 +159,20 @@ describe("runtime context compression integration", () => {
       );
       hiddenCompaction?.close(0);
 
+      await waitFor(() => calls.length === 2, "Expected normal run process to spawn.");
+      const normalRun = calls[1]?.process;
+
       await waitFor(
-        () => normalRun?.stdinText.includes(compressedSummary) === true,
+        () => promptArg(calls[1]).includes(compressedSummary) === true,
         "Expected normal run prompt to contain compressed context.",
       );
 
-      expect(normalRun?.stdinText).toContain("<agenthub_memory>");
-      expect(normalRun?.stdinText).toContain(compressedSummary);
-      expect(normalRun?.stdinText).toContain("Latest request: please continue.");
-      expect(normalRun?.stdinText).not.toContain("{{compressed_context}}");
-      expect(normalRun?.stdinText).not.toContain("old secret context that should be summarized");
+      expect(normalRun?.stdinText).toBe("");
+      expect(promptArg(calls[1])).toContain("<agenthub_memory>");
+      expect(promptArg(calls[1])).toContain(compressedSummary);
+      expect(promptArg(calls[1])).toContain("Latest request: please continue.");
+      expect(promptArg(calls[1])).not.toContain("{{compressed_context}}");
+      expect(promptArg(calls[1])).not.toContain("old secret context that should be summarized");
 
       normalRun?.close(0);
       const events = await eventsPromise;
@@ -226,14 +233,13 @@ describe("runtime context compression integration", () => {
     );
 
     try {
-      await waitFor(() => calls.length === 2, "Expected hidden Claude compaction process to spawn.");
-      const normalRun = calls[0]?.process;
-      const hiddenCompaction = calls[1]?.process;
+      await waitFor(() => calls.length === 1, "Expected hidden Claude compaction process to spawn.");
+      const hiddenCompaction = calls[0]?.process;
 
-      expect(normalRun).toBeDefined();
       expect(hiddenCompaction).toBeDefined();
-      expect(calls[1]?.args).toContain("--append-system-prompt-file");
-      expect(hiddenCompaction?.stdinText).toBe(compressibleText);
+      expect(calls[0]?.args).toContain("--append-system-prompt-file");
+      expect(hiddenCompaction?.stdinText).toBe("");
+      expect(promptArg(calls[0])).toBe(compressibleText);
 
       hiddenCompaction?.stdout.write(
         `${JSON.stringify({
@@ -248,16 +254,20 @@ describe("runtime context compression integration", () => {
       );
       hiddenCompaction?.close(0);
 
+      await waitFor(() => calls.length === 2, "Expected normal Claude run process to spawn.");
+      const normalRun = calls[1]?.process;
+
       await waitFor(
-        () => normalRun?.stdinText.includes(compressedSummary) === true,
+        () => promptArg(calls[1]).includes(compressedSummary) === true,
         "Expected normal Claude run prompt to contain compressed context.",
       );
 
-      expect(normalRun?.stdinText).toContain("<agenthub_memory>");
-      expect(normalRun?.stdinText).toContain(compressedSummary);
-      expect(normalRun?.stdinText).toContain("Latest request: please continue with Claude.");
-      expect(normalRun?.stdinText).not.toContain("{{compressed_context}}");
-      expect(normalRun?.stdinText).not.toContain("old context that should be summarized");
+      expect(normalRun?.stdinText).toBe("");
+      expect(promptArg(calls[1])).toContain("<agenthub_memory>");
+      expect(promptArg(calls[1])).toContain(compressedSummary);
+      expect(promptArg(calls[1])).toContain("Latest request: please continue with Claude.");
+      expect(promptArg(calls[1])).not.toContain("{{compressed_context}}");
+      expect(promptArg(calls[1])).not.toContain("old context that should be summarized");
 
       normalRun?.close(0);
       const events = await eventsPromise;
@@ -310,13 +320,12 @@ describe("runtime context compression integration", () => {
         })),
       );
 
-      await waitFor(() => calls.length === 2, "Expected periodic memory process to spawn.");
-      const normalRun = calls[0]?.process;
-      const periodicRefresh = calls[1]?.process;
+      await waitFor(() => calls.length === 1, "Expected periodic memory process to spawn.");
+      const periodicRefresh = calls[0]?.process;
 
-      expect(normalRun).toBeDefined();
       expect(periodicRefresh).toBeDefined();
-      expect(periodicRefresh?.stdinText).toContain("部署列表页面需要路由");
+      expect(periodicRefresh?.stdinText).toBe("");
+      expect(promptArg(calls[0])).toContain("部署列表页面需要路由");
 
       periodicRefresh?.stdout.write(
         `${JSON.stringify({
@@ -330,8 +339,11 @@ describe("runtime context compression integration", () => {
       );
       periodicRefresh?.close(0);
 
+      await waitFor(() => calls.length === 2, "Expected normal run process to spawn.");
+      const normalRun = calls[1]?.process;
+
       await waitFor(
-        () => normalRun?.stdinText.includes(dailySummary) === true,
+        () => promptArg(calls[1]).includes(dailySummary) === true,
         "Expected normal run memory prompt to contain periodic summary.",
       );
 

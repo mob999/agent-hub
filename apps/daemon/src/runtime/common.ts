@@ -1,19 +1,30 @@
-import type { ChildProcessByStdio, SpawnOptionsWithoutStdio } from "node:child_process";
-import type { Readable, Writable } from "node:stream";
+import { execFileSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
+import type { Readable } from "node:stream";
 
 import type { RunEvent, RunId, RuntimeRawEvent } from "@agent-hub/core/protocol";
 import { LineDecoder, parseJsonLine } from "./jsonl";
 
 export type RuntimeChildProcess = Pick<
-  ChildProcessByStdio<Writable, Readable, Readable>,
-  "kill" | "once" | "stderr" | "stdin" | "stdout"
->;
+  ChildProcess,
+  "kill" | "once" | "stderr" | "stdout"
+> & {
+  stderr: Readable;
+  stdout: Readable;
+};
 
 export type SpawnRuntimeProcess = (
   command: string,
   args: string[],
-  options: SpawnOptionsWithoutStdio,
+  options: SpawnOptions,
 ) => RuntimeChildProcess;
+
+export type NativeSpawnProcess = (
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+) => ChildProcess;
 
 export interface RuntimeEventSink {
   push(event: RunEvent): void;
@@ -99,14 +110,104 @@ export function createLogLineEvent(
 }
 
 export function createRuntimeSpawnOptions(
-  options: SpawnOptionsWithoutStdio,
-): SpawnOptionsWithoutStdio {
-  return process.platform === "win32"
-    ? {
-        ...options,
-        shell: true,
-      }
-    : options;
+  options: SpawnOptions,
+): SpawnOptions {
+  return options;
+}
+
+function findWindowsCommandCandidates(command: string): string[] {
+  if (/[\\/]/.test(command) && existsSync(command)) {
+    return [command];
+  }
+
+  try {
+    return execFileSync("where.exe", [command], {
+      encoding: "utf8",
+      windowsHide: true,
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    return [command];
+  }
+}
+
+function resolveNpmCmdShim(command: string, args: string[]): {
+  args: string[];
+  command: string;
+} | undefined {
+  if (extname(command).toLowerCase() !== ".cmd" || !existsSync(command)) {
+    return undefined;
+  }
+
+  const commandDir = dirname(command);
+  const content = readFileSync(command, "utf8");
+  const exeMatch = /"%dp0%\\([^"]+\.exe)"\s+%[*]/i.exec(content);
+
+  if (exeMatch !== null) {
+    return {
+      command: join(commandDir, exeMatch[1]),
+      args,
+    };
+  }
+
+  const nodeScriptMatch = /"%_prog%"\s+"%dp0%\\([^"]+\.js)"\s+%[*]/i.exec(content);
+
+  if (nodeScriptMatch !== null) {
+    const bundledNode = join(commandDir, "node.exe");
+
+    return {
+      command: existsSync(bundledNode) ? bundledNode : "node",
+      args: [join(commandDir, nodeScriptMatch[1]), ...args],
+    };
+  }
+
+  return undefined;
+}
+
+function resolveWindowsRuntimeCommand(command: string, args: string[]): {
+  args: string[];
+  command: string;
+} {
+  const candidates = findWindowsCommandCandidates(command);
+  const cmdCandidates = candidates.filter(
+    (candidate) => extname(candidate).toLowerCase() === ".cmd",
+  );
+
+  for (const candidate of cmdCandidates) {
+    const resolved = resolveNpmCmdShim(candidate, args);
+
+    if (resolved !== undefined) {
+      return resolved;
+    }
+  }
+
+  const executable = candidates.find(
+    (candidate) => extname(candidate).toLowerCase() === ".exe",
+  );
+
+  return {
+    command: executable ?? command,
+    args,
+  };
+}
+
+export function createRuntimeProcessSpawner(
+  nativeSpawn: NativeSpawnProcess,
+): SpawnRuntimeProcess {
+  return (command, args, options) => {
+    const resolved =
+      process.platform === "win32"
+        ? resolveWindowsRuntimeCommand(command, args)
+        : { command, args };
+
+    return nativeSpawn(
+      resolved.command,
+      resolved.args,
+      options,
+    ) as RuntimeChildProcess;
+  };
 }
 
 export function createRuntimeEvent(

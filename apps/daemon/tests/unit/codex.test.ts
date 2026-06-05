@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import type { SpawnOptionsWithoutStdio } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 
 import type { AgentRunInput } from "@agent-hub/core/runtime";
 import { describe, expect, it, vi } from "vitest";
@@ -42,7 +42,7 @@ class MockCodexProcess extends EventEmitter {
 interface SpawnCall {
   args: string[];
   command: string;
-  options: SpawnOptionsWithoutStdio;
+  options: SpawnOptions;
   process: MockCodexProcess;
 }
 
@@ -112,6 +112,33 @@ async function collectEvents(
   return collected;
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  message: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(message);
+}
+
+async function waitForSpawn(calls: SpawnCall[]): Promise<SpawnCall> {
+  await waitFor(() => calls.length > 0, "Expected Codex process to spawn.");
+
+  return calls[0];
+}
+
+function promptArg(call: SpawnCall): string {
+  return call.args.at(-1) ?? "";
+}
+
 describe("CodexAdapter", () => {
   it("builds the development MCP server command with a loadable tsx loader URL", () => {
     const command = createAgentHubMcpServerCommand();
@@ -128,7 +155,7 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
-    const call = calls[0];
+    const call = await waitForSpawn(calls);
 
     call.process.close(0);
     await eventsPromise;
@@ -141,12 +168,14 @@ describe("CodexAdapter", () => {
       "/tmp/agent-workspace",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
-      "-",
+      expect.stringContaining("hello codex"),
     ]);
     expect(call.options).toMatchObject({
       cwd: "/tmp/agent-workspace",
-      stdio: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello codex$/);
   });
 
   it("spawns codex exec resume when a runtime session is available", async () => {
@@ -161,7 +190,7 @@ describe("CodexAdapter", () => {
         },
       })),
     );
-    const call = calls[0];
+    const call = await waitForSpawn(calls);
 
     call.process.close(0);
     await eventsPromise;
@@ -173,26 +202,33 @@ describe("CodexAdapter", () => {
       "--json",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
-      "-",
+      expect.stringContaining("hello codex"),
     ]);
     expect(call.options).toMatchObject({
       cwd: "/tmp/agent-workspace",
-      stdio: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello codex$/);
   });
 
-  it("writes prompt to stdin", async () => {
+  it("passes prompt as an argument without stdin", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({ prompt: "use this context" })),
     );
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
 
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nuse this context$/);
+    expect(call.process.stdinText).toBe("");
+    expect(call.options).toMatchObject({
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nuse this context$/);
   });
 
   it("passes agent instructions as Codex developer instructions", async () => {
@@ -208,16 +244,18 @@ describe("CodexAdapter", () => {
         agentInstructions,
       })),
     );
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
 
-    expect(calls[0].args).toContain("-c");
-    expect(calls[0].args).toContain(
+    expect(call.args).toContain("-c");
+    expect(call.args).toContain(
       `developer_instructions=${JSON.stringify(agentInstructions)}`,
     );
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nship the page$/);
+    expect(call.process.stdinText).toBe("");
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nship the page$/);
   });
 
   it("injects a per-run AgentHub MCP stdio server and emits MCP tool events", async () => {
@@ -235,8 +273,9 @@ describe("CodexAdapter", () => {
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({ agentHubMcpTools: ["send_message"] })),
     );
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].args).toEqual(
+    expect(call.args).toEqual(
       expect.arrayContaining([
         "-c",
         "mcp_servers.agenthub.command='node'",
@@ -255,7 +294,7 @@ describe("CodexAdapter", () => {
       input: { content: "I can help." },
       createdAt: "2026-05-21T00:00:01.000Z",
     });
-    calls[0].process.close(0);
+    call.process.close(0);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -285,11 +324,12 @@ describe("CodexAdapter", () => {
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({ agentHubMcpTools: ["send_message"] })),
     );
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
 
-    expect(calls[0].args).toContain(
+    expect(call.args).toContain(
       "mcp_servers.agenthub.args=['--import','tsx','E:\\agent-hub\\apps\\daemon\\src\\mcp\\stdio-server.ts']",
     );
   });
@@ -304,8 +344,9 @@ describe("CodexAdapter", () => {
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({ agentHubMcpTools: ["create_task", "send_message"] })),
     );
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].args).toContain(
+    expect(call.args).toContain(
       "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='create_task,send_message'",
     );
 
@@ -321,7 +362,7 @@ describe("CodexAdapter", () => {
       },
       createdAt: "2026-05-21T00:00:01.000Z",
     });
-    calls[0].process.close(0);
+    call.process.close(0);
 
     expect(result).toEqual({ accepted: true });
     await expect(eventsPromise).resolves.toEqual(
@@ -376,8 +417,9 @@ describe("CodexAdapter", () => {
         ],
       })),
     );
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].args).toContain(
+    expect(call.args).toContain(
       "mcp_servers.agenthub.env.AGENTHUB_MCP_TOOLS='list_goals'",
     );
 
@@ -395,7 +437,7 @@ describe("CodexAdapter", () => {
       input: { status: "completed" },
       createdAt: "2026-05-21T00:00:03.000Z",
     });
-    calls[0].process.close(0);
+    call.process.close(0);
 
     expect(firstResult).toMatchObject({
       accepted: true,
@@ -418,11 +460,12 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({ type: "thread.started", thread_id: "thread_1" })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "item.started",
         item: {
@@ -435,7 +478,7 @@ describe("CodexAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "item.completed",
         item: {
@@ -448,7 +491,7 @@ describe("CodexAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "turn.completed",
         usage: {
@@ -457,7 +500,7 @@ describe("CodexAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.close(0);
+    call.process.close(0);
 
     const events = await eventsPromise;
 
@@ -548,8 +591,9 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "item.completed",
         item: {
@@ -559,7 +603,7 @@ describe("CodexAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.close(0);
+    call.process.close(0);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -596,8 +640,9 @@ describe("CodexAdapter", () => {
     const jsonToolCall =
       '{"type":"agenthub.tool_call","version":1,"tool":"send_message","input":{"content":"hidden"}}';
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "item.completed",
         item: {
@@ -607,7 +652,7 @@ describe("CodexAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.close(0);
+    call.process.close(0);
 
     const events = await eventsPromise;
 
@@ -632,9 +677,10 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write("not-json\n");
-    calls[0].process.close(0);
+    call.process.stdout.write("not-json\n");
+    call.process.close(0);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -651,9 +697,10 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stderr.write("warning\n");
-    calls[0].process.close(0);
+    call.process.stderr.write("warning\n");
+    call.process.close(0);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -670,8 +717,9 @@ describe("CodexAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.close(2);
+    call.process.close(2);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -702,7 +750,7 @@ describe("CodexAdapter", () => {
         }),
       ]),
     );
-    expect(calls[0].process.killedWith).toBe("SIGTERM");
+    expect(calls).toHaveLength(0);
   });
 
   it("kills codex and completes interrupted on preempt abort", async () => {
@@ -723,6 +771,6 @@ describe("CodexAdapter", () => {
         }),
       ]),
     );
-    expect(calls[0].process.killedWith).toBe("SIGTERM");
+    expect(calls).toHaveLength(0);
   });
 });

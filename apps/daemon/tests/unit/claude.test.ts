@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
-import type { SpawnOptionsWithoutStdio } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 
 import type { AgentRunInput } from "@agent-hub/core/runtime";
 import { describe, expect, it, vi } from "vitest";
@@ -42,14 +42,14 @@ class MockClaudeProcess extends EventEmitter {
 interface SpawnCall {
   args: string[];
   command: string;
-  options: SpawnOptionsWithoutStdio;
+  options: SpawnOptions;
   process: MockClaudeProcess;
 }
 
 type SpawnClaudeProcess = (
   command: string,
   args: string[],
-  options: SpawnOptionsWithoutStdio,
+  options: SpawnOptions,
 ) => MockClaudeProcess;
 
 function createSpawnMock() {
@@ -135,50 +135,59 @@ async function waitFor(
   throw new Error(message);
 }
 
+async function waitForSpawn(calls: SpawnCall[]): Promise<SpawnCall> {
+  await waitFor(() => calls.length > 0, "Expected Claude process to spawn.");
+
+  return calls[0];
+}
+
+function promptArg(call: SpawnCall): string {
+  return call.args.at(-1) ?? "";
+}
+
 describe("ClaudeCodeAdapter", () => {
   it("spawns claude print mode with stream-json output and bypass permissions", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].command).toBe("claude");
-    expect(calls[0].args).toEqual([
+    expect(call.command).toBe("claude");
+    expect(call.args).toEqual([
       "-p",
       "--verbose",
       "--output-format",
       "stream-json",
       "--permission-mode",
       "bypassPermissions",
+      expect.stringContaining("hello claude"),
     ]);
-    expect(calls[0].options).toMatchObject({
+    expect(call.options).toMatchObject({
       cwd: "/tmp/agent-workspace",
-      stdio: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
-    await waitFor(
-      () => calls[0].process.stdinText.includes("hello claude"),
-      "Expected Claude prompt to be written to stdin.",
-    );
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
-    calls[0].process.close(0);
+    expect(call.process.stdinText).toBe("");
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello claude$/);
+    call.process.close(0);
     await eventsPromise;
   });
 
-  it("writes the prompt to stdin and closes stdin", async () => {
+  it("passes the prompt as an argument without stdin", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    await waitFor(
-      () => calls[0].process.stdinText.includes("hello claude"),
-      "Expected Claude prompt to be written to stdin.",
-    );
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
-    expect(calls[0].process.stdin.writableEnded).toBe(true);
+    expect(call.process.stdinText).toBe("");
+    expect(call.options).toMatchObject({
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello claude$/);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
   });
 
@@ -199,8 +208,9 @@ describe("ClaudeCodeAdapter", () => {
         },
       })),
     );
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].args).toEqual([
+    expect(call.args).toEqual([
       "-p",
       "--resume",
       "claude-session-1",
@@ -209,15 +219,13 @@ describe("ClaudeCodeAdapter", () => {
       "stream-json",
       "--permission-mode",
       "bypassPermissions",
+      expect.stringContaining("hello claude"),
     ]);
-    await waitFor(
-      () => calls[0].process.stdinText.includes("hello claude"),
-      "Expected Claude prompt to be written to stdin.",
-    );
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
+    expect(call.process.stdinText).toBe("");
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello claude$/);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
   });
 
@@ -236,12 +244,13 @@ describe("ClaudeCodeAdapter", () => {
     const eventsPromise = collectEvents(
       adapter.run(createRunInput({ agentHubMcpTools: ["send_message"] })),
     );
+    const call = await waitForSpawn(calls);
 
-    expect(calls[0].args).toContain("--mcp-config");
-    expect(calls[0].args).toContain("--strict-mcp-config");
-    expect(calls[0].args).toContain("--allowedTools");
-    expect(calls[0].args).toContain("mcp__agenthub__send_message");
-    const mcpConfigPath = calls[0].args[calls[0].args.indexOf("--mcp-config") + 1];
+    expect(call.args).toContain("--mcp-config");
+    expect(call.args).toContain("--strict-mcp-config");
+    expect(call.args).toContain("--allowedTools");
+    expect(call.args).toContain("mcp__agenthub__send_message");
+    const mcpConfigPath = call.args[call.args.indexOf("--mcp-config") + 1];
     expect(JSON.parse(readFileSync(mcpConfigPath, "utf8"))).toEqual({
       mcpServers: {
         agenthub: {
@@ -258,9 +267,9 @@ describe("ClaudeCodeAdapter", () => {
         },
       },
     });
-    expect(calls[0].args).toContain("--append-system-prompt-file");
-    const appendSystemPromptPath = calls[0].args[
-      calls[0].args.indexOf("--append-system-prompt-file") + 1
+    expect(call.args).toContain("--append-system-prompt-file");
+    const appendSystemPromptPath = call.args[
+      call.args.indexOf("--append-system-prompt-file") + 1
     ];
     expect(readFileSync(appendSystemPromptPath, "utf8")).toBe(
       [
@@ -270,14 +279,11 @@ describe("ClaudeCodeAdapter", () => {
         "Do not call the bare tool names directly in Claude Code.",
       ].join("\n"),
     );
-    await waitFor(
-      () => calls[0].process.stdinText.includes("hello claude"),
-      "Expected Claude prompt to be written to stdin.",
-    );
-    expect(calls[0].process.stdinText).toContain("<agenthub_memory>");
-    expect(calls[0].process.stdinText).toMatch(/\n\nhello claude$/);
+    expect(call.process.stdinText).toBe("");
+    expect(promptArg(call)).toContain("<agenthub_memory>");
+    expect(promptArg(call)).toMatch(/\n\nhello claude$/);
 
-    calls[0].process.close(0);
+    call.process.close(0);
     await eventsPromise;
     expect(handles[0].close).toHaveBeenCalledOnce();
   });
@@ -286,15 +292,16 @@ describe("ClaudeCodeAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "system",
         subtype: "init",
         session_id: "session_1",
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "assistant",
         message: {
@@ -305,7 +312,7 @@ describe("ClaudeCodeAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "assistant",
         message: {
@@ -321,7 +328,7 @@ describe("ClaudeCodeAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "user",
         message: {
@@ -334,7 +341,7 @@ describe("ClaudeCodeAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.close(0);
+    call.process.close(0);
 
     await expect(eventsPromise).resolves.toEqual(
       expect.arrayContaining([
@@ -382,8 +389,9 @@ describe("ClaudeCodeAdapter", () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new ClaudeCodeAdapter({ spawnProcess });
     const eventsPromise = collectEvents(adapter.run(createRunInput()));
+    const call = await waitForSpawn(calls);
 
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "assistant",
         session_id: "session_from_assistant",
@@ -395,14 +403,14 @@ describe("ClaudeCodeAdapter", () => {
         },
       })}\n`,
     );
-    calls[0].process.stdout.write(
+    call.process.stdout.write(
       `${JSON.stringify({
         type: "result",
         session_id: "session_from_result",
         result: "hello",
       })}\n`,
     );
-    calls[0].process.close(0);
+    call.process.close(0);
 
     const events = await eventsPromise;
     const sessionEvents = events.filter((event) =>
@@ -437,7 +445,7 @@ describe("ClaudeCodeAdapter", () => {
         }),
       ]),
     );
-    expect(calls[0].process.killedWith).toBe("SIGTERM");
+    expect(calls).toHaveLength(0);
   });
 
   it("completes as cancelled when Claude is aborted without preemption", async () => {
@@ -458,7 +466,7 @@ describe("ClaudeCodeAdapter", () => {
         }),
       ]),
     );
-    expect(calls[0].process.killedWith).toBe("SIGTERM");
+    expect(calls).toHaveLength(0);
   });
 
   it("detects Claude through --version", async () => {
@@ -481,6 +489,9 @@ describe("ClaudeCodeAdapter", () => {
       ]),
       status: "ready",
     });
-    expect(calls[0].process.stdin.writableEnded).toBe(true);
+    expect(calls[0].process.stdinText).toBe("");
+    expect(calls[0].options).toMatchObject({
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   });
 });

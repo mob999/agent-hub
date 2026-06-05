@@ -1,5 +1,5 @@
 import { spawn as spawnChildProcess } from "node:child_process";
-import type { SpawnOptionsWithoutStdio } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 
 import type {
   AgentAdapter,
@@ -26,6 +26,7 @@ import {
   attachJsonLineRuntimeOutput,
   createLogLineEvent,
   createRuntimeEvent,
+  createRuntimeProcessSpawner,
   createRuntimeSpawnOptions,
   mapAbortReasonToRunStatus,
   nowIsoDateTime,
@@ -35,7 +36,7 @@ import {
 export type SpawnCodexProcess = (
   command: string,
   args: string[],
-  options: SpawnOptionsWithoutStdio,
+  options: SpawnOptions,
 ) => RuntimeChildProcess;
 
 export interface CodexAdapterOptions {
@@ -280,11 +281,11 @@ async function runHiddenCodexPrompt(input: {
     ...(developerInstructionsConfig === undefined
       ? []
       : ["-c", developerInstructionsConfig]),
-    "-",
+    input.prompt,
   ], {
     ...createRuntimeSpawnOptions({
       cwd: input.workspacePath,
-      stdio: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     }),
   });
   const stdout = new LineDecoder();
@@ -309,9 +310,6 @@ async function runHiddenCodexPrompt(input: {
     }
   });
   process.stderr.on("data", (chunk) => errors.push(...stderr.push(chunk)));
-
-  process.stdin.write(input.prompt);
-  process.stdin.end();
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     process.once("error", reject);
@@ -355,13 +353,14 @@ export class CodexAdapter implements AgentAdapter {
     this.#mcpRelay = options.mcpRelay;
     this.#mcpServerCommand =
       options.mcpServerCommand ?? createAgentHubMcpServerCommand();
-    this.#spawnProcess = options.spawnProcess ?? spawnChildProcess;
+    this.#spawnProcess =
+      options.spawnProcess ?? createRuntimeProcessSpawner(spawnChildProcess);
   }
 
   async detect(): Promise<DaemonRuntime> {
     const process = this.#spawnProcess(this.#executablePath, ["--version"], {
       ...createRuntimeSpawnOptions({
-        stdio: "pipe",
+        stdio: ["ignore", "pipe", "pipe"],
       }),
     });
     const stdout = new LineDecoder();
@@ -424,7 +423,7 @@ export class CodexAdapter implements AgentAdapter {
       input.run.dispatchMode === "resume"
         ? input.run.runtimeSessionId
         : undefined;
-    const args = [
+    const createArgs = (prompt: string): string[] => [
       "exec",
       ...(resumeSessionId === undefined ? [] : ["resume", resumeSessionId]),
       "--json",
@@ -440,20 +439,13 @@ export class CodexAdapter implements AgentAdapter {
             command: this.#mcpServerCommand,
             session: mcpSession,
           })),
-      "-",
+      prompt,
     ];
-    const process = this.#spawnProcess(this.#executablePath, args, {
-      ...createRuntimeSpawnOptions({
-        cwd: input.workspacePath,
-        stdio: "pipe",
-      }),
-    });
     let completed = false;
     let aborted = false;
     let abortStatus: Extract<RunEvent, { type: "run.completed" }>["status"] =
       "cancelled";
-    let stdinInitialized = false;
-    let pendingCloseExitCode: number | null | undefined;
+    let process: RuntimeChildProcess | undefined;
 
     const complete = (
       status: Extract<RunEvent, { type: "run.completed" }>["status"],
@@ -475,47 +467,22 @@ export class CodexAdapter implements AgentAdapter {
       queue.end();
     };
     const completeFromExitCode = (exitCode: number | null): void => {
-      if (!stdinInitialized) {
-        pendingCloseExitCode = exitCode;
-        return;
-      }
-
       complete(
         exitCode === 0 ? "succeeded" : "failed",
         exitCode === 0 ? undefined : `Codex exited with code ${exitCode}`,
       );
     };
-    const markStdinInitialized = (): void => {
-      stdinInitialized = true;
-      if (pendingCloseExitCode !== undefined) {
-        completeFromExitCode(pendingCloseExitCode);
-      }
-    };
-
-    attachJsonLineRuntimeOutput({
-      eventSink: queue,
-      mapJsonValue: (value) => mapCodexJsonEvents(value, input.run.id),
-      process,
-      runId: input.run.id,
-    });
-
-    process.once("error", (error) => {
-      complete("failed", error instanceof Error ? error.message : String(error));
-    });
-    process.once("close", (exitCode) => {
-      if (aborted) {
-        complete(abortStatus);
-        return;
-      }
-
-      completeFromExitCode(exitCode);
-    });
 
     input.abortSignal?.addEventListener(
       "abort",
       () => {
         aborted = true;
         abortStatus = mapAbortReasonToRunStatus(input.abortSignal?.reason);
+        if (process === undefined) {
+          complete(abortStatus);
+          return;
+        }
+
         process.kill("SIGTERM");
       },
       { once: true },
@@ -528,8 +495,10 @@ export class CodexAdapter implements AgentAdapter {
       createdAt: nowIsoDateTime(),
     });
     void (async () => {
+      let runPrompt = input.prompt;
+
       try {
-        const runPrompt = await buildPromptWithRuntimeMemory({
+        runPrompt = await buildPromptWithRuntimeMemory({
           agentInstructions: input.agentInstructions,
           basePrompt: input.prompt,
           contextCompression: input.contextCompression,
@@ -550,14 +519,7 @@ export class CodexAdapter implements AgentAdapter {
           runtimeKind: "codex",
           workspacePath: input.memoryWorkspacePath ?? input.workspacePath,
         });
-
-        process.stdin.write(runPrompt);
-        process.stdin.end();
-        markStdinInitialized();
       } catch (error) {
-        process.stdin.write(input.prompt);
-        process.stdin.end();
-        markStdinInitialized();
         queue.push(
           createLogLineEvent(
             input.run.id,
@@ -567,6 +529,42 @@ export class CodexAdapter implements AgentAdapter {
             }`,
           ),
         );
+      }
+
+      if (completed) {
+        return;
+      }
+
+      process = this.#spawnProcess(this.#executablePath, createArgs(runPrompt), {
+        ...createRuntimeSpawnOptions({
+          cwd: input.workspacePath,
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+      });
+
+      attachJsonLineRuntimeOutput({
+        eventSink: queue,
+        mapJsonValue: (value) => mapCodexJsonEvents(value, input.run.id),
+        process,
+        runId: input.run.id,
+      });
+
+      process.once("error", (error) => {
+        complete("failed", error instanceof Error ? error.message : String(error));
+      });
+      process.once("close", (exitCode) => {
+        if (aborted) {
+          complete(abortStatus);
+          return;
+        }
+
+        completeFromExitCode(exitCode);
+      });
+
+      if (input.abortSignal?.aborted === true) {
+        aborted = true;
+        abortStatus = mapAbortReasonToRunStatus(input.abortSignal.reason);
+        process.kill("SIGTERM");
       }
     })();
 

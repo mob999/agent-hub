@@ -9,40 +9,13 @@ import {
 import { ChatBot } from '@carbon/react/icons'
 import { useState, type SVGProps } from 'react'
 import { apiUrl } from '../lib/api'
+import { readPendingAuthRedirect } from '../lib/auth-redirect'
 
 export type ChatRoutePath = '/chat' | `/chat/${string}`
-export type WorkspaceRoutePath = ChatRoutePath | '/runs' | '/daemon'
+export type WorkspaceRoutePath = '/welcome' | ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
 export type AuthRoutePath = '/login'
 export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
-
-const authRedirectStorageKey = 'agenthub.auth.redirect'
-
-function getPendingAuthRedirect(): WorkspaceRoutePath | EditorRoutePath | null {
-  const value = window.sessionStorage.getItem(authRedirectStorageKey)
-  const isChatConversationRoute = value?.startsWith('/chat/') === true &&
-    (
-      [2, 4, 6].includes(value.split('/').filter(Boolean).length) ||
-      (
-        value.split('/').filter(Boolean).length === 3 &&
-        ['tasks', 'deployments'].includes(value.split('/').filter(Boolean)[2] ?? '')
-      )
-    )
-  const isEditorRoute = value?.startsWith('/editor/') === true &&
-    [2, 3].includes(value.split('/').filter(Boolean).length)
-
-  if (
-    value === '/chat' ||
-    isChatConversationRoute ||
-    value === '/runs' ||
-    value === '/daemon' ||
-    isEditorRoute
-  ) {
-    return value as WorkspaceRoutePath | EditorRoutePath
-  }
-
-  return null
-}
 
 function readOAuthError(): string | null {
   const error = new URLSearchParams(window.location.search).get('error')
@@ -77,11 +50,10 @@ export function AuthPage() {
     setSubmitting(true)
     setServerError(null)
 
-    const redirect = getPendingAuthRedirect() ?? '/chat'
+    const redirect = readPendingAuthRedirect() ?? '/welcome'
     const url = new URL(apiUrl('/auth/github/start'))
     url.searchParams.set('redirect', redirect)
     url.searchParams.set('web_origin', window.location.origin)
-    window.sessionStorage.removeItem(authRedirectStorageKey)
     window.location.assign(url.toString())
   }
 

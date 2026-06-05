@@ -49,6 +49,7 @@ import {
   type User,
   type WorkspaceView,
 } from '../lib/api'
+import { writePendingAuthRedirect } from '../lib/auth-redirect'
 import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
@@ -72,7 +73,6 @@ function workspaceViewFromRoute(route: WorkspaceRoutePath): WorkspaceView {
   return 'chat'
 }
 const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
-const authRedirectStorageKey = 'agenthub.auth.redirect'
 const realtimeToastDurationMs = 5000
 const maxRealtimeToasts = 4
 
@@ -627,7 +627,7 @@ export function WorkspacePage({
           return
         }
         if (error instanceof ApiRequestError && error.status === 401) {
-          window.sessionStorage.setItem(authRedirectStorageKey, window.location.pathname)
+          writePendingAuthRedirect(window.location.pathname)
           navigate('/login')
           return
         }
@@ -2055,6 +2055,7 @@ export function WorkspacePage({
                 focusedMessageId={focusedMessageId}
                 taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
                 deploymentRouteActive={chatPanelRoute === 'deployments'}
+                welcomeActive={route === '/welcome'}
                 openGoalRoute={(goalId, taskIndex) => {
                   if (activeConversation?.id) {
                     openGoalRoute(activeConversation.id, goalId, taskIndex)

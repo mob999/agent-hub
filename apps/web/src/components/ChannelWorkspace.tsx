@@ -69,6 +69,7 @@ interface ChannelWorkspaceProps {
   focusedMessageId?: string | null
   taskRouteActive?: boolean
   deploymentRouteActive?: boolean
+  welcomeActive?: boolean
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -321,6 +322,7 @@ export function ChannelWorkspace({
   focusedMessageId = null,
   taskRouteActive = false,
   deploymentRouteActive = false,
+  welcomeActive = false,
 }: ChannelWorkspaceProps) {
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{
@@ -456,14 +458,18 @@ export function ChannelWorkspace({
     </button>
   )
   const chatTitle = !hasSelectedConversation
-    ? 'Chat'
+    ? welcomeActive
+      ? 'Welcome'
+      : 'Chat'
     : isAgentDirectMessage
       ? selectedAgent?.agent.name ?? activeConversation.title
       : activeConversation.title
   const chatDisplayName =
     hasSelectedConversation && activeConversation.type === 'group' ? `#${activeConversation.title}` : chatTitle
   const chatDescription = !hasSelectedConversation
-    ? 'No conversation selected'
+    ? welcomeActive
+      ? 'Choose a conversation or create a new workspace from the sidebar.'
+      : 'No conversation selected'
     : isAgentDirectMessage
       ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
       : activeConversation.type === 'project'
@@ -472,20 +478,24 @@ export function ChannelWorkspace({
           ? 'General channel for members and agent runs'
           : activeConversation.description?.trim() || 'Group channel for selected agents'
   const emptyTitle = !hasSelectedConversation
-    ? 'No conversation selected'
+    ? welcomeActive
+      ? 'Welcome to Tavro'
+      : 'No conversation selected'
     : isAgentDirectMessage
       ? 'No private messages yet'
       : 'No messages yet'
   const emptyMessage = !hasSelectedConversation
-    ? readyAgentCount > 0
-      ? 'Choose #all or an agent from the sidebar.'
-      : (
-          <>
-            Choose #all after you{' '}
-            {createAgentLink}
-            .
-          </>
-        )
+    ? welcomeActive
+      ? 'Pick an existing chat, open a project, or start by creating an agent.'
+      : readyAgentCount > 0
+        ? 'Choose #all or an agent from the sidebar.'
+        : (
+            <>
+              Choose #all after you{' '}
+              {createAgentLink}
+              .
+            </>
+          )
     : isAgentDirectMessage
       ? selectedAgentReady && selectedAgent
         ? `Message ${selectedAgent.agent.name} to start a private run.`

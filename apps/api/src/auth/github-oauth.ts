@@ -90,7 +90,7 @@ export function selectVerifiedGitHubEmail(emails: GitHubEmail[]): string | null 
 
 export function getSafeAuthRedirectPath(value: string | null): string {
   if (!value) {
-    return "/chat";
+    return "/welcome";
   }
 
   try {
@@ -98,11 +98,12 @@ export function getSafeAuthRedirectPath(value: string | null): string {
     const url = new URL(decoded, "http://127.0.0.1");
 
     if (url.origin !== "http://127.0.0.1") {
-      return "/chat";
+      return "/welcome";
     }
 
     const path = `${url.pathname}${url.search}${url.hash}`;
     if (
+      path === "/welcome" ||
       path === "/chat" ||
       path.startsWith("/chat/") ||
       path === "/runs" ||
@@ -112,8 +113,8 @@ export function getSafeAuthRedirectPath(value: string | null): string {
       return path;
     }
   } catch {
-    return "/chat";
+    return "/welcome";
   }
 
-  return "/chat";
+  return "/welcome";
 }

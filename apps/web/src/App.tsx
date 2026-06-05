@@ -90,6 +90,7 @@ function getRoutePath(): RoutePath {
   }
 
   if (
+    path === '/welcome' ||
     path === '/login' ||
     path === '/chat' ||
     path === '/chat/search' ||
@@ -102,11 +103,11 @@ function getRoutePath(): RoutePath {
   if (path === '/register') {
     return '/login'
   }
-  return '/chat'
+  return '/welcome'
 }
 
 function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
-  return route === '/chat' || route.startsWith('/chat/') || route === '/runs' || route === '/daemon'
+  return route === '/welcome' || route === '/chat' || route.startsWith('/chat/') || route === '/runs' || route === '/daemon'
 }
 
 function editorStateFromPath(path: string): EditorRouteState | null {

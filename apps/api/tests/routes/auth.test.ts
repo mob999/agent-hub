@@ -76,6 +76,23 @@ describe("auth routes", () => {
     expect(location.searchParams.get("state")).toBeTruthy();
   });
 
+  it("uses the welcome page as the default GitHub OAuth return path", async () => {
+    const app = createAuthTestApp();
+    const response = await app.request(
+      "/auth/github/start?web_origin=http://localhost:5173",
+    );
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    const cookieValue = setCookie
+      .split(";")[0]
+      ?.replace("agent_hub_github_oauth_state=", "");
+    const encodedPayload = cookieValue?.split(".")[1] ?? "";
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
+      redirectPath?: unknown;
+    };
+
+    expect(payload.redirectPath).toBe("/welcome");
+  });
+
   it("redirects invalid GitHub callbacks back to login with an error", async () => {
     const app = createAuthTestApp();
     const response = await app.request(

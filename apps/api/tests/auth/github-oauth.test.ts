@@ -93,11 +93,13 @@ describe("GitHub OAuth helpers", () => {
   });
 
   it("only allows workspace redirect paths after OAuth", () => {
+    expect(getSafeAuthRedirectPath(null)).toBe("/welcome");
+    expect(getSafeAuthRedirectPath("/welcome")).toBe("/welcome");
     expect(getSafeAuthRedirectPath("/runs")).toBe("/runs");
     expect(getSafeAuthRedirectPath("/chat/conversation-id/tasks")).toBe(
       "/chat/conversation-id/tasks",
     );
-    expect(getSafeAuthRedirectPath("https://evil.example/chat")).toBe("/chat");
-    expect(getSafeAuthRedirectPath("/settings")).toBe("/chat");
+    expect(getSafeAuthRedirectPath("https://evil.example/chat")).toBe("/welcome");
+    expect(getSafeAuthRedirectPath("/settings")).toBe("/welcome");
   });
 });

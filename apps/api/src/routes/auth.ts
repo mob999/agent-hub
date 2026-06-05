@@ -22,6 +22,24 @@ const invalidCredentialsResponse = {
   },
 } as const;
 
+function sessionCookieOptions(env: AppBindings["Variables"]["env"]) {
+  return {
+    httpOnly: true,
+    secure: env.AUTH_COOKIE_SECURE,
+    sameSite: env.AUTH_COOKIE_SECURE ? "None" : "Lax",
+    path: "/",
+    maxAge: env.AUTH_SESSION_TTL_DAYS * 24 * 60 * 60,
+  } as const;
+}
+
+function clearSessionCookieOptions(env: AppBindings["Variables"]["env"]) {
+  return {
+    secure: env.AUTH_COOKIE_SECURE,
+    sameSite: env.AUTH_COOKIE_SECURE ? "None" : "Lax",
+    path: "/",
+  } as const;
+}
+
 const registerRoute = createRoute({
   method: "post",
   path: "/register",
@@ -230,13 +248,7 @@ authRoutes.openapi(registerRoute, async (c) => {
     ttlDays: env.AUTH_SESSION_TTL_DAYS,
   });
 
-  setCookie(c, env.AUTH_SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: env.AUTH_COOKIE_SECURE,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: env.AUTH_SESSION_TTL_DAYS * 24 * 60 * 60,
-  });
+  setCookie(c, env.AUTH_SESSION_COOKIE, token, sessionCookieOptions(env));
 
   return c.json({ user }, 201);
 });
@@ -273,13 +285,7 @@ authRoutes.openapi(loginRoute, async (c) => {
     ttlDays: env.AUTH_SESSION_TTL_DAYS,
   });
 
-  setCookie(c, env.AUTH_SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: env.AUTH_COOKIE_SECURE,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: env.AUTH_SESSION_TTL_DAYS * 24 * 60 * 60,
-  });
+  setCookie(c, env.AUTH_SESSION_COOKIE, token, sessionCookieOptions(env));
 
   return c.json(
     {
@@ -303,9 +309,7 @@ authRoutes.openapi(logoutRoute, async (c) => {
     await revokeSession(db, token);
   }
 
-  deleteCookie(c, env.AUTH_SESSION_COOKIE, {
-    path: "/",
-  });
+  deleteCookie(c, env.AUTH_SESSION_COOKIE, clearSessionCookieOptions(env));
 
   return c.json({ ok: true }, 200);
 });

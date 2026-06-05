@@ -1,4 +1,4 @@
-import { Button, InlineNotification, Modal, TextInput } from '@carbon/react'
+import { InlineNotification, Modal, TextInput } from '@carbon/react'
 import { Add, Checkmark, Copy, Devices, Renew, TrashCan } from '@carbon/react/icons'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -38,6 +38,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
   const [deviceSaveError, setDeviceSaveError] = useState<string | null>(null)
   const [deviceSaving, setDeviceSaving] = useState(false)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
@@ -166,7 +167,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
   }
 
   const deleteDevice = async () => {
-    if (!selectedDevice) {
+    if (!selectedDevice || deleteLoading) {
       return
     }
 
@@ -176,6 +177,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     }
 
     setDeleteError(null)
+    setDeleteLoading(true)
     try {
       await apiRequest(`/daemon/devices/${encodeURIComponent(selectedDevice.id)}`, {
         method: 'DELETE',
@@ -184,6 +186,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       onDevicesChanged()
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : 'Unable to delete device.')
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -227,6 +231,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                   setDeviceSaveError(null)
                   setDeleteError(null)
                   setDeleteConfirming(false)
+                  setDeleteLoading(false)
                 }}
               >
                 <span
@@ -400,20 +405,28 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                     </div>
 
                     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 py-3">
-                      <p className="text-sm font-semibold text-[#161616]">
-                        {deleteConfirming ? 'Confirm delete' : 'Delete'}
-                      </p>
+                      <p className="text-sm font-semibold text-[#161616]">Delete</p>
                       <span aria-hidden="true" />
                       <button
                         type="button"
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#ffd7d9] bg-[#fff1f1] text-[#da1e28] transition hover:border-[#ffb3b8] hover:bg-[#ffe0e2]"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#ffd7d9] bg-[#fff1f1] text-[#da1e28] transition hover:border-[#ffb3b8] hover:bg-[#ffe0e2] disabled:cursor-wait disabled:border-[#ffd7d9] disabled:bg-[#fff1f1] disabled:text-[#da1e28]"
+                        disabled={deleteLoading}
                         onClick={() => {
                           void deleteDevice()
                         }}
                         title={deleteConfirming ? 'Confirm delete' : 'Delete'}
                         aria-label={deleteConfirming ? 'Confirm delete daemon device' : 'Delete daemon device'}
                       >
-                        <TrashCan size={16} />
+                        {deleteLoading ? (
+                          <span
+                            className="h-4 w-4 animate-spin rounded-full border-2 border-[#ffb3b8] border-t-[#da1e28]"
+                            aria-hidden="true"
+                          />
+                        ) : deleteConfirming ? (
+                          <Checkmark size={16} />
+                        ) : (
+                          <TrashCan size={16} />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -433,6 +446,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       </WorkspacePanel>
 
       <Modal
+        className="centered-modal-actions daemon-registration-modal"
         open={registrationOpen}
         modalHeading={registrationMode === 'create' ? 'Create daemon' : 'Reconnect daemon'}
         passiveModal
@@ -441,25 +455,28 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
         <div className="grid gap-3">
           {registrationMode === 'create' && !registrationCommand && (
             <div className="grid gap-3">
-              <TextInput
-                id="daemon-registration-name"
-                labelText="Device name"
-                value={registrationName}
-                maxLength={80}
-                onChange={(event) => setRegistrationName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    createNamedDevice()
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                disabled={registrationLoading || registrationName.trim().length === 0}
-                onClick={createNamedDevice}
-              >
-                Generate command
-              </Button>
+              <div className="grid max-w-lg grid-cols-[minmax(0,1fr)_5rem] items-end gap-2">
+                <TextInput
+                  id="daemon-registration-name"
+                  labelText="Device name"
+                  value={registrationName}
+                  maxLength={80}
+                  onChange={(event) => setRegistrationName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      createNamedDevice()
+                    }
+                  }}
+                />
+                <button
+                  className="inline-flex h-10 w-20 cursor-pointer items-center justify-center rounded-xl border border-[#d8dee6] bg-white px-2 text-sm font-semibold leading-none text-[#394150] shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#e1e5ea] disabled:bg-[#f4f4f4] disabled:text-[#a2a9b0] disabled:shadow-none"
+                  type="button"
+                  disabled={registrationLoading || registrationName.trim().length === 0}
+                  onClick={createNamedDevice}
+                >
+                  <span>{registrationLoading ? 'Wait' : 'Generate'}</span>
+                </button>
+              </div>
             </div>
           )}
 

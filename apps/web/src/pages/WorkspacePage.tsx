@@ -240,6 +240,7 @@ export function WorkspacePage({
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
   const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
+  const [loadingConversationIds, setLoadingConversationIds] = useState<Record<string, true>>({})
   const [deploymentsByConversation, setDeploymentsByConversation] = useState<Record<string, ConversationDeployment[]>>({})
   const [unreadByConversationId, setUnreadByConversationId] = useState<Record<string, number>>({})
   const [realtimeToasts, setRealtimeToasts] = useState<RealtimeToast[]>([])
@@ -325,6 +326,8 @@ export function WorkspacePage({
     () => (activeConversationId === null ? [] : deploymentsByConversation[activeConversationId] ?? []),
     [activeConversationId, deploymentsByConversation],
   )
+  const isActiveConversationLoading =
+    activeConversationId !== null && loadingConversationIds[activeConversationId] === true
 
   const clearConversationUnread = useCallback((conversationId: string) => {
     setUnreadByConversationId((current) => {
@@ -544,6 +547,28 @@ export function WorkspacePage({
     }
   }, [])
 
+  const loadConversationDetails = useCallback(async (conversationId: string) => {
+    setLoadingConversationIds((current) => ({ ...current, [conversationId]: true }))
+
+    try {
+      await Promise.all([
+        loadMessages(conversationId),
+        loadTasks(conversationId),
+        loadArtifacts(conversationId),
+      ])
+    } finally {
+      setLoadingConversationIds((current) => {
+        if (current[conversationId] !== true) {
+          return current
+        }
+
+        const next = { ...current }
+        delete next[conversationId]
+        return next
+      })
+    }
+  }, [loadArtifacts, loadMessages, loadTasks])
+
   const loadDeployments = useCallback(async (conversationId: string) => {
     try {
       const response = await apiRequest<{ deployments: ConversationDeployment[] }>(
@@ -717,13 +742,11 @@ export function WorkspacePage({
     }
 
     const timer = window.setTimeout(() => {
-      void loadMessages(activeConversationId)
-      void loadTasks(activeConversationId)
-      void loadArtifacts(activeConversationId)
+      void loadConversationDetails(activeConversationId)
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [activeConversationId, loadArtifacts, loadMessages, loadTasks])
+  }, [activeConversationId, loadConversationDetails])
 
   useEffect(() => {
     if (!user || routeConversationId === null) {
@@ -732,17 +755,13 @@ export function WorkspacePage({
 
     const timer = window.setTimeout(() => {
       activateConversation(routeConversationId)
-      void loadMessages(routeConversationId)
-      void loadTasks(routeConversationId)
-      void loadArtifacts(routeConversationId)
+      void loadConversationDetails(routeConversationId)
     }, 0)
 
     return () => window.clearTimeout(timer)
   }, [
     activateConversation,
-    loadArtifacts,
-    loadMessages,
-    loadTasks,
+    loadConversationDetails,
     routeConversationId,
     user,
   ])
@@ -2054,6 +2073,7 @@ export function WorkspacePage({
                 openRun={openRun}
                 focusedGoalRoute={focusedGoalRoute}
                 focusedMessageId={focusedMessageId}
+                isConversationLoading={isActiveConversationLoading}
                 taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
                 deploymentRouteActive={chatPanelRoute === 'deployments'}
                 welcomeActive={route === '/welcome'}

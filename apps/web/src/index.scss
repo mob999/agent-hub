@@ -124,6 +124,14 @@ textarea {
   box-shadow: none;
 }
 
+.daemon-registration-modal .cds--modal-container {
+  max-width: min(32rem, calc(100vw - 2rem));
+}
+
+.daemon-registration-modal .cds--modal-content {
+  padding-block-end: 1.25rem;
+}
+
 .agenthub-markdown {
   display: grid;
   gap: 0.5rem;

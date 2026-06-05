@@ -1,4 +1,4 @@
-import { Form, IconButton, InlineLoading, InlineNotification, Tag } from '@carbon/react'
+import { Form, IconButton, InlineLoading, InlineNotification, Loading, Tag } from '@carbon/react'
 import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, UserAdmin, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
@@ -67,6 +67,7 @@ interface ChannelWorkspaceProps {
   refreshDeployments?: () => void
   focusedGoalRoute?: { goalId: string; taskIndex: number | null } | null
   focusedMessageId?: string | null
+  isConversationLoading?: boolean
   taskRouteActive?: boolean
   deploymentRouteActive?: boolean
   welcomeActive?: boolean
@@ -320,6 +321,7 @@ export function ChannelWorkspace({
   refreshDeployments,
   focusedGoalRoute = null,
   focusedMessageId = null,
+  isConversationLoading = false,
   taskRouteActive = false,
   deploymentRouteActive = false,
   welcomeActive = false,
@@ -1381,7 +1383,16 @@ export function ChannelWorkspace({
         }`}
         aria-live="polite"
       >
-        {showWorkspacePage && showTasks ? (
+        {isConversationLoading && !showWorkspacePage ? (
+          <div className="grid min-h-full place-items-center content-center gap-3 text-center text-[#69707d]">
+            <Loading
+              small
+              withOverlay={false}
+              description="Loading Conversation"
+            />
+            <p className="text-sm font-medium leading-5">Loading Conversation</p>
+          </div>
+        ) : showWorkspacePage && showTasks ? (
           <div
             className="grid h-full min-h-0 min-w-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-4"
           >

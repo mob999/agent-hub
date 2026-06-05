@@ -13,6 +13,11 @@ on:
         required: true
         default: true
         type: boolean
+      run_migrations:
+        description: "Run production database migrations before promoting"
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
   group: promote-production-main
@@ -27,6 +32,7 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       SOURCE_REF: ${{ inputs.source_ref }}
+      NEED_NODE: ${{ inputs.run_checks || inputs.run_migrations }}
 
     steps:
       - name: Checkout
@@ -36,25 +42,37 @@ jobs:
           ref: ${{ inputs.source_ref }}
 
       - name: Setup pnpm
-        if: ${{ inputs.run_checks }}
+        if: ${{ env.NEED_NODE == 'true' }}
         uses: pnpm/action-setup@v6
         with:
           version: 10.15.0
 
       - name: Setup Node.js
-        if: ${{ inputs.run_checks }}
+        if: ${{ env.NEED_NODE == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install dependencies
-        if: ${{ inputs.run_checks }}
+        if: ${{ env.NEED_NODE == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Run checks
         if: ${{ inputs.run_checks }}
         run: pnpm check
+
+      - name: Run production database migrations
+        if: ${{ inputs.run_migrations }}
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "PROD_DATABASE_URL secret is required to run production migrations."
+            exit 1
+          fi
+
+          pnpm --filter @agent-hub/db db:migrate
 
       - name: Fast-forward main
         run: |

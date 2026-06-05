@@ -546,6 +546,13 @@ export function WorkspacePage({
     }
   }, [queryClient])
 
+  const prefetchConversationMessages = useCallback((conversationId: string) => {
+    void queryClient.prefetchQuery({
+      queryFn: () => fetchConversationMessages(conversationId),
+      queryKey: queryKeys.conversationMessages(conversationId),
+    })
+  }, [queryClient])
+
   const loadTasks = useCallback(async (conversationId: string) => {
     try {
       const goals = await queryClient.fetchQuery({
@@ -581,32 +588,35 @@ export function WorkspacePage({
   }, [queryClient])
 
   const loadConversationDetails = useCallback(async (conversationId: string) => {
-    const hasCachedDetails =
-      queryClient.getQueryData(queryKeys.conversationMessages(conversationId)) !== undefined &&
-      queryClient.getQueryData(queryKeys.conversationTasks(conversationId)) !== undefined &&
-      queryClient.getQueryData(queryKeys.conversationArtifacts(conversationId)) !== undefined
+    const cachedMessages = queryClient.getQueryData<ConversationMessage[]>(
+      queryKeys.conversationMessages(conversationId),
+    )
 
-    if (!hasCachedDetails) {
+    if (cachedMessages === undefined) {
       setLoadingConversationIds((current) => ({ ...current, [conversationId]: true }))
+    } else {
+      setMessagesByConversation((current) => ({
+        ...current,
+        [conversationId]: cachedMessages,
+      }))
     }
 
     try {
-      await Promise.all([
-        loadMessages(conversationId),
-        loadTasks(conversationId),
-        loadArtifacts(conversationId),
-      ])
+      await loadMessages(conversationId)
     } finally {
       setLoadingConversationIds((current) => {
         if (current[conversationId] !== true) {
           return current
         }
 
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
-  }
+        const next = { ...current }
+        delete next[conversationId]
+        return next
+      })
+    }
+
+    void loadTasks(conversationId)
+    void loadArtifacts(conversationId)
   }, [loadArtifacts, loadMessages, loadTasks, queryClient])
 
   const loadDeployments = useCallback(async (conversationId: string) => {
@@ -1510,23 +1520,46 @@ export function WorkspacePage({
       setSelectedRunId(null)
     }
     setRunError(null)
-    navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
     activateConversation(conversationId)
-    void loadMessages(conversationId)
-    void loadTasks(conversationId)
-    void loadArtifacts(conversationId)
+    navigate(`/chat/${encodeURIComponent(conversationId)}` as RoutePath)
+    void loadConversationDetails(conversationId)
   }
-  const selectAgentConversation = async (agentId: string) => {
+  const upsertConversation = (conversation: Conversation) => {
+    setConversations((current) => [
+      conversation,
+      ...current.filter((item) => item.id !== conversation.id),
+    ])
+    queryClient.setQueryData<Conversation[]>(
+      queryKeys.conversations('default'),
+      (current = []) => [
+        conversation,
+        ...current.filter((item) => item.id !== conversation.id),
+      ],
+    )
+  }
+  const openAgentConversation = async (input: { agentId: string; conversationId?: string }) => {
+    if (input.conversationId !== undefined) {
+      selectConversation(input.conversationId)
+      return
+    }
+
+    const existingConversation = conversationsRef.current.find(
+      (conversation) =>
+        conversation.type === 'direct' && conversation.directAgentId === input.agentId,
+    )
+
+    if (existingConversation !== undefined) {
+      selectConversation(existingConversation.id)
+      return
+    }
+
     try {
       const response = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
         method: 'POST',
-        body: JSON.stringify({ agentId }),
+        body: JSON.stringify({ agentId: input.agentId }),
       })
 
-      setConversations((current) => [
-        response.conversation,
-        ...current.filter((conversation) => conversation.id !== response.conversation.id),
-      ])
+      upsertConversation(response.conversation)
       invalidateConversationCatalog()
       selectConversation(response.conversation.id)
     } catch (error) {
@@ -2167,10 +2200,11 @@ export function WorkspacePage({
               void restoreGroup(conversationId)
             }}
             onToggleSaved={() => setSavedOpen((open) => !open)}
+            onPrefetchConversation={prefetchConversationMessages}
             selectGroup={selectConversation}
             selectProject={selectConversation}
-            selectAgent={(agentId) => {
-              void selectAgentConversation(agentId)
+            selectAgent={(input) => {
+              void openAgentConversation(input)
             }}
           />
           <WorkspacePanel>
@@ -2216,7 +2250,7 @@ export function WorkspacePage({
                 submitRun={submitRun}
                 openCreateAgent={() => openCreateAgent()}
                 openAgentConversation={(agentId) => {
-                  void selectAgentConversation(agentId)
+                  void openAgentConversation({ agentId })
                 }}
                 openEditConversation={openEditActiveConversation}
                 openArtifactEditor={openArtifactEditor}

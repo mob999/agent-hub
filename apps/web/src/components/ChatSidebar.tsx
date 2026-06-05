@@ -36,9 +36,10 @@ interface ChatSidebarProps {
   onRestoreAgent: (agentId: string) => void
   onRestoreGroup: (conversationId: string) => void
   onToggleSaved: () => void
+  onPrefetchConversation: (conversationId: string) => void
   selectGroup: (conversationId: string) => void
   selectProject: (conversationId: string) => void
-  selectAgent: (agentId: string) => void
+  selectAgent: (input: { agentId: string; conversationId?: string }) => void
 }
 
 const sidebarButton =
@@ -103,6 +104,7 @@ export function ChatSidebar({
   onRestoreAgent,
   onRestoreGroup,
   onToggleSaved,
+  onPrefetchConversation,
   selectGroup,
   selectProject,
   selectAgent,
@@ -361,6 +363,8 @@ export function ChatSidebar({
                       type="button"
                       key={conversation.id}
                       aria-current={groupChatSelected ? 'page' : undefined}
+                      onFocus={() => onPrefetchConversation(conversation.id)}
+                      onMouseEnter={() => onPrefetchConversation(conversation.id)}
                       onClick={() => selectGroup(conversation.id)}
                     >
                       <span
@@ -434,6 +438,8 @@ export function ChatSidebar({
                       key={conversation.id}
                       aria-current={projectSelected ? 'page' : undefined}
                       disabled={cloneStatus === 'cloning'}
+                      onFocus={() => onPrefetchConversation(conversation.id)}
+                      onMouseEnter={() => onPrefetchConversation(conversation.id)}
                       onClick={() => selectProject(conversation.id)}
                     >
                       <span
@@ -524,7 +530,20 @@ export function ChatSidebar({
                       type="button"
                       key={agent.agent.id}
                       aria-current={agentSelected ? 'page' : undefined}
-                      onClick={() => selectAgent(agent.agent.id)}
+                      onFocus={() => {
+                        if (directConversation !== undefined) {
+                          onPrefetchConversation(directConversation.id)
+                        }
+                      }}
+                      onMouseEnter={() => {
+                        if (directConversation !== undefined) {
+                          onPrefetchConversation(directConversation.id)
+                        }
+                      }}
+                      onClick={() => selectAgent({
+                        agentId: agent.agent.id,
+                        conversationId: directConversation?.id,
+                      })}
                     >
                       <span className={agentAvatarFrame} aria-hidden="true">
                         {agent.agent.avatar ? (

@@ -1,0 +1,58 @@
+name: Publish Daemon
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact @tavro-ai/daemon version to publish, matching packages/tavro-daemon/package.json"
+        required: true
+        type: string
+
+concurrency:
+  group: publish-daemon
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify requested version
+        run: |
+          node -e "const pkg = require('./packages/tavro-daemon/package.json'); if (pkg.version !== process.env.VERSION) { console.error(`Input version ${process.env.VERSION} does not match package version ${pkg.version}.`); process.exit(1); }"
+          if npm view "@tavro-ai/daemon@${VERSION}" version >/dev/null 2>&1; then
+            echo "@tavro-ai/daemon@${VERSION} is already published."
+            exit 1
+          fi
+
+      - name: Build daemon package
+        run: pnpm --filter @tavro-ai/daemon build
+
+      - name: Dry-run npm package
+        run: pnpm --filter @tavro-ai/daemon pack:dry-run
+
+      - name: Publish daemon package
+        run: npm publish --access public
+        working-directory: packages/tavro-daemon

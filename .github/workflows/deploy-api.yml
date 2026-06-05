@@ -1,21 +1,18 @@
-name: CI
+name: Deploy API
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - dev
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: deploy-api-production
+  cancel-in-progress: false
 
 jobs:
-  check-and-test:
+  deploy:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
     steps:
       - name: Checkout
@@ -35,5 +32,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run checks
-        run: pnpm check
+      - name: Build API package
+        run: pnpm --filter @agent-hub/api build
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy API to Railway
+        run: railway up --service tavro-api --environment production --project "${{ secrets.RAILWAY_PROJECT_ID }}" --ci

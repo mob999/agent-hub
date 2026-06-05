@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
-import { startDaemon } from "@agent-hub/daemon";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const version = "0.1.0";
+import {
+  type AgentHubMcpServerCommand,
+  startDaemon,
+} from "@agent-hub/daemon";
+
+const version = "0.1.1";
 
 const usage = `Usage:
   tavro-daemon connect --gateway-url <url> --device-id <id> --token <token> [--workspace-root <path>]
@@ -62,6 +68,16 @@ function getStringArg(
     : undefined;
 }
 
+function createPackagedMcpServerCommand(): AgentHubMcpServerCommand {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+
+  return {
+    command: process.execPath,
+    args: [path.resolve(currentDir, "mcp-stdio.js")],
+    cwd: currentDir,
+  };
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -94,7 +110,7 @@ async function main(): Promise<void> {
     process.env.AGENTHUB_WORKSPACE_ROOT = workspaceRoot;
   }
 
-  await startDaemon();
+  await startDaemon({ mcpServerCommand: createPackagedMcpServerCommand() });
 }
 
 await main().catch((error: unknown) => {

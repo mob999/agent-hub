@@ -25,6 +25,7 @@ import { createDaemonLogger } from "./logger";
 import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
 import {
+  type AgentHubMcpServerCommand,
   createAgentHubMcpServerCommand,
   createRuntimeAdapters,
   getRuntimeAdapter,
@@ -316,7 +317,11 @@ async function handleProjectChangeMerge(input: {
   );
 }
 
-export async function startDaemon(): Promise<void> {
+export interface StartDaemonOptions {
+  mcpServerCommand?: AgentHubMcpServerCommand;
+}
+
+export async function startDaemon(options: StartDaemonOptions = {}): Promise<void> {
   const env = loadDaemonEnv();
   const mcpRelay = new AgentHubMcpRelay();
   await mcpRelay.start();
@@ -328,7 +333,7 @@ export async function startDaemon(): Promise<void> {
     CODEX_EXECUTABLE_PATH: env.CODEX_EXECUTABLE_PATH,
     CLAUDE_CODE_EXECUTABLE_PATH: env.CLAUDE_CODE_EXECUTABLE_PATH,
     mcpRelay,
-    mcpServerCommand: createAgentHubMcpServerCommand(),
+    mcpServerCommand: options.mcpServerCommand ?? createAgentHubMcpServerCommand(),
   });
   const logger = createDaemonLogger({
     bindings: {

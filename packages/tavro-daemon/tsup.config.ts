@@ -3,7 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   clean: true,
   dts: false,
-  entry: ["src/index.ts", "src/cli.ts"],
+  entry: ["src/index.ts", "src/cli.ts", "src/mcp-stdio.ts"],
   format: ["esm"],
   noExternal: [
     "@agent-hub/config",

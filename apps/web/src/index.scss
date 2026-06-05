@@ -20,6 +20,7 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
 }
 
@@ -61,6 +62,66 @@ textarea {
 .centered-modal-actions .cds--modal-footer .cds--btn:not(.cds--skeleton) {
   padding-block: 0;
   padding-inline: 1rem;
+}
+
+.centered-modal-actions
+  :where(.cds--text-input, .cds--text-area, .cds--select-input) {
+  background: #fff;
+  border: 1px solid #d8dee6;
+  border-bottom-color: #d8dee6;
+  border-radius: 0.625rem;
+  box-shadow: none;
+}
+
+.centered-modal-actions
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):hover {
+  border-color: #c7d0dc;
+  border-bottom-color: #c7d0dc;
+  box-shadow: none;
+}
+
+.centered-modal-actions
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):focus {
+  border-color: #b9c3cf;
+  border-bottom-color: #b9c3cf;
+  box-shadow: none;
+  outline-offset: 2px;
+}
+
+.centered-modal-actions .cds--text-input__field-wrapper,
+.centered-modal-actions .cds--select-input__wrapper {
+  border-radius: 0.625rem;
+  box-shadow: none;
+}
+
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input) {
+  background: #fff;
+  border: 1px solid #d8dee6;
+  border-bottom-color: #d8dee6;
+  border-radius: 0.625rem;
+  box-shadow: none;
+}
+
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):hover {
+  border-color: #c7d0dc;
+  border-bottom-color: #c7d0dc;
+  box-shadow: none;
+}
+
+.daemon-device-settings
+  :where(.cds--text-input, .cds--text-area, .cds--select-input):focus {
+  border-color: #b9c3cf;
+  border-bottom-color: #b9c3cf;
+  box-shadow: none;
+  outline-offset: 2px;
+}
+
+.daemon-device-settings .cds--text-input__field-wrapper,
+.daemon-device-settings .cds--select-input__wrapper {
+  border-radius: 0.625rem;
+  box-shadow: none;
 }
 
 .agenthub-markdown {
@@ -128,4 +189,28 @@ textarea {
 .agenthub-markdown :where(th, td) {
   border: 1px solid var(--cds-border-subtle-01);
   padding: 0.375rem 0.5rem;
+}
+
+.agenthub-command-markdown {
+  color: var(--cds-text-primary);
+}
+
+.agenthub-command-markdown :where(p, pre) {
+  margin: 0;
+}
+
+.agenthub-command-markdown pre {
+  max-height: 14rem;
+  overflow: auto;
+  border-radius: 0.75rem;
+  background: #161616;
+  color: #f4f4f4;
+  padding: 0.875rem;
+}
+
+.agenthub-command-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }

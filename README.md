@@ -1,17 +1,27 @@
 # AgentHub
 
-AgentHub 是一个基于 IM 聊天范式的多 Agent 协作平台。用户可以像使用飞书或微信一样新建对话、发送消息、@ 不同 Agent，并在聊天流中查看文本回复、代码 Diff、网页预览、文件附件等产物。
+AgentHub 是一个基于 IM 聊天范式的多 Agent 协作平台。用户可以像使用飞书或微信一样新建对话、发送消息、@ 不同 Agent，并在聊天流中查看文本回复、代码 Diff、网页预览、文件附件、站点部署和项目文件变更等产物。
 
-当前仓库是 AgentHub 的 TypeScript monorepo 初始骨架，包含 Web 前端、API 服务、后台 worker、本地 daemon 和共享 packages。
+当前仓库是 AgentHub 的 TypeScript monorepo，包含 Web 前端、API 服务、后台 worker、本地 daemon、数据库 schema 和共享 packages。项目已经具备基础登录、会话、Agent、Run、Artifact、daemon 管理和实时事件链路。
+
+## 当前能力
+
+- Web 工作台：登录、对话侧边栏、Agent 管理、群聊/项目会话、搜索、Runs、Daemon 页面、Artifact 工作区、项目文件视图。
+- API 控制面：auth、agents、search、conversations、messages、project files/changes、artifacts、deployments、runs、daemon devices、SSE realtime。
+- Worker：后台任务入口和 daemon gateway。
+- Daemon：本地 runtime registry、Claude/Codex 适配、MCP relay、workspace 工具、memory/context compression 支持。
+- 数据层：PostgreSQL + Drizzle schema/migrations，Redis 用于队列、缓存和实时协调。
 
 ## 技术栈
 
 - 包管理：pnpm workspace
 - 任务编排：Turborepo
-- 前端：Vite + React + TypeScript
-- 后端：Hono + Node.js
+- 前端：Vite + React + TypeScript + Carbon Design System + Monaco Editor
+- 后端：Hono + Node.js + `@hono/zod-openapi`
 - Worker：TypeScript 后台任务进程
 - Daemon：TypeScript 本地轻量服务
+- 数据库：PostgreSQL + Drizzle ORM
+- 实时/队列：Redis + SSE/WebSocket
 - 测试：Vitest
 
 ## 目录结构
@@ -27,6 +37,7 @@ agent-hub/
     mobile/          # 预留：移动端客户端
 
   packages/
+    config/          # 环境变量解析和运行配置
     core/            # browser-safe，共享协议、Agent/runtime/artifact 契约和纯逻辑
     server/          # Node-only，日志和后端工具
     db/              # 数据库 schema 和数据访问
@@ -34,6 +45,19 @@ agent-hub/
   infra/             # 基础设施配置
   scripts/           # 开发和发布脚本
   docs/              # 项目文档
+```
+
+API 服务已经模块化：
+
+```txt
+apps/api/src/
+  index.ts           # 启动入口
+  app.ts             # OpenAPIHono app 组装
+  context.ts         # API 运行上下文
+  auth/              # session 和 auth middleware
+  routes/            # 按领域拆分的 OpenAPI routes
+  schemas/           # Zod/OpenAPI schemas
+  services/          # API 层组合 helper
 ```
 
 ## 环境要求
@@ -83,6 +107,14 @@ pnpm infra:reset  # 停止服务并删除数据卷
 pnpm install
 pnpm infra:up
 pnpm dev
+```
+
+默认开发端口：
+
+```txt
+Web:    http://localhost:5173
+API:    http://localhost:3000
+Worker: http://localhost:3001
 ```
 
 ## 常用命令
@@ -146,6 +178,13 @@ pnpm --filter @agent-hub/web dev
 pnpm --filter @agent-hub/api dev
 ```
 
+API 服务启动后可以查看 OpenAPI 文档：
+
+```txt
+http://localhost:3000/docs
+http://localhost:3000/openapi.json
+```
+
 启动 worker：
 
 ```bash
@@ -160,6 +199,12 @@ pnpm --filter @agent-hub/daemon dev
 
 ## 当前状态
 
-当前项目处于初始化阶段，已经完成 monorepo 骨架、Vite Web 应用、Hono API 应用、worker/daemon 运行单元和共享 packages 的基础配置。
+当前项目已完成第一阶段基础闭环的大部分工程面：
 
-后续优先实现第一条单 Agent 聊天闭环：对话列表、对话详情、消息输入、Run 创建、流式回复和基础 Artifact 卡片。
+- `packages/core` 已定义 agent、artifact、conversation、daemon、mcp、realtime、run、search 等共享协议。
+- `apps/api` 已从单文件入口拆为模块化 route/service 结构，并通过 OpenAPI 暴露主要路由。
+- `apps/web` 已具备 IM 工作台的主要页面和组件。
+- `apps/worker` 和 `apps/daemon` 已具备本地 daemon 连接、runtime 调用和 MCP relay 的基础能力。
+- `packages/db` 和 `packages/server` 已承载主要数据模型、repository、queue、realtime 和领域工具。
+
+后续重点是继续细化 API schema、补充 route/integration 测试、拆细 API service helper，并打磨消息发送、Run 调度、Artifact 发布和项目会话的稳定性。

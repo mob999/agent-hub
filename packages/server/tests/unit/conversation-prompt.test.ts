@@ -6,6 +6,8 @@ import {
   buildActiveRunsPrompt,
   buildAssignedTaskPrompt,
   buildConversationRunPrompt,
+  buildProjectProtocolPrompt,
+  orchestratorParallelSerialTaskInstructions,
   artifactUserFacingLinkInstructions,
   formatArtifactPromptLines,
   buildMentionedGroupChatRunPrompt,
@@ -96,6 +98,7 @@ describe("conversation prompt builder", () => {
         conversationId: "conversation-1",
         runId: "run-1",
         creatorAgentId: "agent-1",
+        creatorType: "agent",
         status: "ready",
         title: "implementation-report.md",
         filename: "implementation-report.md",
@@ -124,6 +127,7 @@ describe("conversation prompt builder", () => {
         conversationId: "conversation-1",
         runId: "run-1",
         creatorAgentId: "agent-1",
+        creatorType: "agent",
         status: "ready",
         title: "archive.zip",
         filename: "archive.zip",
@@ -242,6 +246,30 @@ describe("conversation prompt builder", () => {
     expect(prompt).not.toContain("configured Orchestrator");
   });
 
+  it("limits mentioned group chat history to the 10 most recent messages", () => {
+    const messages = Array.from({ length: 12 }, (_, index) =>
+      createMessage({
+        content: `history-${index + 1}`,
+        createdAt: `2026-05-26T00:${String(index + 1).padStart(2, "0")}:00.000Z`,
+      })
+    );
+    const prompt = buildMentionedGroupChatRunPrompt({
+      agentGroupsPrompt: "<agenthub_agent_groups />",
+      agentName: "jojo",
+      agentNamesById: {},
+      conversationTitle: "Design",
+      currentMessage: "@jojo can you review this?",
+      messages,
+      senderAgentName: "dudu",
+    });
+
+    expect(prompt).toContain("Only the 10 most recent group messages");
+    expect(prompt).not.toMatch(/^history-1$/m);
+    expect(prompt).not.toMatch(/^history-2$/m);
+    expect(prompt).toMatch(/^history-3$/m);
+    expect(prompt).toMatch(/^history-12$/m);
+  });
+
   it("formats only active prior runs for mentioned group chat context", () => {
     const prompt = buildActiveRunsPrompt([
       {
@@ -250,7 +278,9 @@ describe("conversation prompt builder", () => {
         latestEventType: "run.started",
         runId: "00000000-0000-4000-8000-000000000010",
         status: "running",
+        taskId: "00000000-0000-4000-8000-000000000012",
         taskIndex: 0,
+        taskTitle: "Implement landing page",
       },
       {
         createdAt: "2026-05-25T00:00:00.000Z",
@@ -262,8 +292,11 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("<agenthub_active_runs>");
     expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: running");
     expect(prompt).toContain("latestEvent: run.started");
+    expect(prompt).toContain("continue that same assigned task");
     expect(prompt).toContain("Goal ID: 00000000-0000-4000-8000-000000000099");
+    expect(prompt).toContain("Task ID: 00000000-0000-4000-8000-000000000012");
     expect(prompt).toContain("Task #0");
+    expect(prompt).toContain("Task title: Implement landing page");
     expect(prompt).not.toContain("00000000-0000-4000-8000-000000000011");
   });
 
@@ -299,6 +332,42 @@ describe("conversation prompt builder", () => {
 
     expect(prompt).toContain("<agenthub_active_runs>");
     expect(prompt).toContain("Run 00000000-0000-4000-8000-000000000010: queued");
+  });
+
+  it("documents orchestrator parallel and serial task planning rules", () => {
+    const prompt = orchestratorParallelSerialTaskInstructions.join("\n");
+
+    expect(prompt).toContain("Parallel task rule");
+    expect(prompt).toContain("different agents");
+    expect(prompt).toContain("deliverables are clearly separated");
+    expect(prompt).toContain("Serial task rule");
+    expect(prompt).toContain("same assignee");
+    expect(prompt).toContain("dependsOnTaskIndexes");
+    expect(prompt).toContain("integration, verification, publishing, and final-summary");
+  });
+
+  it("builds Project protocol instructions for worktrees and orchestrator review", () => {
+    const prompt = buildProjectProtocolPrompt({
+      conversationTitle: "agent-hub",
+      isOrchestrator: true,
+      project: {
+        conversationId: "00000000-0000-4000-8000-000000000001",
+        ownerUserId: "00000000-0000-4000-8000-000000000002",
+        remoteUrl: "https://github.com/example/agent-hub.git",
+        daemonDeviceId: "local-dev",
+        defaultBranch: "main",
+        baseHead: "abc123",
+        cloneStatus: "ready",
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    });
+
+    expect(prompt).toContain("<agenthub_project_protocol>");
+    expect(prompt).toContain("per-run Git worktree and branch");
+    expect(prompt).toContain("Agent memory is stored in your own AgentHub memory workspace");
+    expect(prompt).toContain("list_project_changes/read_project_change");
+    expect(prompt).toContain("merge_project_change or reject_project_change");
   });
 
   it("resolves text mentions by longest agent name first", () => {

@@ -110,6 +110,7 @@ daemon 不负责聊天历史主存储、用户系统、计费、全局权限或�
 ### 后端
 
 - Hono，运行在 Node.js 上
+- `@hono/zod-openapi`，用于 API 路由声明和 OpenAPI 文档生成
 - PostgreSQL
 - Drizzle ORM
 - Redis
@@ -170,6 +171,7 @@ agent-hub/
     worker/               # 后台长任务执行器
 
   packages/
+    config/               # 环境变量解析和运行配置
     core/                 # browser-safe，共享协议、Agent/runtime/artifact 契约和纯逻辑
     db/                   # 数据库 schema、迁移和数据访问
     server/               # Node-only，统一日志和后端工具
@@ -189,6 +191,19 @@ agent-hub/
   tsconfig.base.json
   vitest.config.ts
 ```
+
+### API 服务内部结构
+
+`apps/api` 已从单文件入口拆成模块化 Hono 应用。实现 API 时遵守以下边界：
+
+- `src/index.ts` 只负责加载 env、创建 db/redis/logger、订阅 realtime 和启动 HTTP server。
+- `src/app.ts` 负责创建 `OpenAPIHono`、注入 `env/db/user`、注册 Swagger/OpenAPI 和挂载各 route 模块。
+- `src/context.ts` 定义 API 运行上下文；route 模块通过 `ApiRouteContext` 获取共享依赖。
+- `src/routes/*` 按领域拆分路由，例如 auth、agents、conversations、conversation messages、project files、artifacts、daemon、runs、search、realtime。
+- JSON API 路由必须使用 `createRoute + app.openapi(...)`，或使用 `routes/openapi.ts` 中的 `openApiRoute` helper 注册，避免继续新增裸 `app.get/post/...` 业务路由。
+- `src/schemas/*` 放 OpenAPI/Zod schema；已有 `auth.ts` 和 `common.ts`，新增稳定请求/响应结构时优先补 schema。
+- `src/services/api-services.ts` 目前承载从旧入口拆出的 API 组合 helper；后续可以继续按领域拆细，但不要把数据库 repository 逻辑搬回 API 层。
+- 领域数据访问和后端纯逻辑优先放在 `packages/server`；browser-safe 类型和协议放在 `packages/core`。
 
 ## 本地开发基础设施
 
@@ -224,6 +239,13 @@ pnpm test:coverage
 pnpm check
 ```
 
+API OpenAPI 文档在本地 API 服务启动后可访问：
+
+```txt
+http://localhost:3000/docs
+http://localhost:3000/openapi.json
+```
+
 各 workspace 如果包含测试，应在自己的 `package.json` 中提供 `test` 脚本。单元测试文件放在对应 app 或 package 的 `tests/unit` 目录下，命名为 `<subject>.test.ts`、`<subject>.spec.ts`、`<subject>.test.tsx` 或 `<subject>.spec.tsx`，例如 `tests/unit/agent.test.ts`。
 
 优先为这些代码补单测：
@@ -242,28 +264,21 @@ pnpm check
 - 纯静态 UI 展示。
 - 很薄的框架 glue code。
 
-## 初始实现顺序
+## 当前实现状态
 
-建议按以下顺序实现：
+当前仓库已经超过初始骨架阶段，形成了可运行的 AgentHub 雏形：
 
-1. `packages/core`
-2. `apps/api`
-3. `apps/web`
-4. `apps/worker`
-5. `apps/daemon`
-6. `packages/db`
-7. `packages/server`
+- Web SPA 已包含登录、工作台、对话侧边栏、Agent 管理、群聊/项目会话、搜索、Runs、Daemon 状态、Artifact 工作区和项目文件视图。
+- API 已支持 auth、agents、search、conversations、message send、project files/changes、artifacts、deployments、runs、daemon devices 和 SSE realtime，并通过 OpenAPI 文档暴露主要路由。
+- Worker 已包含 daemon gateway 和后台任务入口。
+- Daemon 已包含 WebSocket client、本地 runtime registry、Claude/Codex runtime 适配、MCP relay、workspace 工具和 memory/context compression 相关逻辑。
+- `packages/db` 已包含 auth、agents、conversations、runs 等 schema 与迁移。
+- `packages/server` 已包含 agents、artifacts、conversations、queue、realtime、runs 等后端领域模块。
+- `packages/core` 已包含 agent、artifact、conversation、daemon、mcp、realtime、run、search 等共享协议类型和纯逻辑。
 
-第一个可用里程碑应支持：
+后续优先级：
 
-- 静态 Web SPA。
-- 对话列表。
-- 对话详情。
-- 消息输入框。
-- 单 Agent Run。
-- Agent 回复流式输出。
-- 消息持久化。
-- 基础 Artifact 卡片模型。
-- daemon 状态占位。
-
-多 Agent 编排、本地 daemon 执行、Artifact 二次编辑和一键部署可以在第一条单 Agent 聊天闭环稳定后继续扩展。
+- 继续把 `apps/api/src/services/api-services.ts` 按领域拆细，减少单个 service 文件体积。
+- 为 API route 增补更精确的 Zod request/response schema，而不是长期依赖通用 JSON schema。
+- 补充可运行的 route/integration 测试，尤其是消息发送、Run 创建、Artifact 发布和 daemon device 流程。
+- 打磨第一条单 Agent 和群聊/项目会话闭环的错误处理、取消、重试和用户可见状态。

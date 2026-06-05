@@ -14,7 +14,10 @@ export type RunStatus =
   | "running"
   | "succeeded"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
+
+export type RunDispatchMode = "new" | "resume";
 
 export type RunLogStream = "stdout" | "stderr";
 export type ToolCallStatus = "succeeded" | "failed";
@@ -30,6 +33,10 @@ export interface AgentRun {
   agentId: AgentId;
   daemonDeviceId: DaemonDeviceId;
   status: RunStatus;
+  runtimeSessionId?: string;
+  parentRunId?: RunId;
+  preemptedByRunId?: RunId;
+  dispatchMode?: RunDispatchMode;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -75,6 +82,13 @@ export type RunEvent =
       createdAt: IsoDateTime;
     }
   | {
+      type: "runtime.session.started";
+      runId: RunId;
+      runtimeKind: RuntimeKind;
+      sessionId: string;
+      createdAt: IsoDateTime;
+    }
+  | {
       type: "tool.call.started";
       runId: RunId;
       toolCallId: string;
@@ -104,6 +118,16 @@ export type RunEvent =
       createdAt: IsoDateTime;
     }
   | {
+      type: "agenthub.tool.result";
+      runId: RunId;
+      toolCallId: string;
+      name?: AgentHubMcpToolName;
+      status: ToolCallStatus;
+      output?: unknown;
+      error?: string;
+      createdAt: IsoDateTime;
+    }
+  | {
       type: "artifact.created";
       runId: RunId;
       artifact: Artifact;
@@ -112,7 +136,7 @@ export type RunEvent =
   | {
       type: "run.completed";
       runId: RunId;
-      status: Extract<RunStatus, "succeeded" | "failed" | "cancelled">;
+      status: Extract<RunStatus, "succeeded" | "failed" | "cancelled" | "interrupted">;
       error?: string;
       createdAt: IsoDateTime;
     };

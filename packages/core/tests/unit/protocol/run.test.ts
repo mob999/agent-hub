@@ -87,4 +87,28 @@ describe("run protocol", () => {
     expect(event.name).toBe("send_message");
     expect(event.input.content).toBe("I can take this one.");
   });
+
+  it("expresses AgentHub MCP tool results", () => {
+    const succeeded = {
+      type: "agenthub.tool.result",
+      runId: "run_1",
+      toolCallId: "tool_1",
+      name: "send_message",
+      status: "succeeded",
+      output: { accepted: true, messageId: "msg_1" },
+      createdAt: "2026-05-21T00:00:01.000Z",
+    } satisfies RunEvent;
+    const failed = {
+      type: "agenthub.tool.result",
+      runId: "run_1",
+      toolCallId: "tool_2",
+      name: "read_artifact",
+      status: "failed",
+      error: "Artifact was not found.",
+      createdAt: "2026-05-21T00:00:02.000Z",
+    } satisfies RunEvent;
+
+    expect(succeeded.output).toEqual({ accepted: true, messageId: "msg_1" });
+    expect(failed.error).toBe("Artifact was not found.");
+  });
 });

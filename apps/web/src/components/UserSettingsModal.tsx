@@ -45,7 +45,7 @@ export function UserSettingsModal({
             hideCloseButton
           />
         )}
-        <div className="grid gap-1">
+        <div className="grid gap-1 rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-3">
           <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
             {user.name ?? user.email}
           </p>

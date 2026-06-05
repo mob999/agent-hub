@@ -8,12 +8,20 @@ import type {
   AgentHubCreateTaskToolResult,
   AgentHubDeployStaticSiteToolInput,
   AgentHubDeployStaticSiteToolResult,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
+  AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolResult,
+  AgentHubListProjectChangesToolInput,
+  AgentHubMergeProjectChangeToolInput,
   AgentHubMcpToolCall,
+  AgentHubReadProjectChangeToolInput,
+  AgentHubRejectProjectChangeToolInput,
   AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchGroupMessagesToolInput,
   AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
@@ -29,9 +37,12 @@ describe("AgentHub MCP protocol", () => {
   it("defines orchestrator and non-orchestrator tool sets", () => {
     expect(agentHubAllMcpTools).toEqual([
       "send_message",
+      "list_group_messages",
+      "search_group_messages",
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "download_artifact",
       "append_memory",
       "search_memory",
       "read_memory",
@@ -39,16 +50,25 @@ describe("AgentHub MCP protocol", () => {
       "create_task",
       "approve_task",
       "cancel_task",
+      "list_project_changes",
+      "read_project_change",
+      "merge_project_change",
+      "reject_project_change",
       "complete_goal",
     ]);
     expect(agentHubNonOrchestratorMcpTools).toEqual([
       "send_message",
+      "list_group_messages",
+      "search_group_messages",
       "list_goals",
       "list_artifacts",
       "read_artifact",
+      "download_artifact",
       "append_memory",
       "search_memory",
       "read_memory",
+      "list_project_changes",
+      "read_project_change",
       "upload_artifact",
       "deploy_static_site",
       "complete_task",
@@ -176,9 +196,50 @@ describe("AgentHub MCP protocol", () => {
       goalId: list.goalId,
       artifactId: "00000000-0000-4000-8000-000000000011",
     };
+    const download: AgentHubDownloadArtifactToolInput = {
+      goalId: list.goalId,
+      artifactId: read.artifactId,
+      localPath: "inputs/report.md",
+    };
+    const result: AgentHubDownloadArtifactToolResult = {
+      accepted: true,
+      artifact: {
+        id: read.artifactId,
+        ownerUserId: "00000000-0000-4000-8000-000000000012",
+        conversationId: "00000000-0000-4000-8000-000000000013",
+        goalId: list.goalId,
+        runId: "00000000-0000-4000-8000-000000000014",
+        creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        creatorType: "agent",
+        status: "ready",
+        title: "Report",
+        filename: "report.md",
+        sizeBytes: 128,
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+      localPath: "inputs/report.md",
+      sizeBytes: 128,
+    };
 
     expect(list.limit).toBe(10);
     expect(read.goalId).toBe(list.goalId);
+    expect(download.localPath).toBe("inputs/report.md");
+    expect(result.artifact.id).toBe(download.artifactId);
+  });
+
+  it("expresses group message inspection tools", () => {
+    const listInput: AgentHubListGroupMessagesToolInput = {
+      beforeMessageId: "00000000-0000-4000-8000-000000000031",
+      limit: 20,
+    };
+    const searchInput: AgentHubSearchGroupMessagesToolInput = {
+      query: "deployment",
+      limit: 10,
+    };
+
+    expect(listInput.limit).toBe(20);
+    expect(searchInput.query).toBe("deployment");
   });
 
   it("expresses memory tools scoped to the current agent workspace", () => {
@@ -224,6 +285,7 @@ describe("AgentHub MCP protocol", () => {
         taskIndex: uploadInput.taskIndex,
         runId: "00000000-0000-4000-8000-000000000014",
         creatorAgentId: "00000000-0000-4000-8000-000000000015",
+        creatorType: "agent",
         status: "ready",
         title: uploadInput.title,
         filename: "report.md",
@@ -278,6 +340,35 @@ describe("AgentHub MCP protocol", () => {
 
     expect(input.localPath).toBe("dist");
     expect(result.deployment.url).toContain("/deployments/");
+  });
+
+  it("expresses project change tools", () => {
+    const list: AgentHubListProjectChangesToolInput = {
+      status: "open",
+    };
+    const read: AgentHubReadProjectChangeToolInput = {
+      changeId: "00000000-0000-4000-8000-000000000041",
+    };
+    const merge: AgentHubMergeProjectChangeToolInput = {
+      changeId: read.changeId,
+      message: "Merge implementation changes.",
+    };
+    const reject: AgentHubRejectProjectChangeToolInput = {
+      changeId: read.changeId,
+      reason: "Conflicts with the current goal.",
+    };
+    const call: AgentHubMcpToolCall = {
+      runId: "00000000-0000-4000-8000-000000000003",
+      toolCallId: "tool_project",
+      name: "merge_project_change",
+      input: merge,
+      createdAt: "2026-05-26T00:00:00.000Z",
+    };
+
+    expect(list.status).toBe("open");
+    expect(read.changeId).toBe(merge.changeId);
+    expect(reject.reason).toContain("Conflicts");
+    expect(call.name).toBe("merge_project_change");
   });
 
   it("expresses cross-conversation messages through send_message target", () => {

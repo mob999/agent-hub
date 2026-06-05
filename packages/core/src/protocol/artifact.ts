@@ -56,6 +56,24 @@ const extensionInfo = {
   zsh: { language: "shell", mimeType: "text/x-shellscript; charset=utf-8" },
 } as const satisfies Record<string, { language: string; mimeType: string }>;
 
+const filenameInfo = {
+  ".dockerignore": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".editorconfig": { language: "ini", mimeType: "text/plain; charset=utf-8" },
+  ".env": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".eslintignore": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".eslintrc": { language: "json", mimeType: "application/json; charset=utf-8" },
+  ".gitattributes": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".gitignore": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".npmrc": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".prettierignore": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  ".prettierrc": { language: "json", mimeType: "application/json; charset=utf-8" },
+  copying: { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  dockerfile: { language: "dockerfile", mimeType: "text/plain; charset=utf-8" },
+  license: { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
+  makefile: { language: "makefile", mimeType: "text/x-makefile; charset=utf-8" },
+  readme: { language: "markdown", mimeType: "text/markdown; charset=utf-8" },
+} as const satisfies Record<string, { language: string; mimeType: string }>;
+
 const imageMimeTypes = {
   avif: "image/avif",
   gif: "image/gif",
@@ -73,10 +91,27 @@ function extensionFromFilename(filename: string): string {
   return index > 0 ? baseName.slice(index + 1) : "";
 }
 
+function baseNameFromFilename(filename: string): string {
+  return filename.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+}
+
 export function inferArtifactFileInfo(input: {
   filename: string;
 }): ArtifactFileInfo {
   const extension = extensionFromFilename(input.filename);
+  const filenameInfoMatch = filenameInfo[baseNameFromFilename(input.filename) as keyof typeof filenameInfo];
+
+  if (filenameInfoMatch !== undefined) {
+    return {
+      category: filenameInfoMatch.language === "markdown" ? "markdown" : "text",
+      label: "File",
+      language: filenameInfoMatch.language,
+      mimeType: filenameInfoMatch.mimeType,
+      canApply: true,
+      canEdit: true,
+      canPreview: filenameInfoMatch.language === "markdown",
+    };
+  }
 
   if (extension === "html" || extension === "htm") {
     return {
@@ -85,7 +120,7 @@ export function inferArtifactFileInfo(input: {
       language: "html",
       mimeType: "text/html; charset=utf-8",
       canApply: false,
-      canEdit: false,
+      canEdit: true,
       canPreview: true,
     };
   }

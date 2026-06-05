@@ -6,8 +6,9 @@ export type ConversationMessageId = string;
 export type ConversationGoalId = string;
 export type ConversationGoalTaskId = string;
 export type ConversationArtifactId = string;
+export type ConversationProjectChangeId = string;
 
-export type ConversationType = "group" | "direct";
+export type ConversationType = "group" | "direct" | "project";
 export type ConversationStatus = "active" | "archived";
 export type ConversationMessageSenderType = "user" | "agent" | "system";
 export type ConversationMessageStatus =
@@ -28,12 +29,15 @@ export type ConversationGoalTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled"
+  | "interrupted"
   | "blocked";
 export type ConversationArtifactStatus =
   | "pending"
   | "ready"
   | "failed"
   | "deleted";
+export type ConversationArtifactKind = "file" | "site";
+export type ConversationArtifactCreatorType = "agent" | "user";
 export type ConversationArtifactActionType = "apply" | "publish" | "preview";
 export type ConversationArtifactActionStatus =
   | "queued"
@@ -41,6 +45,12 @@ export type ConversationArtifactActionStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type ConversationProjectCloneStatus = "cloning" | "ready" | "failed";
+export type ConversationProjectChangeStatus =
+  | "open"
+  | "merged"
+  | "rejected"
+  | "failed";
 
 export interface Conversation {
   id: ConversationId;
@@ -56,6 +66,41 @@ export interface Conversation {
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   lastMessageAt?: IsoDateTime;
+  project?: ConversationProject;
+}
+
+export interface ConversationProject {
+  conversationId: ConversationId;
+  ownerUserId: UserId;
+  remoteUrl: string;
+  daemonDeviceId: string;
+  baseRepoPath?: string;
+  defaultBranch?: string;
+  baseHead?: string;
+  cloneStatus: ConversationProjectCloneStatus;
+  cloneError?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface ConversationProjectChange {
+  id: ConversationProjectChangeId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  goalId?: ConversationGoalId;
+  taskIndex?: number;
+  agentId: AgentId;
+  runId: RunId;
+  branchName: string;
+  worktreePath: string;
+  baseCommit?: string;
+  headCommit?: string;
+  status: ConversationProjectChangeStatus;
+  summary?: string;
+  diffStat?: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  mergedAt?: IsoDateTime;
 }
 
 export interface ConversationMessage {
@@ -76,14 +121,19 @@ export interface ConversationArtifact {
   id: ConversationArtifactId;
   ownerUserId: UserId;
   conversationId: ConversationId;
+  kind: ConversationArtifactKind;
   goalId?: ConversationGoalId;
   goalTaskId?: ConversationGoalTaskId;
   taskIndex?: number;
-  runId: RunId;
-  creatorAgentId: AgentId;
+  runId?: RunId;
+  creatorAgentId?: AgentId;
+  creatorType: ConversationArtifactCreatorType;
+  creatorUserId?: UserId;
   status: ConversationArtifactStatus;
   title: string;
   filename: string;
+  entrypoint?: string;
+  fileCount?: number;
   sizeBytes: number;
   latestRevisionId?: ConversationArtifactRevisionId;
   downloadUrl?: string;
@@ -96,12 +146,13 @@ export interface ConversationMessageAttachment {
   id: string;
   messageId: ConversationMessageId;
   artifactId: ConversationArtifactId;
-  type: "image";
+  type: "image" | "file";
   artifact: ConversationArtifact;
   createdAt: IsoDateTime;
 }
 
 export type ConversationArtifactRevisionId = string;
+export type ConversationArtifactFileId = string;
 export type ConversationArtifactActionId = string;
 export type ConversationDeploymentId = string;
 
@@ -111,6 +162,34 @@ export interface ConversationArtifactRevision {
   ownerUserId: UserId;
   conversationId: ConversationId;
   runId?: RunId;
+  editorUserId?: UserId;
+  contentHash: string;
+  summary?: string;
+  createdAt: IsoDateTime;
+}
+
+export interface ConversationArtifactFile {
+  id: ConversationArtifactFileId;
+  artifactId: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  latestRevisionId?: ConversationArtifactFileRevisionId;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export type ConversationArtifactFileRevisionId = string;
+
+export interface ConversationArtifactFileRevision {
+  id: ConversationArtifactFileRevisionId;
+  artifactFileId: ConversationArtifactFileId;
+  artifactId: ConversationArtifactId;
+  ownerUserId: UserId;
+  conversationId: ConversationId;
+  path: string;
   editorUserId?: UserId;
   contentHash: string;
   summary?: string;
@@ -133,6 +212,7 @@ export interface ConversationArtifactAction {
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact;
   latestRevision?: ConversationArtifactRevision;
+  files?: ConversationArtifactFile[];
   actions: ConversationArtifactAction[];
   availableActions: ConversationArtifactActionType[];
 }
@@ -145,6 +225,10 @@ export interface ConversationDeployment {
   taskIndex?: number;
   runId: RunId;
   creatorAgentId: AgentId;
+  sourceArtifactId?: ConversationArtifactId;
+  sourceRevisionId?: ConversationArtifactRevisionId;
+  publishedByUserId?: UserId;
+  publishedFrom: "agent" | "user";
   title: string;
   entrypoint: string;
   status: "ready" | "failed" | "deleted";
@@ -219,6 +303,19 @@ export interface CreateGroupConversationResponse {
   conversation: Conversation;
 }
 
+export interface CreateProjectConversationRequest {
+  title?: string;
+  description?: string;
+  remoteUrl: string;
+  daemonDeviceId: string;
+  agentIds: AgentId[];
+  orchestratorAgentId?: AgentId;
+}
+
+export interface CreateProjectConversationResponse {
+  conversation: Conversation;
+}
+
 export interface UpdateGroupConversationRequest {
   title: string;
   description?: string;
@@ -230,11 +327,30 @@ export interface UpdateGroupConversationResponse {
   conversation: Conversation;
 }
 
+export interface UpdateProjectConversationRequest {
+  title: string;
+  description?: string;
+  agentIds: AgentId[];
+  orchestratorAgentId?: AgentId;
+}
+
+export interface UpdateProjectConversationResponse {
+  conversation: Conversation;
+}
+
 export interface ArchiveGroupConversationResponse {
   conversation: Conversation;
 }
 
 export interface RestoreGroupConversationResponse {
+  conversation: Conversation;
+}
+
+export interface ArchiveProjectConversationResponse {
+  conversation: Conversation;
+}
+
+export interface RestoreProjectConversationResponse {
   conversation: Conversation;
 }
 
@@ -258,6 +374,25 @@ export interface GetConversationArtifactContentResponse {
   revision?: ConversationArtifactRevision;
 }
 
+export interface ListConversationArtifactFilesResponse {
+  files: ConversationArtifactFile[];
+}
+
+export interface GetConversationArtifactFileContentResponse {
+  content: string;
+  file: ConversationArtifactFile;
+  revision?: ConversationArtifactFileRevision;
+}
+
+export interface CreateConversationArtifactFileRevisionRequest {
+  content: string;
+  summary?: string;
+}
+
+export interface CreateConversationArtifactFileRevisionResponse {
+  revision: ConversationArtifactFileRevision;
+}
+
 export interface CreateConversationArtifactRevisionRequest {
   content: string;
   summary?: string;
@@ -269,6 +404,38 @@ export interface CreateConversationArtifactRevisionResponse {
 
 export interface CreateConversationArtifactActionResponse {
   action: ConversationArtifactAction;
+  deployment?: ConversationDeployment;
+}
+
+export interface ListConversationProjectChangesResponse {
+  changes: ConversationProjectChange[];
+}
+
+export interface ListProjectFilesResponse {
+  files: Array<{
+    path: string;
+    type: "file" | "directory";
+    sizeBytes?: number;
+  }>;
+}
+
+export interface GetProjectFileContentResponse {
+  content: string;
+  path: string;
+}
+
+export interface UpdateProjectFileContentRequest {
+  content: string;
+  path: string;
+}
+
+export interface UpdateProjectFileContentResponse {
+  path: string;
+  updated: true;
+}
+
+export interface GetProjectDiffResponse {
+  diff: string;
 }
 
 export type SendConversationMessageMode = "chat" | "task";

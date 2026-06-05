@@ -7,6 +7,8 @@ import type {
   CreateGroupConversationResponse,
   ConversationGoal,
   ConversationMessage,
+  CreateProjectConversationRequest,
+  CreateProjectConversationResponse,
   UpdateGroupConversationRequest,
   UpdateGroupConversationResponse,
 } from "../../../src/protocol";
@@ -89,6 +91,47 @@ describe("conversation protocol", () => {
     expect(response.conversation.agentIds).toEqual(request.agentIds);
   });
 
+  it("expresses project conversations with clone metadata", () => {
+    const request: CreateProjectConversationRequest = {
+      title: "agent-hub",
+      description: "Collaborate on the project repository.",
+      remoteUrl: "https://github.com/example/agent-hub.git",
+      agentIds: [
+        "00000000-0000-4000-8000-000000000003",
+        "00000000-0000-4000-8000-000000000004",
+      ],
+      orchestratorAgentId: "00000000-0000-4000-8000-000000000003",
+    };
+    const response: CreateProjectConversationResponse = {
+      conversation: {
+        id: "00000000-0000-4000-8000-000000000001",
+        ownerUserId: "00000000-0000-4000-8000-000000000002",
+        type: "project",
+        title: request.title,
+        description: request.description,
+        agentIds: request.agentIds,
+        orchestratorAgentId: request.orchestratorAgentId,
+        status: "active",
+        project: {
+          conversationId: "00000000-0000-4000-8000-000000000001",
+          ownerUserId: "00000000-0000-4000-8000-000000000002",
+          remoteUrl: request.remoteUrl,
+          daemonDeviceId: "local-dev",
+          cloneStatus: "cloning",
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+        createdAt: "2026-05-26T00:00:00.000Z",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
+    };
+
+    expect(response.conversation.type).toBe("project");
+    expect(response.conversation.project?.remoteUrl).toBe(request.remoteUrl);
+    expect(response.conversation.project?.cloneStatus).toBe("cloning");
+    expect(response.conversation.agentIds).toEqual(request.agentIds);
+  });
+
   it("expresses conversation goals and tasks", () => {
     const artifact: ConversationArtifact = {
       id: "00000000-0000-4000-8000-000000000020",
@@ -99,6 +142,7 @@ describe("conversation protocol", () => {
       taskIndex: 0,
       runId: "00000000-0000-4000-8000-000000000016",
       creatorAgentId: "00000000-0000-4000-8000-000000000015",
+      creatorType: "agent",
       status: "ready",
       title: "Implementation report",
       filename: "implementation-report.md",

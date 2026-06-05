@@ -140,6 +140,49 @@ const meRoute = createRoute({
   },
 });
 
+const updateMeRoute = createRoute({
+  method: "patch",
+  path: "/me",
+  tags: ["Auth"],
+  summary: "Update current user",
+  description: "Update current user settings.",
+  security: [{ cookieAuth: [] }],
+  responses: {
+    200: {
+      description: "Updated user",
+      content: {
+        "application/json": {
+          schema: AuthUserResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: "Invalid user settings",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    401: {
+      description: "Authentication required",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: "User not found",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
 export const authRoutes = new OpenAPIHono<AppBindings>();
 
 authRoutes.openapi(registerRoute, async (c) => {
@@ -290,7 +333,7 @@ authRoutes.openapi(meRoute, async (c) => {
   );
 });
 
-authRoutes.patch("/me", requireAuth, async (c) => {
+authRoutes.openapi(updateMeRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
 
@@ -349,5 +392,5 @@ authRoutes.patch("/me", requireAuth, async (c) => {
     );
   }
 
-  return c.json({ user: updatedUser });
+  return c.json({ user: updatedUser }, 200);
 });

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -168,6 +168,130 @@ describe("AgentHubMcpRelay", () => {
         input: { status: "active" },
       }),
     ]);
+  });
+
+  it("downloads artifacts into the run workspace without exposing content to the runtime", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-relay-download-"));
+    const calls: unknown[] = [];
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["download_artifact"],
+      onToolCall: (call) => {
+        calls.push(call);
+        return {
+          accepted: true,
+          artifact: {
+            id: "artifact_1",
+            ownerUserId: "user_1",
+            conversationId: "conversation_1",
+            goalId: "goal_1",
+            runId: "run_0",
+            creatorAgentId: "agent_1",
+            creatorType: "agent",
+            status: "ready",
+            title: "Research bundle",
+            filename: "bundle.zip",
+            sizeBytes: 11,
+            createdAt: "2026-05-26T00:00:00.000Z",
+            updatedAt: "2026-05-26T00:00:00.000Z",
+          },
+          contentBase64: Buffer.from("hello world").toString("base64"),
+          filename: "bundle.zip",
+          sizeBytes: 11,
+        };
+      },
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/download_artifact`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolCallId: "tool_download",
+          input: {
+            artifactId: "artifact_1",
+            goalId: "goal_1",
+          },
+        }),
+      },
+    );
+    const body = await response.json() as {
+      contentBase64?: string;
+      localPath?: string;
+      sizeBytes?: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      localPath: "artifacts/bundle.zip",
+      sizeBytes: 11,
+    });
+    expect(body.contentBase64).toBeUndefined();
+    await expect(readFile(path.join(workspacePath, "artifacts", "bundle.zip"), "utf8"))
+      .resolves.toBe("hello world");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        runId: "run_1",
+        toolCallId: "tool_download",
+        name: "download_artifact",
+        input: {
+          artifactId: "artifact_1",
+          goalId: "goal_1",
+          localPath: undefined,
+        },
+      }),
+    ]);
+    await rm(workspacePath, { recursive: true, force: true });
+  });
+
+  it("rejects download_artifact path escapes", async () => {
+    const relay = await createStartedRelay();
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "agenthub-relay-download-escape-"));
+    const session = relay.createSession({
+      runId: "run_1",
+      workspacePath,
+      enabledTools: ["download_artifact"],
+      onToolCall: () => ({
+        accepted: true,
+        artifact: {
+          id: "artifact_1",
+          ownerUserId: "user_1",
+          conversationId: "conversation_1",
+          runId: "run_0",
+          creatorAgentId: "agent_1",
+          creatorType: "agent",
+          status: "ready",
+          title: "Report",
+          filename: "report.md",
+          sizeBytes: 6,
+          createdAt: "2026-05-26T00:00:00.000Z",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+        contentBase64: Buffer.from("report").toString("base64"),
+        filename: "report.md",
+        sizeBytes: 6,
+      }),
+    });
+
+    const response = await fetch(
+      `${session.relayUrl}/sessions/${session.token}/tools/download_artifact`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: {
+            artifactId: "artifact_1",
+            localPath: "../report.md",
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    await rm(workspacePath, { recursive: true, force: true });
   });
 
   it("handles memory tools locally without depending on server RPC", async () => {
@@ -343,6 +467,7 @@ describe("AgentHubMcpRelay", () => {
             taskIndex: upload.taskIndex,
             runId: "run_1",
             creatorAgentId: "agent_1",
+            creatorType: "agent",
             status: "ready",
             title: upload.title,
             filename: upload.filename,
@@ -438,6 +563,7 @@ describe("AgentHubMcpRelay", () => {
             taskIndex: upload.taskIndex,
             runId: "run_1",
             creatorAgentId: "agent_1",
+            creatorType: "agent",
             status: "ready",
             title: upload.title,
             filename: upload.filename,

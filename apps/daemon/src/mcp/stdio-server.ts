@@ -21,18 +21,33 @@ import type {
   AgentHubCreateGoalToolResult,
   AgentHubCreateTaskToolInput,
   AgentHubCreateTaskToolResult,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
   AgentHubAppendMemoryToolResult,
+  AgentHubListGroupMessagesToolInput,
+  AgentHubListGroupMessagesToolResult,
   AgentHubListArtifactsToolInput,
   AgentHubListArtifactsToolResult,
   AgentHubListGoalsToolInput,
   AgentHubListGoalsToolResult,
+  AgentHubListProjectChangesToolInput,
+  AgentHubListProjectChangesToolResult,
+  AgentHubMergeProjectChangeToolInput,
+  AgentHubMergeProjectChangeToolResult,
   AgentHubMcpToolName,
+  AgentHubMcpToolInput,
   AgentHubMcpToolResult,
   AgentHubReadMemoryToolInput,
   AgentHubReadMemoryToolResult,
   AgentHubReadArtifactToolInput,
   AgentHubReadArtifactToolResult,
+  AgentHubReadProjectChangeToolInput,
+  AgentHubReadProjectChangeToolResult,
+  AgentHubRejectProjectChangeToolInput,
+  AgentHubRejectProjectChangeToolResult,
+  AgentHubSearchGroupMessagesToolInput,
+  AgentHubSearchGroupMessagesToolResult,
   AgentHubSearchMemoryToolInput,
   AgentHubSearchMemoryToolResult,
   AgentHubSendMessageToolInput,
@@ -42,9 +57,16 @@ import type {
 } from "@agent-hub/core";
 
 const sendMessageToolName = "send_message" satisfies AgentHubMcpToolName;
+const listGroupMessagesToolName = "list_group_messages" satisfies AgentHubMcpToolName;
+const searchGroupMessagesToolName = "search_group_messages" satisfies AgentHubMcpToolName;
 const listGoalsToolName = "list_goals" satisfies AgentHubMcpToolName;
+const listProjectChangesToolName = "list_project_changes" satisfies AgentHubMcpToolName;
+const readProjectChangeToolName = "read_project_change" satisfies AgentHubMcpToolName;
+const mergeProjectChangeToolName = "merge_project_change" satisfies AgentHubMcpToolName;
+const rejectProjectChangeToolName = "reject_project_change" satisfies AgentHubMcpToolName;
 const listArtifactsToolName = "list_artifacts" satisfies AgentHubMcpToolName;
 const readArtifactToolName = "read_artifact" satisfies AgentHubMcpToolName;
+const downloadArtifactToolName = "download_artifact" satisfies AgentHubMcpToolName;
 const appendMemoryToolName = "append_memory" satisfies AgentHubMcpToolName;
 const searchMemoryToolName = "search_memory" satisfies AgentHubMcpToolName;
 const readMemoryToolName = "read_memory" satisfies AgentHubMcpToolName;
@@ -58,9 +80,16 @@ const completeTaskToolName = "complete_task" satisfies AgentHubMcpToolName;
 const completeGoalToolName = "complete_goal" satisfies AgentHubMcpToolName;
 const agentHubMcpToolNames = [
   sendMessageToolName,
+  listGroupMessagesToolName,
+  searchGroupMessagesToolName,
   listGoalsToolName,
+  listProjectChangesToolName,
+  readProjectChangeToolName,
+  mergeProjectChangeToolName,
+  rejectProjectChangeToolName,
   listArtifactsToolName,
   readArtifactToolName,
+  downloadArtifactToolName,
   appendMemoryToolName,
   searchMemoryToolName,
   readMemoryToolName,
@@ -107,7 +136,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: sendMessageToolName,
               description:
-                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. In group targets, content containing @AgentName forces that agent to run, and content containing @all forces all other ready agents in the target group to run. If this is an ordinary reply, progress update, or final summary, do not include @AgentName or @all.",
+                "Send a visible AgentHub message. The target defaults to the current conversation; use target.group for another active group or target.user to privately message the user. In group targets, content containing @AgentName forces that agent to run, and content containing @all forces all other ready agents in the target group to run. If this is an ordinary reply, progress update, or final summary, do not include @AgentName or @all. In Task mode, never use @AgentName or @all to assign work; create_task and approve_task already dispatch tasks automatically.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -163,12 +192,66 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
+      ...(enabledTools.has(listGroupMessagesToolName)
+        ? [
+            {
+              name: listGroupMessagesToolName,
+              description:
+                "Read visible messages from the current AgentHub group conversation. Use this when the prompt only includes recent history and you need older group context. This tool is scoped to the current group; it cannot read other groups or direct messages.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  limit: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 100,
+                    description: "Maximum number of messages to return. Defaults to 30.",
+                  },
+                  beforeMessageId: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Optional message id cursor. When provided, returns messages older than this message.",
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(searchGroupMessagesToolName)
+        ? [
+            {
+              name: searchGroupMessagesToolName,
+              description:
+                "Search visible messages in the current AgentHub group conversation by text. Use this to retrieve older relevant group context without loading the full history. This tool is scoped to the current group.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  query: {
+                    type: "string",
+                    minLength: 1,
+                    description: "Text to search for in group messages.",
+                  },
+                  limit: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 50,
+                    description: "Maximum number of matches to return. Defaults to 20.",
+                  },
+                },
+                required: ["query"],
+              },
+            },
+          ]
+        : []),
       ...(enabledTools.has(listGoalsToolName)
         ? [
             {
               name: listGoalsToolName,
               description:
-                "List goals in the current AgentHub group conversation, including each goal's tasks and task indexes.",
+                "List goals in the current AgentHub group conversation, including each goal's tasks, assignees, statuses, dependencies, and task indexes. Use this before planning or approving work to decide which tasks can run in parallel and which must remain serial. Parallel tasks should have different assignees, enough input to start, separate deliverables, and no dependency on each other's outputs; same-assignee or output-dependent tasks must be serial within one Goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -183,12 +266,91 @@ export async function startAgentHubMcpStdioServer(
             },
           ]
         : []),
+      ...(enabledTools.has(listProjectChangesToolName)
+        ? [
+            {
+              name: listProjectChangesToolName,
+              description:
+                "List internal Project change proposals for the current AgentHub Project conversation. Use this to inspect open agent branches before deciding whether to merge or reject them.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: ["open", "merged", "rejected", "failed"],
+                    description: "Optional project change status filter.",
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(readProjectChangeToolName)
+        ? [
+            {
+              name: readProjectChangeToolName,
+              description:
+                "Read one internal Project change proposal, including branch metadata, diff stat, and full diff text.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                },
+                required: ["changeId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(mergeProjectChangeToolName)
+        ? [
+            {
+              name: mergeProjectChangeToolName,
+              description:
+                "Approve an internal Project change proposal for merge. Only the configured Project Orchestrator should call this after reviewing the diff.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                  message: {
+                    type: "string",
+                    description: "Optional merge message.",
+                  },
+                },
+                required: ["changeId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(rejectProjectChangeToolName)
+        ? [
+            {
+              name: rejectProjectChangeToolName,
+              description:
+                "Reject an internal Project change proposal. Only the configured Project Orchestrator should call this after reviewing the diff.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  changeId: { type: "string", minLength: 1 },
+                  reason: {
+                    type: "string",
+                    description: "Optional rejection reason.",
+                  },
+                },
+                required: ["changeId"],
+              },
+            },
+          ]
+        : []),
       ...(enabledTools.has(listArtifactsToolName)
         ? [
             {
               name: listArtifactsToolName,
               description:
-                "List files and reports for a goal in the current AgentHub group workspace.",
+                "List files and reports in the current AgentHub conversation workspace. Pass goalId to limit results to one goal.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -196,7 +358,7 @@ export async function startAgentHubMcpStdioServer(
                   goalId: {
                     type: "string",
                     minLength: 1,
-                    description: "Goal id to inspect.",
+                    description: "Optional goal id to inspect.",
                   },
                   taskIndex: {
                     type: "number",
@@ -210,7 +372,7 @@ export async function startAgentHubMcpStdioServer(
                     description: "Maximum number of artifacts to return.",
                   },
                 },
-                required: ["goalId"],
+                required: [],
               },
             },
           ]
@@ -220,7 +382,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: readArtifactToolName,
               description:
-                "Read one artifact from a goal in the current AgentHub group workspace. Text files return text; binary files return base64.",
+                "Read one small artifact from the current AgentHub conversation workspace. Text files return text; binary files return base64 and may be truncated. For images, zip files, resource packages, large files, or anything you need to inspect with local tools, use download_artifact instead.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -228,7 +390,31 @@ export async function startAgentHubMcpStdioServer(
                   goalId: { type: "string", minLength: 1 },
                   artifactId: { type: "string", minLength: 1 },
                 },
-                required: ["goalId", "artifactId"],
+                required: ["artifactId"],
+              },
+            },
+          ]
+        : []),
+      ...(enabledTools.has(downloadArtifactToolName)
+        ? [
+            {
+              name: downloadArtifactToolName,
+              description:
+                "Download one artifact from the current AgentHub conversation workspace into this run's local workspace. Use this for images, zip/resource packages, site artifacts, and large files instead of curling downloadUrl/editorUrl, which require user authentication. Pass goalId to assert the artifact belongs to a specific goal. localPath is optional and defaults to artifacts/<filename>.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  goalId: { type: "string", minLength: 1 },
+                  artifactId: { type: "string", minLength: 1 },
+                  localPath: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Optional destination path inside the current run workspace. Existing files are not overwritten; AgentHub will choose a unique filename.",
+                  },
+                },
+                required: ["artifactId"],
               },
             },
           ]
@@ -336,7 +522,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: createTaskToolName,
               description:
-                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately; dependent tasks wait for Orchestrator approval after dependencies succeed.",
+                "Create an AgentHub task under an existing Goal for one group agent. Tasks without dependencies dispatch immediately, creating the visible assignment message and assignee run automatically. Omit dependsOnTaskIndexes only when the task is truly parallel-safe: different assignee, enough input to start, clear separate deliverable, and no dependency on another task's report, code, screenshots, site artifact, decision, or verification result. Dependent tasks wait for Orchestrator approval after dependencies succeed. For the same assignee within one Goal, create serial tasks by setting dependsOnTaskIndexes to that assignee's previous task index; do not create multiple parallel no-dependency tasks for the same assignee. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -365,7 +551,7 @@ export async function startAgentHubMcpStdioServer(
                     type: "array",
                     items: { type: "number", minimum: 0 },
                     description:
-                      "Optional upstream task indexes in the same goal that must succeed before this task can be approved.",
+                      "Optional upstream task indexes in the same goal that must succeed before this task can be approved. Required for later same-assignee tasks so one agent's work stays serial.",
                   },
                 },
                 required: ["goalId", "title", "assigneeAgentId"],
@@ -378,7 +564,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: approveTaskToolName,
               description:
-                "Approve and dispatch a ready downstream task after reviewing a checkpoint.",
+                "Approve and dispatch a ready downstream task after reviewing a checkpoint. Before approving, use list_goals to ensure all dependencies are succeeded and the same assignee has no earlier active task in this Goal. If the task depends on multiple parallel tasks, approve it only after every dependency is succeeded. This creates the visible assignment message and assignee run automatically. Do not follow this tool with send_message that mentions the assignee; that would force an extra ordinary chat run.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -415,7 +601,7 @@ export async function startAgentHubMcpStdioServer(
             {
               name: uploadArtifactToolName,
               description:
-                "Upload a report, result file, screenshot, zip, or source directory from the current run workspace to the current Goal and task. If localPath is a directory, AgentHub uploads it as a zip artifact for download.",
+                "Upload a report, result file, screenshot, zip, or source directory from the current run workspace to the current Goal and task. If localPath is a directory, AgentHub uploads it as a zip artifact unless kind is set to site. Use kind=site for editable static websites that the user should review, modify, and publish from the AgentHub Editor.",
               inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -430,6 +616,18 @@ export async function startAgentHubMcpStdioServer(
                       "Path to a file or directory inside the current run workspace.",
                   },
                   filename: { type: "string" },
+                  kind: {
+                    type: "string",
+                    enum: ["file", "site"],
+                    description:
+                      "Use site when uploading an editable static website directory. Omit or use file for ordinary files, screenshots, reports, zips, or source packages.",
+                  },
+                  entrypoint: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Entrypoint for kind=site directory uploads. Defaults to index.html.",
+                  },
                 },
                 required: ["goalId", "taskIndex", "title", "localPath"],
               },
@@ -530,35 +728,49 @@ export async function startAgentHubMcpStdioServer(
     const input =
       toolName === sendMessageToolName
         ? readSendMessageInput(request.params.arguments)
+        : toolName === listGroupMessagesToolName
+          ? readListGroupMessagesInput(request.params.arguments)
+          : toolName === searchGroupMessagesToolName
+            ? readSearchGroupMessagesInput(request.params.arguments)
         : toolName === listGoalsToolName
-          ? readListGoalsInput(request.params.arguments)
-          : toolName === listArtifactsToolName
+            ? readListGoalsInput(request.params.arguments)
+            : toolName === listProjectChangesToolName
+              ? readListProjectChangesInput(request.params.arguments)
+              : toolName === readProjectChangeToolName
+                ? readReadProjectChangeInput(request.params.arguments)
+                : toolName === mergeProjectChangeToolName
+                  ? readMergeProjectChangeInput(request.params.arguments)
+                  : toolName === rejectProjectChangeToolName
+                    ? readRejectProjectChangeInput(request.params.arguments)
+            : toolName === listArtifactsToolName
             ? readListArtifactsInput(request.params.arguments)
             : toolName === readArtifactToolName
               ? readReadArtifactInput(request.params.arguments)
-              : toolName === appendMemoryToolName
-                ? readAppendMemoryInput(request.params.arguments)
-                : toolName === searchMemoryToolName
-                  ? readSearchMemoryInput(request.params.arguments)
-                  : toolName === readMemoryToolName
-                    ? readReadMemoryInput(request.params.arguments)
-                    : toolName === createGoalToolName
-                      ? readCreateGoalInput(request.params.arguments)
-                      : toolName === createTaskToolName
-                        ? readCreateTaskInput(request.params.arguments)
-                        : toolName === approveTaskToolName
-                          ? readApproveTaskInput(request.params.arguments)
-                          : toolName === cancelTaskToolName
-                            ? readCancelTaskInput(request.params.arguments)
-                            : toolName === uploadArtifactToolName
-                              ? readUploadArtifactInput(request.params.arguments)
-                              : toolName === deployStaticSiteToolName
-                                ? readDeployStaticSiteInput(request.params.arguments)
-                                : toolName === completeTaskToolName
-                                  ? readCompleteTaskInput(request.params.arguments)
-                                  : toolName === completeGoalToolName
-                                    ? readCompleteGoalInput(request.params.arguments)
-                                    : undefined;
+              : toolName === downloadArtifactToolName
+                ? readDownloadArtifactInput(request.params.arguments)
+                : toolName === appendMemoryToolName
+                  ? readAppendMemoryInput(request.params.arguments)
+                  : toolName === searchMemoryToolName
+                    ? readSearchMemoryInput(request.params.arguments)
+                    : toolName === readMemoryToolName
+                      ? readReadMemoryInput(request.params.arguments)
+                      : toolName === createGoalToolName
+                        ? readCreateGoalInput(request.params.arguments)
+                        : toolName === createTaskToolName
+                          ? readCreateTaskInput(request.params.arguments)
+                          : toolName === approveTaskToolName
+                            ? readApproveTaskInput(request.params.arguments)
+                            : toolName === cancelTaskToolName
+                              ? readCancelTaskInput(request.params.arguments)
+                              : toolName === uploadArtifactToolName
+                                ? readUploadArtifactInput(request.params.arguments)
+                                : toolName === deployStaticSiteToolName
+                                  ? readDeployStaticSiteInput(request.params.arguments)
+                                  : toolName === completeTaskToolName
+                                    ? readCompleteTaskInput(request.params.arguments)
+                                    : toolName === completeGoalToolName
+                                      ? readCompleteGoalInput(request.params.arguments)
+                                      : undefined;
 
     if (input === undefined) {
       throw new Error(`Unknown AgentHub MCP tool: ${toolName}`);
@@ -703,18 +915,123 @@ function readListGoalsInput(value: unknown): AgentHubListGoalsToolInput {
     : {};
 }
 
+function readListProjectChangesInput(
+  value: unknown,
+): AgentHubListProjectChangesToolInput {
+  const input = readObjectArguments(value, "list_project_changes");
+  const status = input.status;
+
+  if (
+    status !== undefined &&
+    status !== "open" &&
+    status !== "merged" &&
+    status !== "rejected" &&
+    status !== "failed"
+  ) {
+    throw new Error("list_project_changes.status is invalid.");
+  }
+
+  return status === undefined ? {} : { status };
+}
+
+function readReadProjectChangeInput(
+  value: unknown,
+): AgentHubReadProjectChangeToolInput {
+  const input = readObjectArguments(value, "read_project_change");
+  const changeId = input.changeId;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("read_project_change.changeId is required.");
+  }
+
+  return { changeId };
+}
+
+function readMergeProjectChangeInput(
+  value: unknown,
+): AgentHubMergeProjectChangeToolInput {
+  const input = readObjectArguments(value, "merge_project_change");
+  const changeId = input.changeId;
+  const message = input.message;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("merge_project_change.changeId is required.");
+  }
+
+  return {
+    changeId,
+    message:
+      typeof message === "string" && message.trim().length > 0
+        ? message.trim()
+        : undefined,
+  };
+}
+
+function readRejectProjectChangeInput(
+  value: unknown,
+): AgentHubRejectProjectChangeToolInput {
+  const input = readObjectArguments(value, "reject_project_change");
+  const changeId = input.changeId;
+  const reason = input.reason;
+
+  if (typeof changeId !== "string" || changeId.length === 0) {
+    throw new Error("reject_project_change.changeId is required.");
+  }
+
+  return {
+    changeId,
+    reason:
+      typeof reason === "string" && reason.trim().length > 0
+        ? reason.trim()
+        : undefined,
+  };
+}
+
+function readListGroupMessagesInput(value: unknown): AgentHubListGroupMessagesToolInput {
+  const input = readObjectArguments(value, "list_group_messages");
+  const limit = input.limit;
+  const beforeMessageId = input.beforeMessageId;
+
+  return {
+    beforeMessageId:
+      typeof beforeMessageId === "string" && beforeMessageId.trim().length > 0
+        ? beforeMessageId.trim()
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : undefined,
+  };
+}
+
+function readSearchGroupMessagesInput(value: unknown): AgentHubSearchGroupMessagesToolInput {
+  const input = readObjectArguments(value, "search_group_messages");
+  const query = input.query;
+  const limit = input.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    throw new Error("search_group_messages.query is required.");
+  }
+
+  return {
+    query: query.trim(),
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
 function readListArtifactsInput(value: unknown): AgentHubListArtifactsToolInput {
   const input = readObjectArguments(value, "list_artifacts");
   const goalId = input.goalId;
   const taskIndex = readTaskIndex(input.taskIndex);
   const limit = input.limit;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    throw new Error("list_artifacts.goalId is required.");
-  }
-
   return {
-    goalId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
     taskIndex: taskIndex ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -728,15 +1045,37 @@ function readReadArtifactInput(value: unknown): AgentHubReadArtifactToolInput {
   const goalId = input.goalId;
   const artifactId = input.artifactId;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    throw new Error("read_artifact.goalId is required.");
-  }
-
   if (typeof artifactId !== "string" || artifactId.length === 0) {
     throw new Error("read_artifact.artifactId is required.");
   }
 
-  return { goalId, artifactId };
+  return {
+    artifactId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
+  };
+}
+
+function readDownloadArtifactInput(value: unknown): AgentHubDownloadArtifactToolInput {
+  const input = readObjectArguments(value, "download_artifact");
+  const goalId = input.goalId;
+  const artifactId = input.artifactId;
+  const localPath = input.localPath;
+
+  if (typeof artifactId !== "string" || artifactId.length === 0) {
+    throw new Error("download_artifact.artifactId is required.");
+  }
+
+  return {
+    artifactId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
+    localPath: typeof localPath === "string" && localPath.trim().length > 0
+      ? localPath.trim()
+      : undefined,
+  };
 }
 
 function readAppendMemoryInput(value: unknown): AgentHubAppendMemoryToolInput {
@@ -944,6 +1283,8 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
   const title = input.title;
   const localPath = input.localPath;
   const filename = input.filename;
+  const kind = input.kind;
+  const entrypoint = input.entrypoint;
 
   if (typeof goalId !== "string" || goalId.length === 0) {
     throw new Error("upload_artifact.goalId is required.");
@@ -969,6 +1310,11 @@ function readUploadArtifactInput(value: unknown): AgentHubUploadArtifactToolInpu
     filename:
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
+        : undefined,
+    kind: kind === "site" ? "site" : kind === "file" ? "file" : undefined,
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
         : undefined,
   };
 }
@@ -1071,22 +1417,7 @@ function compactUniqueNumbers(value: unknown[]): number[] {
 }
 
 async function callRelayTool(input: {
-  input:
-    | AgentHubApproveTaskToolInput
-    | AgentHubCancelTaskToolInput
-    | AgentHubCompleteGoalToolInput
-    | AgentHubCompleteTaskToolInput
-    | AgentHubDeployStaticSiteToolInput
-    | AgentHubCreateGoalToolInput
-    | AgentHubCreateTaskToolInput
-    | AgentHubAppendMemoryToolInput
-    | AgentHubListArtifactsToolInput
-    | AgentHubListGoalsToolInput
-    | AgentHubReadMemoryToolInput
-    | AgentHubReadArtifactToolInput
-    | AgentHubSearchMemoryToolInput
-    | AgentHubSendMessageToolInput
-    | AgentHubUploadArtifactToolInput;
+  input: AgentHubMcpToolInput;
   relayUrl: string;
   sessionToken: string;
   toolCallId: string;

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readdir, readFile, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 
@@ -12,7 +12,10 @@ import type {
   AgentHubDeployStaticSiteToolResult,
   AgentHubCreateGoalToolInput,
   AgentHubCreateTaskToolInput,
+  AgentHubDownloadArtifactToolInput,
+  AgentHubDownloadArtifactToolResult,
   AgentHubAppendMemoryToolInput,
+  AgentHubListGroupMessagesToolInput,
   AgentHubListArtifactsToolInput,
   AgentHubListGoalsToolInput,
   AgentHubMcpToolCall,
@@ -21,6 +24,7 @@ import type {
   AgentHubMcpToolResult,
   AgentHubReadMemoryToolInput,
   AgentHubReadArtifactToolInput,
+  AgentHubSearchGroupMessagesToolInput,
   AgentHubSearchMemoryToolInput,
   AgentHubSendMessageToolInput,
   AgentHubUploadArtifactToolInput,
@@ -63,6 +67,7 @@ interface AgentHubMcpSession {
     deployment: AgentRunStaticSiteDeploy,
   ): Promise<AgentHubDeployStaticSiteToolResult>;
   onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
+  memoryWorkspacePath?: string;
   runId: RunId;
   workspacePath: string;
 }
@@ -158,6 +163,7 @@ export class AgentHubMcpRelay {
       deployment: AgentRunStaticSiteDeploy,
     ): Promise<AgentHubDeployStaticSiteToolResult>;
     onToolCall(call: AgentHubMcpToolCall): Promise<AgentHubMcpToolResult> | AgentHubMcpToolResult;
+    memoryWorkspacePath?: string;
     runId: RunId;
     workspacePath: string;
   }): AgentHubMcpSessionHandle {
@@ -169,6 +175,7 @@ export class AgentHubMcpRelay {
       onArtifactUpload: input.onArtifactUpload,
       onStaticSiteDeploy: input.onStaticSiteDeploy,
       onToolCall: input.onToolCall,
+      memoryWorkspacePath: input.memoryWorkspacePath,
       runId: input.runId,
       workspacePath: input.workspacePath,
     });
@@ -297,9 +304,28 @@ export class AgentHubMcpRelay {
         }
       }
 
+      if (toolName === "download_artifact") {
+        const downloadInput = input as AgentHubDownloadArtifactToolInput;
+        const serverResult = await session.onToolCall({
+          runId: session.runId,
+          toolCallId,
+          name: toolName,
+          input,
+          createdAt: new Date().toISOString(),
+        }) as AgentHubDownloadArtifactToolResult;
+
+        const result = await writeDownloadedArtifact({
+          input: downloadInput,
+          result: serverResult,
+          workspacePath: session.workspacePath,
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
       if (toolName === "append_memory") {
         const result = await appendMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubAppendMemoryToolInput,
         );
         void Promise.resolve()
@@ -342,7 +368,7 @@ export class AgentHubMcpRelay {
 
       if (toolName === "search_memory") {
         const result = await searchMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubSearchMemoryToolInput,
         );
         void Promise.resolve()
@@ -362,7 +388,7 @@ export class AgentHubMcpRelay {
 
       if (toolName === "read_memory") {
         const result = await readMemoryTool(
-          session.workspacePath,
+          session.memoryWorkspacePath ?? session.workspacePath,
           input as AgentHubReadMemoryToolInput,
         );
         void Promise.resolve()
@@ -431,12 +457,40 @@ function readToolInput(
     return readListGoalsInput(input);
   }
 
+  if (toolName === "list_project_changes") {
+    return readListProjectChangesInput(input);
+  }
+
+  if (toolName === "read_project_change") {
+    return readProjectChangeInput(input);
+  }
+
+  if (toolName === "merge_project_change") {
+    return readProjectChangeInput(input, "message");
+  }
+
+  if (toolName === "reject_project_change") {
+    return readProjectChangeInput(input, "reason");
+  }
+
+  if (toolName === "list_group_messages") {
+    return readListGroupMessagesInput(input);
+  }
+
+  if (toolName === "search_group_messages") {
+    return readSearchGroupMessagesInput(input);
+  }
+
   if (toolName === "list_artifacts") {
     return readListArtifactsInput(input);
   }
 
   if (toolName === "read_artifact") {
     return readReadArtifactInput(input);
+  }
+
+  if (toolName === "download_artifact") {
+    return readDownloadArtifactInput(input);
   }
 
   if (toolName === "append_memory") {
@@ -603,6 +657,96 @@ function readListGoalsInput(input: unknown): AgentHubListGoalsToolInput | null {
     : {};
 }
 
+function readListProjectChangesInput(input: unknown): AgentHubMcpToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const status = (input as Record<string, unknown>).status;
+
+  if (
+    status !== undefined &&
+    status !== "open" &&
+    status !== "merged" &&
+    status !== "rejected" &&
+    status !== "failed"
+  ) {
+    return null;
+  }
+
+  return status === undefined ? {} : { status };
+}
+
+function readProjectChangeInput(
+  input: unknown,
+  optionalTextField?: "message" | "reason",
+): AgentHubMcpToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const changeId = record.changeId;
+
+  if (typeof changeId !== "string" || changeId.trim().length === 0) {
+    return null;
+  }
+
+  const result: Record<string, string> = { changeId: changeId.trim() };
+  if (
+    optionalTextField !== undefined &&
+    typeof record[optionalTextField] === "string" &&
+    record[optionalTextField].trim().length > 0
+  ) {
+    result[optionalTextField] = record[optionalTextField].trim();
+  }
+
+  return result as AgentHubMcpToolInput;
+}
+
+function readListGroupMessagesInput(input: unknown): AgentHubListGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const limit = record.limit;
+  const beforeMessageId = record.beforeMessageId;
+
+  return {
+    beforeMessageId:
+      typeof beforeMessageId === "string" && beforeMessageId.trim().length > 0
+        ? beforeMessageId.trim()
+        : undefined,
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : undefined,
+  };
+}
+
+function readSearchGroupMessagesInput(input: unknown): AgentHubSearchGroupMessagesToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const query = record.query;
+  const limit = record.limit;
+
+  if (typeof query !== "string" || query.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    query: query.trim(),
+    limit:
+      typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 50)
+        : undefined,
+  };
+}
+
 async function readArtifactUpload(input: {
   input: AgentHubUploadArtifactToolInput;
   runId: RunId;
@@ -627,12 +771,42 @@ async function readArtifactUpload(input: {
       maxFiles: maxDirectoryFileCount,
       workspacePath: input.workspacePath,
     });
-    const zip = createStoredZip(files);
     const sourcePath = path
       .relative(input.workspacePath, resolvedPath)
       .split(path.sep)
       .join("/");
     const directoryName = path.basename(resolvedPath);
+
+    if (input.input.kind === "site") {
+      const entrypoint = normalizeRelativeFilePath(input.input.entrypoint ?? "index.html");
+      if (!files.some((file) => file.path === entrypoint)) {
+        throw new Error("upload_artifact site entrypoint was not found in the directory.");
+      }
+
+      const manifest = Buffer.from(JSON.stringify({
+        entrypoint,
+        files: files.map((file) => ({
+          path: file.path,
+          sizeBytes: file.content.byteLength,
+        })),
+      }));
+
+      return {
+        ...input.input,
+        entrypoint,
+        filename: input.input.filename ?? directoryName,
+        files: files.map((file) => ({
+          path: file.path,
+          sizeBytes: file.content.byteLength,
+          contentBase64: file.content.toString("base64"),
+        })),
+        sourcePath,
+        sizeBytes: files.reduce((sum, file) => sum + file.content.byteLength, 0),
+        contentBase64: manifest.toString("base64"),
+      };
+    }
+
+    const zip = createStoredZip(files);
     const filename = input.input.filename ?? `${directoryName}.zip`;
 
     if (zip.byteLength > maxDirectoryArtifactUploadBytes) {
@@ -876,12 +1050,10 @@ function readListArtifactsInput(
   const taskIndex = record.taskIndex;
   const limit = record.limit;
 
-  if (typeof goalId !== "string" || goalId.length === 0) {
-    return null;
-  }
-
   return {
-    goalId,
+    goalId: typeof goalId === "string" && goalId.length > 0
+      ? goalId
+      : undefined,
     taskIndex: readTaskIndex(taskIndex) ?? undefined,
     limit:
       typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -901,10 +1073,121 @@ function readReadArtifactInput(
   const goalId = record.goalId;
   const artifactId = record.artifactId;
 
-  return typeof goalId === "string" && goalId.length > 0 &&
-    typeof artifactId === "string" && artifactId.length > 0
-    ? { goalId, artifactId }
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+      }
     : null;
+}
+
+function readDownloadArtifactInput(
+  input: unknown,
+): AgentHubDownloadArtifactToolInput | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const goalId = record.goalId;
+  const artifactId = record.artifactId;
+  const localPath = record.localPath;
+
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? {
+        artifactId,
+        goalId: typeof goalId === "string" && goalId.length > 0
+          ? goalId
+          : undefined,
+        localPath:
+          typeof localPath === "string" && localPath.trim().length > 0
+            ? localPath.trim()
+            : undefined,
+      }
+    : null;
+}
+
+async function writeDownloadedArtifact(input: {
+  input: AgentHubDownloadArtifactToolInput;
+  result: AgentHubDownloadArtifactToolResult;
+  workspacePath: string;
+}): Promise<AgentHubDownloadArtifactToolResult> {
+  if (input.result.contentBase64 === undefined) {
+    throw new Error("download_artifact did not return artifact content.");
+  }
+
+  const filename = sanitizeLocalFilename(
+    input.result.filename ?? input.result.artifact.filename,
+  );
+  const relativeTargetPath = input.input.localPath ?? path.join("artifacts", filename);
+  const resolvedTargetPath = path.resolve(input.workspacePath, relativeTargetPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, resolvedTargetPath)) {
+    throw new Error("download_artifact.localPath must stay inside this run workspace.");
+  }
+
+  const targetPath = await resolveUniqueFilePath(resolvedTargetPath);
+
+  if (!isPathInsideWorkspace(input.workspacePath, targetPath)) {
+    throw new Error("download_artifact.localPath must stay inside this run workspace.");
+  }
+
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  const content = Buffer.from(input.result.contentBase64, "base64");
+  await writeFile(targetPath, content);
+
+  const localPath = path
+    .relative(input.workspacePath, targetPath)
+    .split(path.sep)
+    .join("/");
+
+  return {
+    accepted: true,
+    artifact: input.result.artifact,
+    localPath,
+    sizeBytes: content.byteLength,
+  };
+}
+
+function sanitizeLocalFilename(filename: string): string {
+  const base = path.basename(filename).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim();
+
+  return base.length > 0 ? base.slice(0, 255) : "artifact";
+}
+
+async function resolveUniqueFilePath(filePath: string): Promise<string> {
+  const parsed = path.parse(filePath);
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? filePath
+      : path.join(parsed.dir, `${parsed.name}-${attempt}${parsed.ext}`);
+
+    if (!(await pathExists(candidate))) {
+      return candidate;
+    }
+  }
+
+  throw new Error("download_artifact could not find an available local filename.");
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  return lstat(filePath)
+    .then(() => true)
+    .catch((error: unknown) => {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "ENOENT"
+      ) {
+        return false;
+      }
+
+      throw error;
+    });
 }
 
 async function readMessageAttachmentUpload(input: {
@@ -975,6 +1258,8 @@ function readUploadArtifactInput(
   const title = record.title;
   const localPath = record.localPath;
   const filename = record.filename;
+  const kind = record.kind;
+  const entrypoint = record.entrypoint;
 
   if (
     typeof goalId !== "string" ||
@@ -997,6 +1282,11 @@ function readUploadArtifactInput(
     filename:
       typeof filename === "string" && filename.trim().length > 0
         ? filename.trim()
+        : undefined,
+    kind: kind === "site" ? "site" : kind === "file" ? "file" : undefined,
+    entrypoint:
+      typeof entrypoint === "string" && entrypoint.trim().length > 0
+        ? entrypoint.trim()
         : undefined,
   };
 }

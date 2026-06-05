@@ -5,7 +5,12 @@ import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { AgentRunInput } from "@agent-hub/core/runtime";
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexAdapter, type AgentHubMcpRelayLike, type SpawnCodexProcess } from "../../src/runtime";
+import {
+  CodexAdapter,
+  createAgentHubMcpServerCommand,
+  type AgentHubMcpRelayLike,
+  type SpawnCodexProcess,
+} from "../../src/runtime";
 
 class MockCodexProcess extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -108,6 +113,17 @@ async function collectEvents(
 }
 
 describe("CodexAdapter", () => {
+  it("builds the development MCP server command with a loadable tsx loader URL", () => {
+    const command = createAgentHubMcpServerCommand();
+
+    expect(command.command).toBe(process.execPath);
+    expect(command.args[0]).toBe("--import");
+    expect(command.args[1]).toContain("tsx");
+    expect(command.args[1]).not.toBe("tsx");
+    expect(command.args[1]).toMatch(/^file:\/\//);
+    expect(command.args[2]).toMatch(/stdio-server\.ts$|stdio-server\.js$/);
+  });
+
   it("spawns codex exec with json and ephemeral mode", async () => {
     const { calls, spawnProcess } = createSpawnMock();
     const adapter = new CodexAdapter({ spawnProcess });
@@ -121,9 +137,40 @@ describe("CodexAdapter", () => {
     expect(call.args).toEqual([
       "exec",
       "--json",
-      "--ephemeral",
       "--cd",
       "/tmp/agent-workspace",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-",
+    ]);
+    expect(call.options).toMatchObject({
+      cwd: "/tmp/agent-workspace",
+      stdio: "pipe",
+    });
+  });
+
+  it("spawns codex exec resume when a runtime session is available", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new CodexAdapter({ spawnProcess });
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({
+        run: {
+          ...createRunInput().run,
+          dispatchMode: "resume",
+          runtimeSessionId: "thread_123",
+        },
+      })),
+    );
+    const call = calls[0];
+
+    call.process.close(0);
+    await eventsPromise;
+
+    expect(call.args).toEqual([
+      "exec",
+      "resume",
+      "thread_123",
+      "--json",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
       "-",
@@ -428,6 +475,12 @@ describe("CodexAdapter", () => {
           }),
         }),
         expect.objectContaining({
+          type: "runtime.session.started",
+          runId: "run_1",
+          runtimeKind: "codex",
+          sessionId: "thread_1",
+        }),
+        expect.objectContaining({
           type: "runtime.event",
           runId: "run_1",
           raw: expect.objectContaining({
@@ -646,6 +699,27 @@ describe("CodexAdapter", () => {
         expect.objectContaining({
           type: "run.completed",
           status: "cancelled",
+        }),
+      ]),
+    );
+    expect(calls[0].process.killedWith).toBe("SIGTERM");
+  });
+
+  it("kills codex and completes interrupted on preempt abort", async () => {
+    const { calls, spawnProcess } = createSpawnMock();
+    const adapter = new CodexAdapter({ spawnProcess });
+    const abortController = new AbortController();
+    const eventsPromise = collectEvents(
+      adapter.run(createRunInput({ abortSignal: abortController.signal })),
+    );
+
+    abortController.abort("interrupted");
+
+    await expect(eventsPromise).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.completed",
+          status: "interrupted",
         }),
       ]),
     );

@@ -35,7 +35,7 @@ export function AppRail({
     <Theme
       theme="g100"
       as="aside"
-      className="relative grid h-screen grid-rows-[auto_minmax(0,1fr)_auto] justify-items-center border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] py-2"
+      className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] justify-items-center border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] py-2"
       aria-label="Primary workspace tools"
     >
       <a
@@ -64,9 +64,9 @@ export function AppRail({
           aria-label="Account"
         >
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)]">
+            <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[var(--cds-layer-02)] shadow-[0_1px_3px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.12)_inset]">
               {avatar ? (
-                <img src={avatar} alt="" className="h-9 w-9 object-cover" />
+                <img src={avatar} alt="" className="h-9 w-9 rounded-[3px] object-cover" />
               ) : (
                 <UserAvatar size={22} />
               )}

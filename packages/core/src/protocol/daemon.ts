@@ -21,12 +21,19 @@ import type {
   ConversationArtifactId,
   ConversationDeployment,
   ConversationGoalId,
+  ConversationId,
+  ConversationProjectChange,
+  ConversationProjectChangeId,
 } from "./conversation.js";
 import type { AgentRun, RunEvent, RunId } from "./run.js";
+import type { RunDispatchMode } from "./run.js";
 
 export interface DaemonRunAssignment {
   run: AgentRun;
   prompt: string;
+  dispatchMode?: RunDispatchMode;
+  runtimeSessionId?: string;
+  preemptRunIds?: RunId[];
   contextCompression?: {
     compressibleText: string;
     promptTemplate: string;
@@ -34,6 +41,14 @@ export interface DaemonRunAssignment {
   };
   agentInstructions?: string;
   workspacePath: string;
+  memoryWorkspacePath?: string;
+  projectRun?: {
+    baseRepoPath: string;
+    branchName: string;
+    conversationId: ConversationId;
+    ownerUserId: string;
+    projectId: ConversationId;
+  };
   runtime: AgentRuntimeConfig;
   agentHubMcpTools?: AgentHubMcpToolName[];
   agentHubMcpGoals?: AgentHubListGoalsToolResult["goals"];
@@ -83,8 +98,15 @@ export type DaemonClientMessage =
       goalId?: ConversationGoalId;
       taskIndex?: number;
       messageTarget?: AgentHubSendMessageTarget;
+      kind?: "file" | "site";
       title: string;
       filename: string;
+      entrypoint?: string;
+      files?: Array<{
+        path: string;
+        sizeBytes: number;
+        contentBase64: string;
+      }>;
       sizeBytes: number;
       contentBase64: string;
       sourcePath?: string;
@@ -130,6 +152,42 @@ export type DaemonClientMessage =
   | {
       type: "memory.append_failed";
       requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.clone.completed";
+      requestId: string;
+      conversationId: ConversationId;
+      baseRepoPath: string;
+      defaultBranch?: string;
+      baseHead?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.clone.failed";
+      requestId: string;
+      conversationId: ConversationId;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.created";
+      requestId: string;
+      change: ConversationProjectChange;
+      diff?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.merge.ack";
+      requestId: string;
+      changeId: ConversationProjectChangeId;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.merge.rejected";
+      requestId: string;
+      changeId: ConversationProjectChangeId;
       reason: string;
       sentAt: IsoDateTime;
     }
@@ -210,6 +268,22 @@ export type DaemonServerMessage =
       tags?: string[];
       date?: string;
       dedupeKey?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.clone";
+      requestId: string;
+      conversationId: ConversationId;
+      remoteUrl: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.merge";
+      requestId: string;
+      changeId: ConversationProjectChangeId;
+      baseRepoPath: string;
+      branchName: string;
+      message?: string;
       sentAt: IsoDateTime;
     }
   | {

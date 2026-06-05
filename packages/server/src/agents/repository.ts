@@ -16,7 +16,7 @@ import {
   daemonRuntimes,
   type Db,
 } from "@agent-hub/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, or } from "drizzle-orm";
 
 export interface CreateAgentRecordInput {
   id: string;
@@ -50,6 +50,11 @@ export type ArchiveAgentResult =
 export type RestoreAgentResult =
   | { status: "restored"; agent: AgentDetails }
   | { status: "not-found" };
+
+export type DeleteArchivedAgentResult =
+  | { status: "deleted" }
+  | { status: "not-found" }
+  | { status: "not-archived" };
 
 type AgentRow = typeof agents.$inferSelect;
 type BindingRow = typeof agentRuntimeBindings.$inferSelect;
@@ -178,6 +183,7 @@ export async function getReadyDaemonRuntime(
         eq(daemonRuntimes.runtimeKind, input.runtimeKind),
         eq(daemonRuntimes.status, "ready"),
         eq(daemonDevices.status, "online"),
+        isNull(daemonDevices.deletedAt),
       ),
     )
     .limit(1);
@@ -185,11 +191,25 @@ export async function getReadyDaemonRuntime(
   return row === undefined ? null : toDaemonRuntime(row.runtime);
 }
 
-export async function listDaemonDevicesWithRuntimes(db: Db) {
+export async function listDaemonDevicesWithRuntimes(
+  db: Db,
+  input?: { ownerUserId?: string },
+) {
   const deviceRows = await db
     .select()
     .from(daemonDevices)
-    .orderBy(asc(daemonDevices.id));
+    .where(
+      input?.ownerUserId === undefined
+        ? isNull(daemonDevices.deletedAt)
+        : and(
+            or(
+              eq(daemonDevices.ownerUserId, input.ownerUserId),
+              isNull(daemonDevices.ownerUserId),
+            ),
+            isNull(daemonDevices.deletedAt),
+          ),
+    )
+    .orderBy(asc(daemonDevices.name), asc(daemonDevices.id));
   const runtimeRows = await db
     .select()
     .from(daemonRuntimes)
@@ -407,6 +427,45 @@ export async function restoreAgentForUser(
   }
 
   return { status: "restored", agent };
+}
+
+export async function deleteArchivedAgentForUser(
+  db: Db,
+  input: { agentId: string; ownerUserId: string },
+): Promise<DeleteArchivedAgentResult> {
+  return db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select({ status: agents.status })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.ownerUserId, input.ownerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (agent === undefined) {
+      return { status: "not-found" as const };
+    }
+
+    if (agent.status !== "archived") {
+      return { status: "not-archived" as const };
+    }
+
+    await tx
+      .delete(conversations)
+      .where(
+        and(
+          eq(conversations.ownerUserId, input.ownerUserId),
+          eq(conversations.directAgentId, input.agentId),
+        ),
+      );
+
+    await tx.delete(agents).where(eq(agents.id, input.agentId));
+
+    return { status: "deleted" as const };
+  });
 }
 
 export async function getAgentForUser(

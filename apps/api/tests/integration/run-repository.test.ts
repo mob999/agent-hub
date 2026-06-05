@@ -21,7 +21,9 @@ import {
   listDaemonDevices,
   listRunsForUser,
   listRunningRunIdsByDaemonDevice,
+  softDeleteDaemonDeviceForUser,
   toAgentRun,
+  updateDaemonDeviceForUser,
   upsertDaemonDevice,
 } from "@agent-hub/server";
 
@@ -204,7 +206,71 @@ describeDb("run repository integration", () => {
 
     expect(device).toMatchObject({
       id: deviceId,
+      name: deviceId,
       status: "offline",
     });
+  });
+
+  it("updates and soft-deletes owner scoped daemon devices", async () => {
+    const ownerUserId = await createUser(
+      `daemon-owner-${randomUUID()}@example.com`,
+    );
+    const otherUserId = await createUser(
+      `daemon-other-${randomUUID()}@example.com`,
+    );
+    const deviceId = `test-device-${randomUUID()}`;
+    daemonDeviceIds.push(deviceId);
+
+    await db.insert(daemonDevices).values({
+      id: deviceId,
+      ownerUserId,
+      name: "Office workstation",
+      status: "offline",
+    });
+
+    expect(
+      await updateDaemonDeviceForUser(db, {
+        deviceId,
+        ownerUserId: otherUserId,
+        name: "Other rename",
+      }),
+    ).toBeNull();
+
+    const renamed = await updateDaemonDeviceForUser(db, {
+      deviceId,
+      ownerUserId,
+      name: "Studio workstation",
+    });
+
+    expect(renamed).toMatchObject({
+      id: deviceId,
+      name: "Studio workstation",
+    });
+
+    const deleted = await softDeleteDaemonDeviceForUser(db, {
+      deviceId,
+      ownerUserId,
+    });
+
+    expect(deleted).toMatchObject({
+      id: deviceId,
+      status: "disabled",
+    });
+
+    await upsertDaemonDevice(db, {
+      id: deviceId,
+      status: "online",
+      lastSeenAt: new Date("2026-05-25T00:00:03.000Z"),
+    });
+
+    const devices = await listDaemonDevices(db);
+    const device = devices.find((candidate) => candidate.id === deviceId);
+
+    expect(device).toMatchObject({
+      id: deviceId,
+      name: "Studio workstation",
+      status: "disabled",
+    });
+    expect(device?.deletedAt).not.toBeNull();
   });
 });

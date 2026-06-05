@@ -11,7 +11,7 @@ import {
   runs,
   type Db,
 } from "@agent-hub/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 
 import type { RunQueueJob } from "../queue/index.js";
 import {
@@ -31,8 +31,13 @@ export async function createRunRecord(
     agentId: input.job.run.agentId,
     daemonDeviceId: input.job.daemonDeviceId,
     status: input.job.run.status,
+    runtimeSessionId: input.job.runtimeSessionId,
+    parentRunId: input.job.run.parentRunId,
+    preemptedByRunId: input.job.run.preemptedByRunId,
+    dispatchMode: input.job.dispatchMode ?? input.job.run.dispatchMode ?? "new",
     prompt: input.job.prompt,
     workspacePath: input.job.workspacePath,
+    memoryWorkspacePath: input.job.memoryWorkspacePath ?? input.job.workspacePath,
     runtime: input.job.runtime,
     createdAt: new Date(input.job.run.createdAt),
     updatedAt: new Date(input.job.run.updatedAt),
@@ -48,6 +53,12 @@ export async function getRunForUser(
     .from(runs)
     .where(and(eq(runs.id, input.runId), eq(runs.ownerUserId, input.ownerUserId)))
     .limit(1);
+
+  return run ?? null;
+}
+
+export async function getRunById(db: Db, runId: RunId) {
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
 
   return run ?? null;
 }
@@ -109,11 +120,16 @@ export async function appendRunEvent(
       : event.type === "run.completed"
         ? event.status
         : undefined;
+  const nextRuntimeSessionId =
+    event.type === "runtime.session.started" ? event.sessionId : undefined;
 
   const [run] = await db
     .update(runs)
     .set({
       ...(nextStatus === undefined ? {} : { status: nextStatus }),
+      ...(nextRuntimeSessionId === undefined
+        ? {}
+        : { runtimeSessionId: nextRuntimeSessionId }),
       updatedAt: new Date(event.createdAt),
     })
     .where(eq(runs.id, event.runId))
@@ -146,6 +162,7 @@ export async function appendRunEvent(
   return {
     dispatchJobs: conversationResult.dispatchJobs,
     memoryAppendJobs: conversationResult.memoryAppendJobs,
+    projectMergeRequests: conversationResult.projectMergeRequests,
     toolResult: conversationResult.toolResult,
     realtimeEvents: [
       ...realtimeEvents,
@@ -159,23 +176,139 @@ export async function upsertDaemonDevice(
   input: { id: string; status: "online" | "offline"; lastSeenAt?: Date },
 ): Promise<void> {
   const now = new Date();
+  const [existing] = await db
+    .select()
+    .from(daemonDevices)
+    .where(eq(daemonDevices.id, input.id))
+    .limit(1);
+
+  if (existing !== undefined && existing.deletedAt !== null) {
+    return;
+  }
+
+  if (existing !== undefined) {
+    await db
+      .update(daemonDevices)
+      .set({
+        status: input.status,
+        lastSeenAt: input.lastSeenAt ?? now,
+        updatedAt: now,
+      })
+      .where(eq(daemonDevices.id, input.id));
+    return;
+  }
 
   await db
     .insert(daemonDevices)
     .values({
       id: input.id,
+      name: input.id,
       status: input.status,
       lastSeenAt: input.lastSeenAt ?? now,
       updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: daemonDevices.id,
-      set: {
-        status: input.status,
-        lastSeenAt: input.lastSeenAt ?? now,
-        updatedAt: now,
-      },
     });
+}
+
+export async function createDaemonDeviceForUser(
+  db: Db,
+  input: {
+    id: string;
+    name: string;
+    ownerUserId: string;
+    registrationShell: "powershell" | "sh";
+  },
+) {
+  const now = new Date();
+  const [device] = await db
+    .insert(daemonDevices)
+    .values({
+      id: input.id,
+      ownerUserId: input.ownerUserId,
+      name: input.name,
+      registrationShell: input.registrationShell,
+      status: "offline",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  return device;
+}
+
+export async function getDaemonDeviceForUser(
+  db: Db,
+  input: { deviceId: string; ownerUserId: string },
+) {
+  const [device] = await db
+    .select()
+    .from(daemonDevices)
+    .where(
+      and(
+        eq(daemonDevices.id, input.deviceId),
+        or(
+          eq(daemonDevices.ownerUserId, input.ownerUserId),
+          isNull(daemonDevices.ownerUserId),
+        ),
+        isNull(daemonDevices.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return device ?? null;
+}
+
+export async function updateDaemonDeviceForUser(
+  db: Db,
+  input: { deviceId: string; name: string; ownerUserId: string },
+) {
+  const [device] = await db
+    .update(daemonDevices)
+    .set({
+      name: input.name,
+      ownerUserId: input.ownerUserId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(daemonDevices.id, input.deviceId),
+        or(
+          eq(daemonDevices.ownerUserId, input.ownerUserId),
+          isNull(daemonDevices.ownerUserId),
+        ),
+        isNull(daemonDevices.deletedAt),
+      ),
+    )
+    .returning();
+
+  return device ?? null;
+}
+
+export async function softDeleteDaemonDeviceForUser(
+  db: Db,
+  input: { deviceId: string; ownerUserId: string },
+) {
+  const now = new Date();
+  const [device] = await db
+    .update(daemonDevices)
+    .set({
+      deletedAt: now,
+      ownerUserId: input.ownerUserId,
+      status: "disabled",
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(daemonDevices.id, input.deviceId),
+        or(
+          eq(daemonDevices.ownerUserId, input.ownerUserId),
+          isNull(daemonDevices.ownerUserId),
+        ),
+        isNull(daemonDevices.deletedAt),
+      ),
+    )
+    .returning();
+
+  return device ?? null;
 }
 
 export async function listDaemonDevices(db: Db) {
@@ -211,6 +344,10 @@ export function toAgentRun(row: typeof runs.$inferSelect): AgentRun {
     agentId: row.agentId,
     daemonDeviceId: row.daemonDeviceId,
     status: row.status as AgentRun["status"],
+    runtimeSessionId: row.runtimeSessionId ?? undefined,
+    parentRunId: row.parentRunId ?? undefined,
+    preemptedByRunId: row.preemptedByRunId ?? undefined,
+    dispatchMode: row.dispatchMode as AgentRun["dispatchMode"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

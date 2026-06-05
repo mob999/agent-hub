@@ -4,7 +4,7 @@ export function apiUrl(path: string): string {
   return `${apiBaseUrl}${path}`
 }
 
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
 export type DeviceStatus = 'online' | 'offline' | string
 export type WorkspaceView = 'chat' | 'runs' | 'daemon'
 export type RuntimeKind = 'claude-code' | 'codex' | 'opencode' | 'custom'
@@ -48,10 +48,24 @@ interface ApiErrorPayload {
 
 export interface DaemonDevice {
   id: string
+  ownerUserId?: string
+  name: string
   status: DeviceStatus
+  registrationShell?: string
   lastSeenAt: string | null
+  createdAt?: string
+  updatedAt?: string
+  deletedAt?: string
   runningRunIds: string[]
   runtimes: DaemonRuntime[]
+}
+
+export interface DaemonRegistrationCommandResponse {
+  command: string
+  device?: DaemonDevice
+  deviceId: string
+  gatewayUrl: string
+  shell: 'powershell' | 'sh' | string
 }
 
 export interface Agent {
@@ -134,6 +148,10 @@ export interface AgentRun {
   agentId: string
   daemonDeviceId: string
   status: RunStatus
+  runtimeSessionId?: string
+  parentRunId?: string
+  preemptedByRunId?: string
+  dispatchMode?: 'new' | 'resume'
   createdAt: string
   updatedAt: string
 }
@@ -144,7 +162,7 @@ export interface AgentRunSummary {
   conversationId?: string
 }
 
-export type ConversationType = 'group' | 'direct'
+export type ConversationType = 'group' | 'direct' | 'project'
 export type ConversationStatus = 'active' | 'archived'
 export type ConversationMessageSenderType = 'user' | 'agent' | 'system'
 export type ConversationMessageStatus = 'completed' | 'streaming' | 'failed' | 'cancelled'
@@ -157,8 +175,10 @@ export type ConversationGoalTaskStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+  | 'interrupted'
   | 'blocked'
 export type ConversationArtifactStatus = 'pending' | 'ready' | 'failed' | 'deleted'
+export type ConversationArtifactKind = 'file' | 'site'
 export type ConversationArtifactActionType = 'apply' | 'publish' | 'preview'
 export type ConversationArtifactActionStatus =
   | 'queued'
@@ -166,6 +186,8 @@ export type ConversationArtifactActionStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
+export type ConversationProjectCloneStatus = 'cloning' | 'ready' | 'failed'
+export type ConversationProjectChangeStatus = 'open' | 'merged' | 'rejected' | 'failed'
 export type SearchSort = 'relevant' | 'recent'
 export type SearchTimeFilter = 'any' | '24h' | '7d' | '30d'
 export type SearchSenderType = 'user' | 'agent' | 'system'
@@ -184,6 +206,41 @@ export interface Conversation {
   createdAt: string
   updatedAt: string
   lastMessageAt?: string
+  project?: ConversationProject
+}
+
+export interface ConversationProject {
+  conversationId: string
+  ownerUserId: string
+  remoteUrl: string
+  daemonDeviceId: string
+  baseRepoPath?: string
+  defaultBranch?: string
+  baseHead?: string
+  cloneStatus: ConversationProjectCloneStatus
+  cloneError?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationProjectChange {
+  id: string
+  ownerUserId: string
+  conversationId: string
+  goalId?: string
+  taskIndex?: number
+  agentId: string
+  runId: string
+  branchName: string
+  worktreePath: string
+  baseCommit?: string
+  headCommit?: string
+  status: ConversationProjectChangeStatus
+  summary?: string
+  diffStat?: string
+  createdAt: string
+  updatedAt: string
+  mergedAt?: string
 }
 
 export interface ConversationGoalTask {
@@ -229,14 +286,19 @@ export interface ConversationArtifact {
   id: string
   ownerUserId: string
   conversationId: string
+  kind: ConversationArtifactKind
   goalId?: string
   goalTaskId?: string
   taskIndex?: number
-  runId: string
-  creatorAgentId: string
+  runId?: string
+  creatorAgentId?: string
+  creatorType: 'agent' | 'user'
+  creatorUserId?: string
   status: ConversationArtifactStatus
   title: string
   filename: string
+  entrypoint?: string
+  fileCount?: number
   sizeBytes: number
   downloadUrl?: string
   editorUrl?: string
@@ -251,6 +313,32 @@ export interface ConversationArtifactRevision {
   ownerUserId: string
   conversationId: string
   runId?: string
+  editorUserId?: string
+  contentHash: string
+  summary?: string
+  createdAt: string
+}
+
+export interface ConversationArtifactFile {
+  id: string
+  artifactId: string
+  ownerUserId: string
+  conversationId: string
+  path: string
+  mimeType: string
+  sizeBytes: number
+  latestRevisionId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationArtifactFileRevision {
+  id: string
+  artifactFileId: string
+  artifactId: string
+  ownerUserId: string
+  conversationId: string
+  path: string
   editorUserId?: string
   contentHash: string
   summary?: string
@@ -278,6 +366,10 @@ export interface ConversationDeployment {
   taskIndex?: number
   runId: string
   creatorAgentId: string
+  sourceArtifactId?: string
+  sourceRevisionId?: string
+  publishedByUserId?: string
+  publishedFrom: 'agent' | 'user'
   title: string
   entrypoint: string
   status: 'ready' | 'failed' | 'deleted'
@@ -289,6 +381,7 @@ export interface ConversationDeployment {
 export interface ConversationArtifactDetails {
   artifact: ConversationArtifact
   latestRevision?: ConversationArtifactRevision
+  files?: ConversationArtifactFile[]
   actions: ConversationArtifactAction[]
   availableActions: ConversationArtifactActionType[]
 }
@@ -298,12 +391,23 @@ export interface GetConversationArtifactContentResponse {
   revision?: ConversationArtifactRevision
 }
 
+export interface GetConversationArtifactFileContentResponse {
+  content: string
+  file: ConversationArtifactFile
+  revision?: ConversationArtifactFileRevision
+}
+
+export interface CreateConversationArtifactFileRevisionResponse {
+  revision: ConversationArtifactFileRevision
+}
+
 export interface CreateConversationArtifactRevisionResponse {
   revision: ConversationArtifactRevision
 }
 
 export interface CreateConversationArtifactActionResponse {
   action: ConversationArtifactAction
+  deployment?: ConversationDeployment
 }
 
 export interface ConversationMessage {
@@ -324,7 +428,7 @@ export interface ConversationMessageAttachment {
   id: string
   messageId: string
   artifactId: string
-  type: 'image'
+  type: 'image' | 'file'
   artifact: ConversationArtifact
   createdAt: string
 }
@@ -398,6 +502,68 @@ export interface CreateGroupConversationRequest {
 
 export interface CreateGroupConversationResponse {
   conversation: Conversation
+}
+
+export interface CreateProjectConversationRequest {
+  title?: string
+  description?: string
+  remoteUrl: string
+  agentIds: string[]
+  orchestratorAgentId?: string
+}
+
+export interface CreateProjectConversationResponse {
+  conversation: Conversation
+}
+
+export interface ListConversationProjectChangesResponse {
+  changes: ConversationProjectChange[]
+}
+
+export interface GetConversationProjectChangeResponse {
+  change: ConversationProjectChange
+  diff: string
+}
+
+export interface ProjectFileEntry {
+  path: string
+  type: 'directory' | 'file'
+  sizeBytes?: number
+}
+
+export interface ListProjectFilesResponse {
+  files: ProjectFileEntry[]
+}
+
+export interface GetProjectFileContentResponse {
+  path: string
+  content: string
+}
+
+export interface UpdateProjectFileContentResponse {
+  baseHead?: string
+  content: string
+  path: string
+}
+
+export type ProjectChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'binary'
+
+export interface ProjectChangedFile {
+  binary: boolean
+  oldPath?: string
+  path: string
+  status: ProjectChangedFileStatus
+}
+
+export interface ListProjectChangeFilesResponse {
+  files: ProjectChangedFile[]
+}
+
+export interface GetProjectChangeFileContentResponse {
+  binary: boolean
+  file: ProjectChangedFile
+  newContent: string
+  oldContent: string
 }
 
 export interface UpdateGroupConversationRequest {
@@ -523,11 +689,12 @@ export class ApiRequestError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
   const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...init.headers,
     },
   })

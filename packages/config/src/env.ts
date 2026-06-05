@@ -83,6 +83,7 @@ export const apiEnvSchema = z.object({
   AUTH_SESSION_TTL_DAYS: sessionTtlDaysSchema,
   AUTH_COOKIE_SECURE: cookieSecureSchema,
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
+  AGENTHUB_DAEMON_GATEWAY_URL: z.string().url().default("http://localhost:3001"),
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
@@ -138,6 +139,7 @@ export const daemonEnvSchema = z.object({
     .positive()
     .default(60000),
   CODEX_EXECUTABLE_PATH: z.string().min(1).optional(),
+  CLAUDE_CODE_EXECUTABLE_PATH: z.string().min(1).optional(),
 });
 
 export type DaemonEnv = z.infer<typeof daemonEnvSchema>;

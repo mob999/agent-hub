@@ -1,14 +1,17 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { Code, Document, FileDiff, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Close, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ConversationArtifact,
+  ConversationArtifactFile,
   ConversationArtifactActionType,
   ConversationArtifactDetails,
+  CreateConversationArtifactFileRevisionResponse,
   CreateConversationArtifactActionResponse,
   CreateConversationArtifactRevisionResponse,
+  GetConversationArtifactFileContentResponse,
   GetConversationArtifactContentResponse,
 } from '../lib/api'
 import { ApiRequestError, apiRequest, apiUrl } from '../lib/api'
@@ -20,6 +23,7 @@ interface ArtifactWorkspaceProps {
   activeArtifactId?: string | null
   onActiveArtifactChange?: (artifactId: string) => void
   onRefreshArtifacts?: () => void
+  onRefreshDeployments?: () => void
 }
 
 type ArtifactFileCategory = 'html' | 'markdown' | 'diff' | 'image' | 'text' | 'binary'
@@ -30,6 +34,15 @@ interface ArtifactFileInfo {
   language: string
   canEdit: boolean
   canPreview: boolean
+}
+
+interface SiteTreeNode {
+  children: SiteTreeNode[]
+  file?: ConversationArtifactFile
+  id: string
+  name: string
+  path: string
+  type: 'directory' | 'file'
 }
 
 const imageExtensions = new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp'])
@@ -65,6 +78,23 @@ const textLanguages: Record<string, string> = {
   yml: 'yaml',
   zsh: 'shell',
 }
+const textFilenameLanguages: Record<string, string> = {
+  '.dockerignore': 'plaintext',
+  '.editorconfig': 'ini',
+  '.env': 'plaintext',
+  '.eslintignore': 'plaintext',
+  '.eslintrc': 'json',
+  '.gitattributes': 'plaintext',
+  '.gitignore': 'plaintext',
+  '.npmrc': 'plaintext',
+  '.prettierignore': 'plaintext',
+  '.prettierrc': 'json',
+  copying: 'plaintext',
+  dockerfile: 'dockerfile',
+  license: 'plaintext',
+  makefile: 'makefile',
+  readme: 'markdown',
+}
 
 function extensionFromFilename(filename: string): string {
   const extension = filename.split('.').pop()?.toLowerCase()
@@ -72,8 +102,23 @@ function extensionFromFilename(filename: string): string {
   return extension && extension !== filename.toLowerCase() ? extension : ''
 }
 
+function baseNameFromFilename(filename: string): string {
+  return filename.split(/[\\/]/).pop()?.toLowerCase() ?? ''
+}
+
 function inferArtifactFileInfo(filename: string): ArtifactFileInfo {
   const extension = extensionFromFilename(filename)
+  const filenameLanguage = textFilenameLanguages[baseNameFromFilename(filename)]
+
+  if (filenameLanguage !== undefined) {
+    return {
+      category: filenameLanguage === 'markdown' ? 'markdown' : 'text',
+      label: filenameLanguage === 'markdown' ? 'Markdown' : 'File',
+      language: filenameLanguage,
+      canEdit: true,
+      canPreview: filenameLanguage === 'markdown',
+    }
+  }
 
   switch (extension) {
     case 'html':
@@ -82,7 +127,7 @@ function inferArtifactFileInfo(filename: string): ArtifactFileInfo {
         category: 'html',
         label: 'HTML',
         language: 'html',
-        canEdit: false,
+        canEdit: true,
         canPreview: true,
       }
     case 'md':
@@ -139,6 +184,17 @@ function shouldLoadArtifactContent(filename: string): boolean {
   const fileInfo = inferArtifactFileInfo(filename)
 
   return fileInfo.category === 'markdown' || fileInfo.category === 'diff' || fileInfo.category === 'text'
+}
+
+function shouldLoadSiteFileContent(filename: string): boolean {
+  const fileInfo = inferArtifactFileInfo(filename)
+
+  return (
+    fileInfo.category === 'html' ||
+    fileInfo.category === 'markdown' ||
+    fileInfo.category === 'diff' ||
+    fileInfo.category === 'text'
+  )
 }
 
 function parseUnifiedDiff(content: string): {
@@ -230,11 +286,70 @@ function ArtifactFileIcon({ fileInfo }: { fileInfo: ArtifactFileInfo }) {
   }
 }
 
+function buildSiteFileTree(files: ConversationArtifactFile[]): SiteTreeNode[] {
+  const root: SiteTreeNode[] = []
+
+  for (const file of files) {
+    const parts = file.path.split('/').filter(Boolean)
+    let current = root
+    let currentPath = ''
+
+    parts.forEach((part, index) => {
+      currentPath = currentPath.length === 0 ? part : `${currentPath}/${part}`
+      const isFile = index === parts.length - 1
+      let node = current.find((child) => child.name === part)
+
+      if (node === undefined) {
+        node = {
+          children: [],
+          id: isFile ? file.id : `dir:${currentPath}`,
+          name: part,
+          path: currentPath,
+          type: isFile ? 'file' : 'directory',
+        }
+        current.push(node)
+      }
+
+      if (isFile) {
+        node.file = file
+        node.id = file.id
+        node.type = 'file'
+      } else {
+        current = node.children
+      }
+    })
+  }
+
+  return sortSiteTreeNodes(root)
+}
+
+function sortSiteTreeNodes(nodes: SiteTreeNode[]): SiteTreeNode[] {
+  return nodes
+    .map((node) => ({
+      ...node,
+      children: sortSiteTreeNodes(node.children),
+    }))
+    .sort((left, right) => {
+      if (left.type !== right.type) {
+        return left.type === 'directory' ? -1 : 1
+      }
+
+      return left.name.localeCompare(right.name)
+    })
+}
+
+function expandedDirectoriesForPath(filePath: string): string[] {
+  const parts = filePath.split('/').filter(Boolean)
+
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
+}
+
 export function ArtifactWorkspace({
   artifacts,
   activeArtifactId,
   onActiveArtifactChange,
   onRefreshArtifacts,
+  onRefreshDeployments,
 }: ArtifactWorkspaceProps) {
   const selectedArtifactId = activeArtifactId ?? artifacts[0]?.id ?? null
   const selectedArtifact = useMemo(
@@ -245,13 +360,27 @@ export function ArtifactWorkspace({
   const [content, setContent] = useState('')
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<{
+    kind: 'success' | 'info'
+    title: string
+    subtitle: string
+    url?: string
+  } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [runningAction, setRunningAction] = useState<ConversationArtifactActionType | null>(null)
   const [leftInfoPanel, setLeftInfoPanel] = useState<'details' | 'history' | null>(null)
+  const [activeSiteFilePath, setActiveSiteFilePath] = useState<string | null>(null)
+  const [activeSiteFile, setActiveSiteFile] = useState<ConversationArtifactFile | null>(null)
+  const [expandedSiteDirectories, setExpandedSiteDirectories] = useState<Set<string>>(() => new Set())
+  const activeSiteFilePathRef = useRef<string | null>(null)
   const markdownEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const markdownScrollDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const markdownContentDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const markdownPreviewRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    activeSiteFilePathRef.current = activeSiteFilePath
+  }, [activeSiteFilePath])
 
   useEffect(() => {
     if (selectedArtifact === null) {
@@ -260,7 +389,7 @@ export function ArtifactWorkspace({
 
     let cancelled = false
 
-    const contentRequest = shouldLoadArtifactContent(selectedArtifact.filename)
+    const contentRequest = selectedArtifact.kind !== 'site' && shouldLoadArtifactContent(selectedArtifact.filename)
       ? apiRequest<GetConversationArtifactContentResponse>(`/artifacts/${selectedArtifact.id}/content`)
       : Promise.resolve({ content: '' })
 
@@ -274,8 +403,34 @@ export function ArtifactWorkspace({
         }
 
         setDetails(detailsResponse)
-        setContent(contentResponse.content)
-        setDraft(contentResponse.content)
+        setActionNotice(null)
+        if (detailsResponse.artifact.kind === 'site') {
+          const currentPath = activeSiteFilePathRef.current
+          const nextPath = detailsResponse.files?.some((file) => file.path === currentPath)
+            ? currentPath
+            : detailsResponse.artifact.entrypoint ?? detailsResponse.files?.[0]?.path ?? null
+          setActiveSiteFilePath(nextPath)
+          if (nextPath !== null) {
+            setExpandedSiteDirectories((current) => {
+              const next = new Set(current)
+              for (const directory of expandedDirectoriesForPath(nextPath)) {
+                next.add(directory)
+              }
+
+              return next
+            })
+          }
+          if (nextPath !== currentPath) {
+            setActiveSiteFile(null)
+            setContent('')
+            setDraft('')
+          }
+        } else {
+          setActiveSiteFilePath(null)
+          setActiveSiteFile(null)
+          setContent(contentResponse.content)
+          setDraft(contentResponse.content)
+        }
         setError(null)
       })
       .catch((loadError: unknown) => {
@@ -289,13 +444,70 @@ export function ArtifactWorkspace({
     return () => {
       cancelled = true
     }
-  }, [selectedArtifact])
+  }, [selectedArtifact?.filename, selectedArtifact?.id, selectedArtifact?.kind])
 
   const isLoading = selectedArtifact !== null && details?.artifact.id !== selectedArtifact.id && error === null
   const artifact = isLoading ? selectedArtifact : details?.artifact ?? selectedArtifact
+
+  useEffect(() => {
+    if (artifact?.kind !== 'site' || activeSiteFilePath === null) {
+      return
+    }
+
+    if (!shouldLoadSiteFileContent(activeSiteFilePath)) {
+      return
+    }
+
+    let cancelled = false
+
+    apiRequest<GetConversationArtifactFileContentResponse>(
+      `/artifacts/${artifact.id}/files/content?path=${encodeURIComponent(activeSiteFilePath)}`,
+    )
+      .then((response) => {
+        if (cancelled) {
+          return
+        }
+
+        setActiveSiteFile(response.file)
+        setContent(response.content)
+        setDraft(response.content)
+        setError(null)
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) {
+          return
+        }
+
+        setError(loadError instanceof ApiRequestError ? loadError.message : 'Unable to load site file.')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeSiteFilePath, artifact?.id, artifact?.kind, details?.files])
+
   const availableActions = details?.availableActions ?? []
-  const fileInfo = inferArtifactFileInfo(artifact?.filename ?? '')
-  const previewUrl = artifact !== null && fileInfo.canPreview
+  const activeFilename = artifact?.kind === 'site'
+    ? activeSiteFilePath ?? artifact.filename
+    : artifact?.filename ?? ''
+  const fileInfo = inferArtifactFileInfo(activeFilename)
+  const siteFiles = useMemo(
+    () => artifact?.kind === 'site' ? details?.files ?? [] : [],
+    [artifact?.kind, details?.files],
+  )
+  const siteFileTree = useMemo(() => buildSiteFileTree(siteFiles), [siteFiles])
+  const selectedSiteFile = useMemo(
+    () =>
+      artifact?.kind === 'site' && activeSiteFilePath !== null
+        ? siteFiles.find((file) => file.path === activeSiteFilePath) ?? null
+        : null,
+    [activeSiteFilePath, artifact?.kind, siteFiles],
+  )
+  const displayedSiteFile = activeSiteFile ?? selectedSiteFile
+  const siteFileRawUrl = artifact?.kind === 'site' && activeSiteFilePath !== null
+    ? apiUrl(`/artifacts/${artifact.id}/files/raw?path=${encodeURIComponent(activeSiteFilePath)}`)
+    : undefined
+  const previewUrl = artifact !== null && artifact.kind !== 'site' && fileInfo.canPreview
     ? apiUrl(`/artifacts/${artifact.id}/preview/`)
     : undefined
   const canEdit = artifact !== null && fileInfo.canEdit
@@ -377,13 +589,28 @@ export function ArtifactWorkspace({
     setIsSaving(true)
     setError(null)
     try {
-      await apiRequest<CreateConversationArtifactRevisionResponse>(`/artifacts/${artifact.id}/revisions`, {
-        method: 'POST',
-        body: JSON.stringify({
-          content: draft,
-          summary: 'Saved from Files workspace',
-        }),
-      })
+      if (artifact.kind === 'site') {
+        if (activeSiteFilePath === null) {
+          return
+        }
+
+        await apiRequest<CreateConversationArtifactFileRevisionResponse>(`/artifacts/${artifact.id}/files/revisions`, {
+          method: 'POST',
+          body: JSON.stringify({
+            content: draft,
+            path: activeSiteFilePath,
+            summary: 'Saved from Files workspace',
+          }),
+        })
+      } else {
+        await apiRequest<CreateConversationArtifactRevisionResponse>(`/artifacts/${artifact.id}/revisions`, {
+          method: 'POST',
+          body: JSON.stringify({
+            content: draft,
+            summary: 'Saved from Files workspace',
+          }),
+        })
+      }
       const detailsResponse = await apiRequest<ConversationArtifactDetails>(`/artifacts/${artifact.id}`)
       setDetails(detailsResponse)
       setContent(draft)
@@ -402,6 +629,7 @@ export function ArtifactWorkspace({
 
     setRunningAction(type)
     setError(null)
+    setActionNotice(null)
     try {
       const response = await apiRequest<CreateConversationArtifactActionResponse>(
         `/artifacts/${artifact.id}/actions/${type}`,
@@ -418,12 +646,121 @@ export function ArtifactWorkspace({
               actions: [response.action, ...current.actions],
             },
       )
+      if (response.action.status === 'failed') {
+        setError(response.action.error ?? `Unable to complete ${type}.`)
+        return
+      }
+      if (type === 'publish') {
+        const detailsResponse = await apiRequest<ConversationArtifactDetails>(`/artifacts/${artifact.id}`)
+        setDetails(detailsResponse)
+        onRefreshDeployments?.()
+        if (response.deployment?.url) {
+          setActionNotice({
+            kind: 'success',
+            title: 'Site published',
+            subtitle: `Published ${response.deployment.title}.`,
+            url: response.deployment.url,
+          })
+        } else {
+          setActionNotice({
+            kind: 'info',
+            title: 'Publish queued',
+            subtitle: 'The publish action has been queued.',
+          })
+        }
+      } else {
+        setActionNotice({
+          kind: 'info',
+          title: 'Action queued',
+          subtitle: `${type} has been queued.`,
+        })
+      }
     } catch (actionError) {
       setError(actionError instanceof ApiRequestError ? actionError.message : `Unable to start ${type}.`)
     } finally {
       setRunningAction(null)
     }
   }
+
+  const selectSiteFile = (filePath: string) => {
+    setActiveSiteFilePath(filePath)
+    if (!shouldLoadSiteFileContent(filePath)) {
+      setActiveSiteFile(siteFiles.find((file) => file.path === filePath) ?? null)
+      setContent('')
+      setDraft('')
+      setError(null)
+    } else {
+      setActiveSiteFile(null)
+    }
+    setExpandedSiteDirectories((current) => {
+      const next = new Set(current)
+      for (const directory of expandedDirectoriesForPath(filePath)) {
+        next.add(directory)
+      }
+
+      return next
+    })
+  }
+
+  const toggleSiteDirectory = (directoryPath: string) => {
+    setExpandedSiteDirectories((current) => {
+      const next = new Set(current)
+
+      if (next.has(directoryPath)) {
+        next.delete(directoryPath)
+      } else {
+        next.add(directoryPath)
+      }
+
+      return next
+    })
+  }
+
+  const renderSiteTreeNodes = (nodes: SiteTreeNode[], depth = 0) =>
+    nodes.map((node) => {
+      const isDirectory = node.type === 'directory'
+      const expanded = expandedSiteDirectories.has(node.path)
+      const selected = node.type === 'file' && node.path === activeSiteFilePath
+      const itemFileInfo = node.file === undefined ? null : inferArtifactFileInfo(node.file.path)
+
+      return (
+        <div key={node.id}>
+          <button
+            type="button"
+            className={`grid w-full cursor-pointer grid-cols-[1.25rem_1.25rem_minmax(0,1fr)] items-center gap-1 rounded-lg border-0 p-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+              selected
+                ? 'bg-[#e9eaee] text-[#161616]'
+                : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
+            }`}
+            style={{ paddingLeft: `${0.5 + depth * 0.875}rem` }}
+            onClick={() => {
+              if (isDirectory) {
+                toggleSiteDirectory(node.path)
+              } else {
+                selectSiteFile(node.path)
+              }
+            }}
+          >
+            <span className="grid size-5 place-items-center text-[var(--cds-icon-secondary)]">
+              {isDirectory ? (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
+            </span>
+            <span className="grid size-5 place-items-center text-[var(--cds-icon-secondary)]">
+              {isDirectory
+                ? expanded
+                  ? <FolderOpen size={18} />
+                  : <Folder size={18} />
+                : itemFileInfo !== null
+                  ? <ArtifactFileIcon fileInfo={itemFileInfo} />
+                  : <Document size={18} />}
+            </span>
+            <span className="truncate font-medium">{node.name}</span>
+          </button>
+          {isDirectory && expanded && node.children.length > 0 && (
+            <div>{renderSiteTreeNodes(node.children, depth + 1)}</div>
+          )}
+        </div>
+      )
+    })
 
   if (artifacts.length === 0) {
     return (
@@ -438,26 +775,28 @@ export function ArtifactWorkspace({
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden border border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] max-[1055px]:border-b max-[1055px]:border-r-0">
-        <div className="border-b border-[var(--cds-border-subtle-01)] p-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
+    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[1055px]:grid-cols-1">
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[1055px]:border-b max-[1055px]:border-r-0">
+        <div className="border-b border-[#eef0f3] bg-white p-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[#596171]">
             Files ({artifacts.length})
           </h2>
         </div>
-        <div className="grid content-start overflow-y-auto p-2 max-[1055px]:max-h-56">
+        <div className="grid content-start gap-0.5 overflow-y-auto p-2 max-[1055px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
-            const itemFileInfo = inferArtifactFileInfo(item.filename)
+            const itemFileInfo = item.kind === 'site'
+              ? inferArtifactFileInfo(item.entrypoint ?? 'index.html')
+              : inferArtifactFileInfo(item.filename)
 
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`grid cursor-pointer gap-1 border p-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] ${
+                className={`grid cursor-pointer gap-0.5 rounded-md border-0 px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selected
-                    ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                    : 'border-transparent bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)]'
+                    ? 'bg-[#dde3ea] text-[#161616]'
+                    : 'bg-transparent text-[#5f6877] hover:bg-[#edf0f4] hover:text-[#161616]'
                 }`}
                 onClick={() => onActiveArtifactChange?.(item.id)}
               >
@@ -467,32 +806,52 @@ export function ArtifactWorkspace({
                   </span>
                   <span className="truncate font-semibold">{item.filename}</span>
                 </span>
+                {item.kind === 'site' && (
+                  <span className="truncate pl-7 text-xs text-[#69707d]">
+                    Site project · {item.fileCount ?? 0} files
+                  </span>
+                )}
                 {item.title !== item.filename && (
-                  <span className="truncate pl-7 text-xs">{item.title}</span>
+                  <span className="truncate pl-7 text-xs text-[#69707d]">{item.title}</span>
                 )}
               </button>
             )
           })}
+          {artifact?.kind === 'site' && siteFileTree.length > 0 && (
+            <div className="mt-3 border-t border-[#e1e5ea] pt-3">
+              <h3 className="mb-2 px-2 text-xs font-semibold uppercase text-[#69707d]">
+                Site files
+              </h3>
+              <div className="grid gap-0.5">
+                {renderSiteTreeNodes(siteFileTree)}
+              </div>
+            </div>
+          )}
         </div>
-        <div className="grid self-end border-t border-[var(--cds-border-subtle-01)]">
+        <div className="grid self-end border-t border-[#eef0f3] bg-white">
           {leftInfoPanel === 'details' && (
-            <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3 text-sm">
-              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Details</h3>
-              <p className="truncate text-[var(--cds-text-primary)]">{fileInfo.label}</p>
-              <p className="truncate text-[var(--cds-text-secondary)]">{artifact?.filename}</p>
-              <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil(artifact.sizeBytes / 1024)) : 0} KB</p>
+            <section className="grid max-h-72 gap-1 overflow-y-auto border-b border-[#eef0f3] p-3 text-sm">
+              <h3 className="text-xs font-semibold uppercase text-[#69707d]">Details</h3>
+              <p className="truncate text-[var(--cds-text-primary)]">{artifact?.kind === 'site' ? 'Site' : fileInfo.label}</p>
+              <p className="truncate text-[var(--cds-text-secondary)]">{artifact?.kind === 'site' ? activeSiteFilePath ?? artifact.filename : artifact?.filename}</p>
+              {artifact?.kind === 'site' && (
+                <p className="text-[var(--cds-text-secondary)]">
+                  {artifact.fileCount ?? 0} files · entry {artifact.entrypoint ?? 'index.html'}
+                </p>
+              )}
+              <p className="text-[var(--cds-text-secondary)]">{artifact ? Math.max(1, Math.ceil((displayedSiteFile?.sizeBytes ?? artifact.sizeBytes) / 1024)) : 0} KB</p>
               {artifact && <p className="text-[var(--cds-text-secondary)]">Updated {formatTime(artifact.updatedAt)}</p>}
             </section>
           )}
           {leftInfoPanel === 'history' && (
-            <section className="grid max-h-72 gap-2 overflow-y-auto border-b border-[var(--cds-border-subtle-01)] p-3">
-              <h3 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">History</h3>
+            <section className="grid max-h-72 gap-2 overflow-y-auto border-b border-[#eef0f3] p-3">
+              <h3 className="text-xs font-semibold uppercase text-[#69707d]">History</h3>
               {(details?.actions ?? []).length === 0 ? (
                 <p className="text-sm text-[var(--cds-text-secondary)]">No actions yet.</p>
               ) : (
                 <div className="grid gap-2">
                   {(details?.actions ?? []).map((action) => (
-                    <div key={action.id} className="grid gap-1 border border-[var(--cds-border-subtle-01)] p-2 text-xs">
+                    <div key={action.id} className="grid gap-1 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-2 text-xs">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{action.type}</span>
                         <span className="text-[var(--cds-text-secondary)]">{action.status}</span>
@@ -512,10 +871,10 @@ export function ArtifactWorkspace({
               <button
                 key={panel}
                 type="button"
-                className={`min-h-10 cursor-pointer border-0 border-r border-[var(--cds-border-subtle-01)] px-3 text-left text-xs font-semibold uppercase focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] last:border-r-0 ${
+                className={`min-h-10 cursor-pointer border-0 border-r border-[#eef0f3] px-3 text-left text-xs font-semibold uppercase focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] last:border-r-0 ${
                   leftInfoPanel === panel
-                    ? 'bg-[var(--cds-layer-selected-01)] text-[var(--cds-text-primary)]'
-                    : 'bg-transparent text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)] hover:text-[var(--cds-text-primary)]'
+                    ? 'bg-[#e9eaee] text-[#161616]'
+                    : 'bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616]'
                 }`}
                 onClick={() =>
                   setLeftInfoPanel((current) => current === panel ? null : panel)
@@ -529,13 +888,15 @@ export function ArtifactWorkspace({
       </aside>
 
       <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]">
-        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--cds-border-subtle-01)] p-3">
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[#eef0f3] bg-white p-3">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-[var(--cds-text-primary)]">
               {artifact?.title ?? 'File'}
             </h2>
             <p className="truncate text-sm text-[var(--cds-text-secondary)]">
-              {artifact?.filename}
+              {artifact?.kind === 'site'
+                ? activeSiteFilePath ?? artifact.filename
+                : artifact?.filename}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -569,7 +930,12 @@ export function ArtifactWorkspace({
             >
               <Rocket size={16} />
             </IconButton>
-            {runningAction && <InlineLoading description={`Queueing ${runningAction}...`} status="active" />}
+            {runningAction && (
+              <InlineLoading
+                description={runningAction === 'publish' ? 'Publishing site...' : `Queueing ${runningAction}...`}
+                status="active"
+              />
+            )}
             <IconButton
               kind="ghost"
               label="Download"
@@ -606,6 +972,40 @@ export function ArtifactWorkspace({
               hideCloseButton
             />
           )}
+          {actionNotice && (
+            actionNotice.url ? (
+              <div className="flex min-w-0 items-center justify-between gap-4 border-b border-[#24a148] bg-[#defbe6] px-4 py-3 text-sm text-[#161616]">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-semibold">{actionNotice.title}</span>
+                  <span className="truncate text-[#393939]">{actionNotice.subtitle}</span>
+                  <a
+                    className="font-semibold text-[#0f62fe] underline"
+                    href={actionNotice.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open deployment
+                  </a>
+                </div>
+                <button
+                  type="button"
+                  className="grid size-8 shrink-0 cursor-pointer place-items-center border-0 bg-transparent text-[#393939] hover:bg-[#a7f0ba] hover:text-[#161616]"
+                  aria-label="Dismiss notification"
+                  onClick={() => setActionNotice(null)}
+                >
+                  <Close size={16} />
+                </button>
+              </div>
+            ) : (
+              <InlineNotification
+                kind={actionNotice.kind}
+                title={actionNotice.title}
+                subtitle={actionNotice.subtitle}
+                lowContrast
+                onClose={() => setActionNotice(null)}
+              />
+            )
+          )}
           {isLoading ? (
             <div className="grid h-full place-items-center">
               <InlineLoading description="Loading file..." status="active" />
@@ -614,7 +1014,7 @@ export function ArtifactWorkspace({
             <div className="grid h-full min-h-0 place-items-center text-[var(--cds-text-secondary)]">
               Select a file.
             </div>
-          ) : fileInfo.category === 'html' ? (
+          ) : fileInfo.category === 'html' && artifact.kind !== 'site' ? (
             previewUrl ? (
               <iframe
                 className="h-full min-h-0 w-full border-0 bg-white"
@@ -627,12 +1027,12 @@ export function ArtifactWorkspace({
               </div>
             )
           ) : fileInfo.category === 'image' ? (
-            previewUrl ? (
-              <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[var(--cds-layer-01)] p-3">
+            previewUrl || siteFileRawUrl ? (
+              <div className="grid h-full min-h-0 place-items-center overflow-auto bg-[#f7f8fa] p-3">
                 <img
-                  alt={artifact.title}
+                  alt={artifact.kind === 'site' ? activeSiteFilePath ?? artifact.title : artifact.title}
                   className="max-h-full max-w-full object-contain"
-                  src={previewUrl}
+                  src={siteFileRawUrl ?? previewUrl}
                 />
               </div>
             ) : (
@@ -673,7 +1073,7 @@ export function ArtifactWorkspace({
               </div>
             </div>
           ) : (
-            fileInfo.category === 'text' ? (
+            fileInfo.category === 'text' || (artifact.kind === 'site' && fileInfo.category === 'html') ? (
               <Editor
                 height="100%"
                 language={fileInfo.language}

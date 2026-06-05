@@ -15,7 +15,7 @@ import {
 } from "@agent-hub/db";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 
-import { listConversationsForUser } from "./repository.js";
+import { listConversationsForUser } from "./conversation-records.js";
 
 interface ScoredMatch<TMatchedField extends string> {
   matchedFields: TMatchedField[];

@@ -248,6 +248,7 @@ describe("DaemonGateway", () => {
         taskIndex: message.taskIndex,
         runId: message.runId,
         creatorAgentId: "agent_1",
+        creatorType: "agent",
         status: "ready",
         title: message.title,
         filename: message.filename,

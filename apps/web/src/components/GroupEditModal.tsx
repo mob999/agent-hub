@@ -1,15 +1,12 @@
 import {
   Button,
-  Checkbox,
   InlineNotification,
   Modal,
-  Select,
-  SelectItem,
   TextArea,
   TextInput,
 } from '@carbon/react'
 import { useState } from 'react'
-import { AgentStatusIndicator } from './AgentStatusIndicator'
+import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails, Conversation } from '../lib/api'
 
 interface GroupEditModalProps {
@@ -50,6 +47,15 @@ export function GroupEditModal({
     )
     if (!checked && orchestratorAgentId === agentId) {
       setOrchestratorAgentId('')
+    }
+  }
+
+  const selectOrchestrator = (agentId: string | null) => {
+    setOrchestratorAgentId(agentId ?? '')
+    if (agentId) {
+      setSelectedAgentIds((current) =>
+        current.includes(agentId) ? current : [...current, agentId],
+      )
     }
   }
 
@@ -101,43 +107,16 @@ export function GroupEditModal({
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
         />
-        <Select
-          id="edit-group-orchestrator"
-          labelText="Orchestrator"
-          value={orchestratorAgentId}
-          disabled={isSaving || selectedAgentIds.length === 0}
-          onChange={(event) => setOrchestratorAgentId(event.target.value)}
-        >
-          <SelectItem value="" text="No orchestrator" />
-          {agents
-            .filter((agent) => selectedAgentIds.includes(agent.agent.id))
-            .map((agent) => (
-              <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
-            ))}
-        </Select>
-        <div className="grid gap-2" aria-label="Agents">
-          <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
-            Agents
-          </p>
-          <div className="grid max-h-64 overflow-y-auto border border-[var(--cds-border-subtle-01)]">
-            {agents.map((agent) => (
-              <div
-                className="grid min-h-12 grid-cols-[minmax(0,1fr)_1.5rem] items-center gap-3 border-b border-[var(--cds-border-subtle-01)] px-3 py-2 last:border-b-0"
-                key={agent.agent.id}
-              >
-                <Checkbox
-                  id={`edit-group-agent-${agent.agent.id}`}
-                  labelText={agent.agent.name}
-                  checked={selectedAgentIds.includes(agent.agent.id)}
-                  disabled={isSaving}
-                  onChange={(_, data) => toggleAgent(agent.agent.id, data.checked)}
-                />
-                <AgentStatusIndicator agent={agent} />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="grid gap-3 border-t border-[var(--cds-border-subtle-01)] pt-4">
+        <AgentMemberSelector
+          agents={agents}
+          disabled={isSaving}
+          idPrefix="edit-group-agent"
+          orchestratorAgentId={orchestratorAgentId}
+          selectedAgentIds={selectedAgentIds}
+          onSelectOrchestrator={selectOrchestrator}
+          onToggleAgent={toggleAgent}
+        />
+        <div className="grid gap-3 rounded-xl border border-[#ffd7d9] bg-[#fff1f1] p-3">
           <Button
             kind="danger--tertiary"
             size="sm"

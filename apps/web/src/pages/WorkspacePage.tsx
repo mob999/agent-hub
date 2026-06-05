@@ -9,9 +9,12 @@ import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
 import { GroupOrchestratorModal } from '../components/GroupOrchestratorModal'
+import { ProjectCreateModal } from '../components/ProjectCreateModal'
+import { ProjectEditModal } from '../components/ProjectEditModal'
 import { RealtimeToastStack, type RealtimeToast } from '../components/RealtimeToastStack'
 import { SearchWorkspace } from '../components/SearchWorkspace'
 import { UserSettingsModal } from '../components/UserSettingsModal'
+import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
   ApiRequestError,
   apiRequest,
@@ -28,6 +31,7 @@ import {
   type ConversationGoal,
   type ConversationMessage,
   type CreateGroupConversationResponse,
+  type CreateProjectConversationResponse,
   type DaemonDevice,
   type LocalRun,
   type RealtimeEvent,
@@ -224,6 +228,10 @@ export function WorkspacePage({
   const [groupEditError, setGroupEditError] = useState<string | null>(null)
   const [isSavingGroup, setIsSavingGroup] = useState(false)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null)
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
@@ -280,6 +288,10 @@ export function WorkspacePage({
   const editingGroup = useMemo(
     () => conversations.find((conversation) => conversation.id === editingGroupId) ?? null,
     [conversations, editingGroupId],
+  )
+  const editingProject = useMemo(
+    () => conversations.find((conversation) => conversation.id === editingProjectId) ?? null,
+    [conversations, editingProjectId],
   )
   const canEditActiveConversation =
     activeConversation !== null &&
@@ -395,6 +407,17 @@ export function WorkspacePage({
     try {
       const response = await apiRequest<{ agents: AgentDetails[] }>('/agents')
       setAgents(response.agents)
+      agentsRef.current = response.agents
+      setRuns((current) =>
+        current.map((localRun) => {
+          const runAgent = response.agents.find((agent) => agent.agent.id === localRun.run.agentId)
+
+          return {
+            ...localRun,
+            agentName: runAgent?.agent.name ?? localRun.agentName,
+          }
+        }),
+      )
       setAgentError(null)
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -540,7 +563,7 @@ export function WorkspacePage({
   const loadRuns = useCallback(async () => {
     try {
       const response = await apiRequest<{ runs: AgentRunSummary[] }>('/runs')
-      const loadedRuns = response.runs.map((run) => toLocalRun(run))
+      const loadedRuns = response.runs.map((run) => toLocalRun(run, agentsRef.current))
 
       setRuns(loadedRuns)
       setSelectedRunId((current) => {
@@ -844,16 +867,17 @@ export function WorkspacePage({
   const submitRun = async (
     event: FormEvent<HTMLFormElement>,
     mode: SendConversationMessageMode,
-  ) => {
+    attachments: File[] = [],
+  ): Promise<boolean> => {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
-    if (!trimmedPrompt || isCreatingRun) {
-      return
+    if ((!trimmedPrompt && attachments.length === 0) || isCreatingRun) {
+      return false
     }
 
     if (activeConversation === null) {
       setRunError('Select a conversation before sending a message.')
-      return
+      return false
     }
 
     const selectedAgent =
@@ -868,7 +892,7 @@ export function WorkspacePage({
       setRunError(
         'Selected agent is not ready to receive messages.',
       )
-      return
+      return false
     }
 
     if (
@@ -877,21 +901,31 @@ export function WorkspacePage({
       activeConversation.orchestratorAgentId === undefined
     ) {
       setRunError('Set a group orchestrator in settings before using Task mode.')
-      return
+      return false
     }
 
     setRunError(null)
     setIsCreatingRun(true)
 
     try {
+      const body = attachments.length > 0
+        ? (() => {
+            const formData = new FormData()
+            formData.set('content', trimmedPrompt)
+            formData.set('mode', mode)
+            attachments.forEach((file) => formData.append('attachments', file))
+
+            return formData
+          })()
+        : JSON.stringify({
+            content: trimmedPrompt,
+            mode,
+          })
       const response = await apiRequest<SendConversationMessageResponse>(
         `/conversations/${activeConversation.id}/messages`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            content: trimmedPrompt,
-            mode,
-          }),
+          body,
         },
       )
       const responseRuns = response.runs.length > 0
@@ -952,12 +986,14 @@ export function WorkspacePage({
       void loadMessages(activeConversation.id)
       void loadTasks(activeConversation.id)
       void loadArtifacts(activeConversation.id)
+      return true
     } catch (error) {
       if (error instanceof ApiRequestError) {
         setRunError(error.message)
       } else {
         setRunError('Unable to create the run. Try again in a moment.')
       }
+      return false
     } finally {
       setIsCreatingRun(false)
     }
@@ -1148,6 +1184,14 @@ export function WorkspacePage({
               ...current.filter((conversation) => conversation.id !== event.conversationId),
             ])
           } else {
+            const existingConversation = conversationsRef.current.find(
+              (conversation) => conversation.id === event.conversationId,
+            )
+
+            if (existingConversation === undefined || existingConversation.type === 'project') {
+              void loadConversations()
+            }
+
             setConversations((current) => {
               const existing = current.find((conversation) => conversation.id === event.conversationId)
 
@@ -1228,7 +1272,7 @@ export function WorkspacePage({
   const navigateToView = (view: WorkspaceView) => {
     navigate(workspaceRouteByView[view])
   }
-  const openSearch = () => {
+  const openSearch = useCallback(() => {
     const path = searchRoutePath({
       channelId: searchSelectedChannelId,
       query: searchQuery,
@@ -1238,7 +1282,27 @@ export function WorkspacePage({
     })
     window.history.pushState({}, '', path)
     navigate('/chat/search')
-  }
+  }, [navigate, searchQuery, searchSelectedChannelId, searchSelectedSender, searchSort, searchTime])
+
+  useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.key.toLowerCase() !== 'k' || (!event.ctrlKey && !event.metaKey)) {
+        return
+      }
+
+      event.preventDefault()
+      openSearch()
+      window.setTimeout(() => {
+        document.getElementById('workspace-search-input')?.focus()
+      }, 0)
+    }
+
+    window.addEventListener('keydown', handleSearchShortcut)
+
+    return () => {
+      window.removeEventListener('keydown', handleSearchShortcut)
+    }
+  }, [openSearch])
   const openRun = (runId: string) => {
     setSelectedRunId(runId)
     navigate('/runs')
@@ -1338,6 +1402,10 @@ export function WorkspacePage({
     setGroupCreateError(null)
     setGroupModalOpen(true)
   }
+  const openCreateProject = () => {
+    setProjectCreateError(null)
+    setProjectModalOpen(true)
+  }
   const openEditActiveConversation = () => {
     if (activeConversation === null) {
       return
@@ -1352,6 +1420,12 @@ export function WorkspacePage({
     if (activeConversation.type === 'group') {
       setGroupEditError(null)
       setEditingGroupId(activeConversation.id)
+      return
+    }
+
+    if (activeConversation.type === 'project') {
+      setGroupEditError(null)
+      setEditingProjectId(activeConversation.id)
     }
   }
   const createGroup = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
@@ -1436,6 +1510,40 @@ export function WorkspacePage({
         )
       } else {
         setGroupEditError('Unable to update the group. Try again in a moment.')
+      }
+    } finally {
+      setIsSavingGroup(false)
+    }
+  }
+  const updateProject = async (input: { title: string; description?: string; agentIds: string[]; orchestratorAgentId?: string }) => {
+    if (editingProject === null) {
+      return
+    }
+
+    setIsSavingGroup(true)
+    setGroupEditError(null)
+
+    try {
+      const response = await apiRequest<UpdateGroupConversationResponse>(
+        `/conversations/projects/${editingProject.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        },
+      )
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      activateConversation(response.conversation.id)
+      setEditingProjectId(null)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setGroupEditError(error.message)
+      } else {
+        setGroupEditError('Unable to update the project. Try again in a moment.')
       }
     } finally {
       setIsSavingGroup(false)
@@ -1536,6 +1644,70 @@ export function WorkspacePage({
         setRunError(error.message)
       } else {
         setRunError('Unable to restore the group. Try again in a moment.')
+      }
+    }
+  }
+  const createProject = async (input: {
+    title?: string
+    description?: string
+    remoteUrl: string
+    agentIds: string[]
+    orchestratorAgentId?: string
+  }) => {
+    setIsCreatingProject(true)
+    setProjectCreateError(null)
+
+    try {
+      const response = await apiRequest<CreateProjectConversationResponse>('/conversations/projects', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+
+      setConversations((current) => [
+        response.conversation,
+        ...current.filter((conversation) => conversation.id !== response.conversation.id),
+      ])
+      setMessagesByConversation((current) => ({
+        ...current,
+        [response.conversation.id]: [],
+      }))
+      if (user) {
+        writeConversationDraft(user.id, response.conversation.id, '')
+      }
+      setSelectedRunId(null)
+      if (response.conversation.project?.cloneStatus === 'ready') {
+        selectConversation(response.conversation.id)
+      }
+      setProjectModalOpen(false)
+      void loadConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setProjectCreateError(error.message)
+      } else {
+        setProjectCreateError('Unable to create the project. Try again in a moment.')
+      }
+    } finally {
+      setIsCreatingProject(false)
+    }
+  }
+  const deleteArchivedGroup = async (conversationId: string) => {
+    setRunError(null)
+
+    try {
+      await apiRequest<{ ok: boolean }>(
+        `/conversations/groups/${conversationId}`,
+        { method: 'DELETE' },
+      )
+
+      setArchivedConversations((current) =>
+        current.filter((item) => item.id !== conversationId),
+      )
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to permanently delete the group. Try again in a moment.')
       }
     }
   }
@@ -1695,6 +1867,29 @@ export function WorkspacePage({
       }
     }
   }
+  const deleteArchivedAgent = async (agentId: string) => {
+    setRunError(null)
+
+    try {
+      await apiRequest<{ ok: boolean }>(
+        `/agents/${agentId}`,
+        { method: 'DELETE' },
+      )
+
+      setArchivedAgents((current) => current.filter((item) => item.agent.id !== agentId))
+      setArchivedConversations((current) =>
+        current.filter((conversation) => conversation.directAgentId !== agentId),
+      )
+      void loadArchivedAgents()
+      void loadArchivedConversations()
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        setRunError(error.message)
+      } else {
+        setRunError('Unable to permanently delete the agent. Try again in a moment.')
+      }
+    }
+  }
 
   const updateSearchFilters = (input: {
     channelId?: string
@@ -1754,8 +1949,8 @@ export function WorkspacePage({
     <main
       className={
         activeView === 'chat'
-          ? 'grid h-screen grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
-          : 'grid h-screen grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
       }
       aria-label="AgentHub workspace"
     >
@@ -1787,7 +1982,14 @@ export function WorkspacePage({
             onOpenSearch={openSearch}
             onCreateAgent={() => openCreateAgent()}
             onCreateGroup={openCreateGroup}
+            onCreateProject={openCreateProject}
             onOpenActivity={() => navigateToView('runs')}
+            onDeleteAgent={(agentId) => {
+              void deleteArchivedAgent(agentId)
+            }}
+            onDeleteGroup={(conversationId) => {
+              void deleteArchivedGroup(conversationId)
+            }}
             onRestoreAgent={(agentId) => {
               void restoreAgent(agentId)
             }}
@@ -1796,110 +1998,115 @@ export function WorkspacePage({
             }}
             onToggleSaved={() => setSavedOpen((open) => !open)}
             selectGroup={selectConversation}
+            selectProject={selectConversation}
             selectAgent={(agentId) => {
               void selectAgentConversation(agentId)
             }}
           />
-          {isSearchRoute ? (
-            <SearchWorkspace
-              agents={agents}
-              conversations={conversations}
-              error={searchError}
-              isLoading={isSearchLoading}
-              query={searchQuery}
-              results={searchResults}
-              selectedChannelId={searchSelectedChannelId}
-              selectedSender={searchSelectedSender}
-              sort={searchSort}
-              time={searchTime}
-              onChannelChange={(value) => updateSearchFilters({ channelId: value })}
-              onOpenConversation={(conversationId) => {
-                selectConversation(conversationId)
-              }}
-              onOpenMessage={(conversationId, messageId) => {
-                openMessageRoute(conversationId, messageId)
-              }}
-              onQueryChange={(value) => updateSearchFilters({ query: value })}
-              onSenderChange={(value) => updateSearchFilters({ sender: value })}
-              onSortChange={(value) => updateSearchFilters({ sort: value })}
-              onTimeChange={(value) => updateSearchFilters({ time: value })}
-            />
-          ) : (
-            <ChannelWorkspace
-              activeConversation={activeConversation}
-              messages={activeConversationMessages}
-              goals={activeConversationGoals}
-              artifacts={activeConversationArtifacts}
-              deployments={activeConversationDeployments}
-              agents={agents}
-              user={user}
-              prompt={prompt}
-              isCreatingRun={isCreatingRun}
-              runError={runError ?? agentError}
-              readyAgentCount={readyAgentCount}
-              canEditConversation={canEditActiveConversation}
-              setPrompt={updatePrompt}
-              submitRun={submitRun}
-              openCreateAgent={() => openCreateAgent()}
-              openAgentConversation={(agentId) => {
-                void selectAgentConversation(agentId)
-              }}
-              openEditConversation={openEditActiveConversation}
-              openArtifactEditor={openArtifactEditor}
-              openRun={openRun}
-              focusedGoalRoute={focusedGoalRoute}
-              focusedMessageId={focusedMessageId}
-              taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
-              deploymentRouteActive={chatPanelRoute === 'deployments'}
-              openGoalRoute={(goalId, taskIndex) => {
-                if (activeConversation?.id) {
-                  openGoalRoute(activeConversation.id, goalId, taskIndex)
-                }
-              }}
-              openTasksRoute={() => {
-                if (activeConversation?.id) {
-                  openTasksRoute(activeConversation.id)
-                }
-              }}
-              openDeploymentsRoute={() => {
-                if (activeConversation?.id) {
-                  openDeploymentsRoute(activeConversation.id)
-                }
-              }}
-              closeConversationRoute={() => {
-                if (activeConversation?.id) {
-                  closeConversationRoute(activeConversation.id)
-                }
-              }}
-              openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
-              closeArtifactEditor={closeArtifactEditor}
-              activeEditorArtifactId={editorRoute?.artifactId ?? null}
-              editorConversationId={editorRoute?.conversationId ?? null}
-              onActiveEditorArtifactChange={openArtifactEditor}
-              refreshArtifacts={() => {
-                if (activeConversation?.id) {
-                  void loadArtifacts(activeConversation.id)
-                }
-              }}
-              refreshDeployments={() => {
-                if (activeConversation?.id) {
-                  void loadDeployments(activeConversation.id)
-                }
-              }}
-            />
-          )}
+          <WorkspacePanel>
+            {isSearchRoute ? (
+              <SearchWorkspace
+                agents={agents}
+                conversations={conversations}
+                error={searchError}
+                isLoading={isSearchLoading}
+                query={searchQuery}
+                results={searchResults}
+                selectedChannelId={searchSelectedChannelId}
+                selectedSender={searchSelectedSender}
+                sort={searchSort}
+                time={searchTime}
+                onChannelChange={(value) => updateSearchFilters({ channelId: value })}
+                onOpenConversation={(conversationId) => {
+                  selectConversation(conversationId)
+                }}
+                onOpenMessage={(conversationId, messageId) => {
+                  openMessageRoute(conversationId, messageId)
+                }}
+                onQueryChange={(value) => updateSearchFilters({ query: value })}
+                onSenderChange={(value) => updateSearchFilters({ sender: value })}
+                onSortChange={(value) => updateSearchFilters({ sort: value })}
+                onTimeChange={(value) => updateSearchFilters({ time: value })}
+              />
+            ) : (
+              <ChannelWorkspace
+                activeConversation={activeConversation}
+                messages={activeConversationMessages}
+                goals={activeConversationGoals}
+                artifacts={activeConversationArtifacts}
+                deployments={activeConversationDeployments}
+                agents={agents}
+                user={user}
+                prompt={prompt}
+                isCreatingRun={isCreatingRun}
+                runError={runError ?? agentError}
+                readyAgentCount={readyAgentCount}
+                canEditConversation={canEditActiveConversation}
+                setPrompt={updatePrompt}
+                submitRun={submitRun}
+                openCreateAgent={() => openCreateAgent()}
+                openAgentConversation={(agentId) => {
+                  void selectAgentConversation(agentId)
+                }}
+                openEditConversation={openEditActiveConversation}
+                openArtifactEditor={openArtifactEditor}
+                openRun={openRun}
+                focusedGoalRoute={focusedGoalRoute}
+                focusedMessageId={focusedMessageId}
+                taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
+                deploymentRouteActive={chatPanelRoute === 'deployments'}
+                openGoalRoute={(goalId, taskIndex) => {
+                  if (activeConversation?.id) {
+                    openGoalRoute(activeConversation.id, goalId, taskIndex)
+                  }
+                }}
+                openTasksRoute={() => {
+                  if (activeConversation?.id) {
+                    openTasksRoute(activeConversation.id)
+                  }
+                }}
+                openDeploymentsRoute={() => {
+                  if (activeConversation?.id) {
+                    openDeploymentsRoute(activeConversation.id)
+                  }
+                }}
+                closeConversationRoute={() => {
+                  if (activeConversation?.id) {
+                    closeConversationRoute(activeConversation.id)
+                  }
+                }}
+                openConversationEditor={(conversationId) => openConversationEditor(conversationId)}
+                closeArtifactEditor={closeArtifactEditor}
+                activeEditorArtifactId={editorRoute?.artifactId ?? null}
+                editorConversationId={editorRoute?.conversationId ?? null}
+                onActiveEditorArtifactChange={openArtifactEditor}
+                refreshArtifacts={() => {
+                  if (activeConversation?.id) {
+                    void loadArtifacts(activeConversation.id)
+                  }
+                }}
+                refreshDeployments={() => {
+                  if (activeConversation?.id) {
+                    void loadDeployments(activeConversation.id)
+                  }
+                }}
+              />
+            )}
+          </WorkspacePanel>
         </>
       ) : activeView === 'daemon' ? (
         <DaemonPage
           devices={devices}
-          agents={agents}
           deviceError={deviceError}
-          openCreateAgent={openCreateAgent}
+          onDevicesChanged={() => {
+            void loadDevices()
+          }}
         />
       ) : (
         <RunsPage
           runs={orderedRuns}
           activeRunCount={activeRunCount}
+          devices={devices}
           eventsByRun={eventsByRun}
           selectedRunId={selectedRunId}
           selectRun={setSelectedRunId}
@@ -1929,6 +2136,17 @@ export function WorkspacePage({
           isCreating={isCreatingGroup}
           onClose={() => setGroupModalOpen(false)}
           onCreate={createGroup}
+        />
+      )}
+      {projectModalOpen && (
+        <ProjectCreateModal
+          open={projectModalOpen}
+          agents={agents}
+          devices={devices}
+          error={projectCreateError}
+          isCreating={isCreatingProject}
+          onClose={() => setProjectModalOpen(false)}
+          onCreate={createProject}
         />
       )}
       {editingAgent && (
@@ -1968,6 +2186,18 @@ export function WorkspacePage({
             onSave={updateGroup}
           />
         )
+      )}
+      {editingProject && (
+        <ProjectEditModal
+          key={editingProject.id}
+          open={editingProject !== null}
+          agents={agents}
+          conversation={editingProject}
+          error={groupEditError}
+          isSaving={isSavingGroup}
+          onClose={() => setEditingProjectId(null)}
+          onSave={updateProject}
+        />
       )}
       {settingsOpen && user && (
         <UserSettingsModal

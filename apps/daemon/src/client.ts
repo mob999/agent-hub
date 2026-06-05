@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { loadDaemonEnv } from "@agent-hub/config";
 import type {
@@ -14,6 +16,7 @@ import type {
   AgentHubUploadArtifactToolResult,
   AgentRunArtifactUpload,
   AgentRunStaticSiteDeploy,
+  ConversationProjectChange,
   RunId,
 } from "@agent-hub/core";
 import { createLogger } from "@agent-hub/server";
@@ -21,7 +24,11 @@ import WebSocket from "ws";
 
 import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
-import { CodexAdapter } from "./runtime/codex";
+import {
+  createAgentHubMcpServerCommand,
+  createRuntimeAdapters,
+  getRuntimeAdapter,
+} from "./runtime";
 import {
   assertPathInsideWorkspace,
   getAgentWorkspacePath,
@@ -65,6 +72,16 @@ const initialReconnectDelayMs = 1_000;
 const maxReconnectDelayMs = 10_000;
 const artifactUploadTimeoutMs = 30_000;
 const mcpToolCallTimeoutMs = 30_000;
+const runPreemptTimeoutMs = 10_000;
+const execFileAsync = promisify(execFile);
+
+type RunAbortReason = "cancelled" | "interrupted";
+interface ActiveRun {
+  abortController: AbortController;
+  abortReason?: RunAbortReason;
+  done: Promise<void>;
+  resolveDone(): void;
+}
 
 async function handleArtifactAction(input: {
   env: ReturnType<typeof loadDaemonEnv>;
@@ -101,17 +118,217 @@ async function handleArtifactAction(input: {
   throw new Error(`Unsupported artifact action: ${message.actionType}`);
 }
 
+async function git(
+  args: string[],
+  options: { cwd?: string; maxBuffer?: number } = {},
+): Promise<string> {
+  const result = await execFileAsync("git", args, {
+    cwd: options.cwd,
+    maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024,
+  });
+
+  return result.stdout.trim();
+}
+
+function getProjectRootPath(
+  env: ReturnType<typeof loadDaemonEnv>,
+  conversationId: string,
+): string {
+  return path.join(env.AGENTHUB_WORKSPACE_ROOT, "projects", conversationId);
+}
+
+async function handleProjectClone(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "project.clone" }>;
+}): Promise<{
+  baseHead?: string;
+  baseRepoPath: string;
+  defaultBranch?: string;
+}> {
+  const projectRootPath = getProjectRootPath(input.env, input.message.conversationId);
+  const baseRepoPath = path.join(projectRootPath, "base");
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRootPath);
+  await mkdir(projectRootPath, { recursive: true });
+  await rm(baseRepoPath, { force: true, recursive: true });
+  await git(["clone", input.message.remoteUrl, baseRepoPath], {
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  const defaultBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: baseRepoPath,
+  }).catch(() => undefined);
+  const baseHead = await git(["rev-parse", "HEAD"], {
+    cwd: baseRepoPath,
+  }).catch(() => undefined);
+
+  return { baseHead, baseRepoPath, defaultBranch };
+}
+
+async function prepareProjectWorktree(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "run.assigned" }>;
+}): Promise<void> {
+  const projectRun = input.message.projectRun;
+
+  if (projectRun === undefined) {
+    return;
+  }
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRun.baseRepoPath);
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.workspacePath);
+  await mkdir(path.dirname(input.message.workspacePath), { recursive: true });
+  await rm(input.message.workspacePath, { force: true, recursive: true });
+  await git(
+    [
+      "worktree",
+      "add",
+      "-B",
+      projectRun.branchName,
+      input.message.workspacePath,
+      "HEAD",
+    ],
+    {
+      cwd: projectRun.baseRepoPath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+}
+
+async function createProjectChangeIfNeeded(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "run.assigned" }>;
+  logger: ReturnType<typeof createLogger>;
+}): Promise<{ change: ConversationProjectChange; diff: string } | null> {
+  const projectRun = input.message.projectRun;
+
+  if (projectRun === undefined) {
+    return null;
+  }
+
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, projectRun.baseRepoPath);
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.workspacePath);
+
+  const status = await git(["status", "--porcelain"], {
+    cwd: input.message.workspacePath,
+  });
+
+  if (status.length === 0) {
+    return null;
+  }
+
+  const baseCommit = await git(["rev-parse", "HEAD"], {
+    cwd: projectRun.baseRepoPath,
+  }).catch(() => undefined);
+  await git(["add", "-A"], { cwd: input.message.workspacePath });
+  await git(
+    [
+      "-c",
+      "user.name=AgentHub",
+      "-c",
+      "user.email=agenthub@example.local",
+      "commit",
+      "-m",
+      `AgentHub run ${input.message.run.id.slice(0, 8)}`,
+    ],
+    {
+      cwd: input.message.workspacePath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+  const headCommit = await git(["rev-parse", "HEAD"], {
+    cwd: input.message.workspacePath,
+  }).catch(() => undefined);
+  const diffStat = baseCommit === undefined
+    ? undefined
+    : await git(["diff", "--stat", baseCommit, "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => undefined);
+  const diff = baseCommit === undefined
+    ? await git(["show", "--format=", "--no-ext-diff", "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => "")
+    : await git(["diff", "--no-ext-diff", baseCommit, "HEAD"], {
+        cwd: input.message.workspacePath,
+        maxBuffer: 20 * 1024 * 1024,
+      }).catch(() => "");
+
+  input.logger.info(
+    {
+      branchName: projectRun.branchName,
+      runId: input.message.run.id,
+    },
+    "Created project change commit",
+  );
+
+  const now = nowIsoDateTime();
+  return {
+    change: {
+      id: randomUUID(),
+      ownerUserId: projectRun.ownerUserId,
+      conversationId: projectRun.conversationId,
+      goalId: undefined,
+      taskIndex: undefined,
+      agentId: input.message.run.agentId,
+      runId: input.message.run.id,
+      branchName: projectRun.branchName,
+      worktreePath: input.message.workspacePath,
+      baseCommit,
+      headCommit,
+      status: "open",
+      summary: `Changes from run ${input.message.run.id.slice(0, 8)}`,
+      diffStat,
+      createdAt: now,
+      updatedAt: now,
+    },
+    diff,
+  };
+}
+
+async function handleProjectChangeMerge(input: {
+  env: ReturnType<typeof loadDaemonEnv>;
+  message: Extract<DaemonServerMessage, { type: "project.change.merge" }>;
+}): Promise<void> {
+  assertPathInsideWorkspace(input.env.AGENTHUB_WORKSPACE_ROOT, input.message.baseRepoPath);
+
+  await git(["fetch", "--all", "--prune"], {
+    cwd: input.message.baseRepoPath,
+    maxBuffer: 20 * 1024 * 1024,
+  }).catch(() => "");
+  await git(
+    [
+      "-c",
+      "user.name=AgentHub",
+      "-c",
+      "user.email=agenthub@example.local",
+      "merge",
+      "--no-ff",
+      input.message.branchName,
+      "-m",
+      input.message.message?.trim() || `Merge ${input.message.branchName}`,
+    ],
+    {
+      cwd: input.message.baseRepoPath,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+}
+
 export async function startDaemon(): Promise<void> {
   const env = loadDaemonEnv();
   const mcpRelay = new AgentHubMcpRelay();
   await mcpRelay.start();
-  const adapter = new CodexAdapter({
+  const adapters = createRuntimeAdapters({
     dailyMemoryRefreshIntervalMs:
       env.AGENTHUB_DAILY_MEMORY_REFRESH_INTERVAL_MINUTES * 60 * 1000,
     dailyMemoryRefreshTranscriptMaxBytes:
       env.AGENTHUB_DAILY_MEMORY_REFRESH_TRANSCRIPT_MAX_BYTES,
-    executablePath: env.CODEX_EXECUTABLE_PATH,
+    CODEX_EXECUTABLE_PATH: env.CODEX_EXECUTABLE_PATH,
+    CLAUDE_CODE_EXECUTABLE_PATH: env.CLAUDE_CODE_EXECUTABLE_PATH,
     mcpRelay,
+    mcpServerCommand: createAgentHubMcpServerCommand(),
   });
   const logger = createLogger({
     bindings: {
@@ -119,7 +336,7 @@ export async function startDaemon(): Promise<void> {
       service: "daemon",
     },
   });
-  const abortControllers = new Map<RunId, AbortController>();
+  const activeRuns = new Map<RunId, ActiveRun>();
   const pendingArtifactUploads = new Map<
     string,
     PendingDaemonRequest<AgentHubUploadArtifactToolResult>
@@ -151,7 +368,12 @@ export async function startDaemon(): Promise<void> {
     }
 
     if (message.type === "run.cancel") {
-      abortControllers.get(message.runId)?.abort();
+      const activeRun = activeRuns.get(message.runId);
+
+      if (activeRun !== undefined) {
+        activeRun.abortReason = "cancelled";
+        activeRun.abortController.abort("cancelled");
+      }
       logger.info({ runId: message.runId }, "Run cancellation requested");
       return;
     }
@@ -291,6 +513,79 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
+    if (message.type === "project.clone") {
+      void (async () => {
+        try {
+          const result = await handleProjectClone({ env, message });
+          send(ws, {
+            type: "project.clone.completed",
+            requestId: message.requestId,
+            conversationId: message.conversationId,
+            baseRepoPath: result.baseRepoPath,
+            defaultBranch: result.defaultBranch,
+            baseHead: result.baseHead,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.info(
+            {
+              baseRepoPath: result.baseRepoPath,
+              conversationId: message.conversationId,
+            },
+            "Project cloned",
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          send(ws, {
+            type: "project.clone.failed",
+            requestId: message.requestId,
+            conversationId: message.conversationId,
+            reason,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, conversationId: message.conversationId },
+            "Project clone failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.change.merge") {
+      void (async () => {
+        try {
+          await handleProjectChangeMerge({ env, message });
+          send(ws, {
+            type: "project.change.merge.ack",
+            requestId: message.requestId,
+            changeId: message.changeId,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.info(
+            {
+              branchName: message.branchName,
+              changeId: message.changeId,
+            },
+            "Project change merged",
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          send(ws, {
+            type: "project.change.merge.rejected",
+            requestId: message.requestId,
+            changeId: message.changeId,
+            reason,
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, changeId: message.changeId },
+            "Project change merge failed",
+          );
+        }
+      })();
+      return;
+    }
+
     if (message.type === "agent.create") {
       void (async () => {
         try {
@@ -347,170 +642,266 @@ export async function startDaemon(): Promise<void> {
       return;
     }
 
-    if (abortControllers.has(message.run.id)) {
-      return;
-    }
+    void (async () => {
+      const preemptRunIds = message.preemptRunIds ?? [];
 
-    try {
-      assertPathInsideWorkspace(
-        env.AGENTHUB_WORKSPACE_ROOT,
-        message.workspacePath,
-      );
-    } catch (error) {
+      for (const runId of preemptRunIds) {
+        const activeRun = activeRuns.get(runId);
+
+        if (activeRun === undefined) {
+          continue;
+        }
+
+        activeRun.abortReason = "interrupted";
+        activeRun.abortController.abort("interrupted");
+        logger.info(
+          { newRunId: message.run.id, preemptedRunId: runId },
+          "Preempting active run before accepting new run",
+        );
+
+        await Promise.race([
+          activeRun.done,
+          new Promise((resolve) => setTimeout(resolve, runPreemptTimeoutMs)),
+        ]);
+      }
+
+      if (activeRuns.has(message.run.id)) {
+        return;
+      }
+
+      try {
+        assertPathInsideWorkspace(
+          env.AGENTHUB_WORKSPACE_ROOT,
+          message.workspacePath,
+        );
+        await prepareProjectWorktree({ env, message });
+      } catch (error) {
+        send(ws, {
+          type: "run.rejected",
+          runId: message.run.id,
+          reason: error instanceof Error ? error.message : String(error),
+          sentAt: nowIsoDateTime(),
+        });
+        logger.warn(
+          { runId: message.run.id, workspacePath: message.workspacePath },
+          "Rejected run because workspace path is outside daemon root",
+        );
+        return;
+      }
+
+      const abortController = new AbortController();
+      let resolveDone!: () => void;
+      const done = new Promise<void>((resolve) => {
+        resolveDone = resolve;
+      });
+      const activeRun: ActiveRun = {
+        abortController,
+        done,
+        resolveDone,
+      };
+      activeRuns.set(message.run.id, activeRun);
+
+      let adapter;
+
+      try {
+        adapter = getRuntimeAdapter({
+          adapters,
+          runtimeKind: message.runtime.runtimeKind,
+        });
+      } catch (error) {
+        send(ws, {
+          type: "run.rejected",
+          runId: message.run.id,
+          reason: error instanceof Error ? error.message : String(error),
+          sentAt: nowIsoDateTime(),
+        });
+        logger.warn(
+          {
+            err: error,
+            runId: message.run.id,
+            runtimeKind: message.runtime.runtimeKind,
+          },
+          "Rejected run because runtime adapter is unavailable",
+        );
+        activeRuns.delete(message.run.id);
+        activeRun.resolveDone();
+        return;
+      }
+
       send(ws, {
-        type: "run.rejected",
+        type: "run.accepted",
         runId: message.run.id,
-        reason: error instanceof Error ? error.message : String(error),
         sentAt: nowIsoDateTime(),
       });
-      logger.warn(
+      logger.info(
         { runId: message.run.id, workspacePath: message.workspacePath },
-        "Rejected run because workspace path is outside daemon root",
+        "Accepted daemon run",
       );
-      return;
-    }
 
-    const abortController = new AbortController();
-    abortControllers.set(message.run.id, abortController);
-    send(ws, {
-      type: "run.accepted",
-      runId: message.run.id,
-      sentAt: nowIsoDateTime(),
-    });
-    logger.info(
-      { runId: message.run.id, workspacePath: message.workspacePath },
-      "Accepted daemon run",
-    );
+      const uploadArtifact = (
+        upload: AgentRunArtifactUpload,
+      ): Promise<AgentHubUploadArtifactToolResult> => {
+        const uploadId = randomUUID();
 
-    const uploadArtifact = (
-      upload: AgentRunArtifactUpload,
-    ): Promise<AgentHubUploadArtifactToolResult> => {
-      const uploadId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingArtifactUploads.delete(uploadId);
+            reject(new Error("Artifact upload timed out."));
+          }, artifactUploadTimeoutMs);
 
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingArtifactUploads.delete(uploadId);
-          reject(new Error("Artifact upload timed out."));
-        }, artifactUploadTimeoutMs);
-
-        pendingArtifactUploads.set(uploadId, {
-          resolve,
-          reject,
-          timer,
+          pendingArtifactUploads.set(uploadId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "artifact.upload",
+            uploadId,
+            runId: message.run.id,
+            goalId: upload.goalId,
+            taskIndex: upload.taskIndex,
+            messageTarget: upload.messageTarget,
+            kind: upload.kind,
+            title: upload.title,
+            filename: upload.filename,
+            entrypoint: upload.entrypoint,
+            files: upload.files,
+            sizeBytes: upload.sizeBytes,
+            sourcePath: upload.sourcePath,
+            contentBase64: upload.contentBase64,
+            sentAt: nowIsoDateTime(),
+          });
         });
-        send(ws, {
-          type: "artifact.upload",
-          uploadId,
-          runId: message.run.id,
-          goalId: upload.goalId,
-          taskIndex: upload.taskIndex,
-          messageTarget: upload.messageTarget,
-          title: upload.title,
-          filename: upload.filename,
-          sizeBytes: upload.sizeBytes,
-          sourcePath: upload.sourcePath,
-          contentBase64: upload.contentBase64,
-          sentAt: nowIsoDateTime(),
+      };
+
+      const callAgentHubMcpTool = (
+        call: AgentHubMcpToolCall,
+      ): Promise<AgentHubMcpToolResult> => {
+        const requestId = randomUUID();
+
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingMcpToolCalls.delete(requestId);
+            reject(new Error("AgentHub MCP tool call timed out."));
+          }, mcpToolCallTimeoutMs);
+
+          pendingMcpToolCalls.set(requestId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "agenthub.tool.call",
+            requestId,
+            call,
+            sentAt: nowIsoDateTime(),
+          });
         });
-      });
-    };
+      };
 
-    const callAgentHubMcpTool = (
-      call: AgentHubMcpToolCall,
-    ): Promise<AgentHubMcpToolResult> => {
-      const requestId = randomUUID();
+      const deployStaticSite = (
+        deployment: AgentRunStaticSiteDeploy,
+      ): Promise<AgentHubDeployStaticSiteToolResult> => {
+        const deploymentId = randomUUID();
 
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingMcpToolCalls.delete(requestId);
-          reject(new Error("AgentHub MCP tool call timed out."));
-        }, mcpToolCallTimeoutMs);
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingStaticSiteDeployments.delete(deploymentId);
+            reject(new Error("Static site deployment timed out."));
+          }, artifactUploadTimeoutMs);
 
-        pendingMcpToolCalls.set(requestId, {
-          resolve,
-          reject,
-          timer,
+          pendingStaticSiteDeployments.set(deploymentId, {
+            resolve,
+            reject,
+            timer,
+          });
+          send(ws, {
+            type: "static_site.deploy",
+            deploymentId,
+            runId: message.run.id,
+            goalId: deployment.goalId,
+            taskIndex: deployment.taskIndex,
+            title: deployment.title,
+            entrypoint: deployment.entrypoint,
+            files: deployment.files,
+            sentAt: nowIsoDateTime(),
+          });
         });
-        send(ws, {
-          type: "agenthub.tool.call",
-          requestId,
-          call,
-          sentAt: nowIsoDateTime(),
-        });
-      });
-    };
+      };
 
-    const deployStaticSite = (
-      deployment: AgentRunStaticSiteDeploy,
-    ): Promise<AgentHubDeployStaticSiteToolResult> => {
-      const deploymentId = randomUUID();
-
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingStaticSiteDeployments.delete(deploymentId);
-          reject(new Error("Static site deployment timed out."));
-        }, artifactUploadTimeoutMs);
-
-        pendingStaticSiteDeployments.set(deploymentId, {
-          resolve,
-          reject,
-          timer,
-        });
-        send(ws, {
-          type: "static_site.deploy",
-          deploymentId,
-          runId: message.run.id,
-          goalId: deployment.goalId,
-          taskIndex: deployment.taskIndex,
-          title: deployment.title,
-          entrypoint: deployment.entrypoint,
-          files: deployment.files,
-          sentAt: nowIsoDateTime(),
-        });
-      });
-    };
-
-    void (async () => {
-      try {
-        for await (const event of adapter.run({
-          run: message.run,
-          prompt: message.prompt,
-          contextCompression: message.contextCompression,
-          agentInstructions: message.agentInstructions,
-          workspacePath: message.workspacePath,
-          runtime: message.runtime,
-          agentHubMcpTools: message.agentHubMcpTools,
-          agentHubMcpGoals: message.agentHubMcpGoals,
-          uploadArtifact,
-          deployStaticSite,
-          callAgentHubMcpTool,
-          abortSignal: abortController.signal,
-        })) {
+      void (async () => {
+        let completedStatus: string | undefined;
+        try {
+          for await (const event of adapter.run({
+            run: message.run,
+            prompt: message.prompt,
+            contextCompression: message.contextCompression,
+            agentInstructions: message.agentInstructions,
+            workspacePath: message.workspacePath,
+            memoryWorkspacePath: message.memoryWorkspacePath,
+            runtime: message.runtime,
+            agentHubMcpTools: message.agentHubMcpTools,
+            agentHubMcpGoals: message.agentHubMcpGoals,
+            uploadArtifact,
+            deployStaticSite,
+            callAgentHubMcpTool,
+            abortSignal: abortController.signal,
+          })) {
+            if (event.type === "run.completed") {
+              completedStatus = event.status;
+            }
+            send(ws, {
+              type: "run.event",
+              runId: message.run.id,
+              event,
+              sentAt: nowIsoDateTime(),
+            });
+          }
+        } catch (error) {
+          logger.error({ err: error, runId: message.run.id }, "Daemon run failed");
           send(ws, {
             type: "run.event",
             runId: message.run.id,
-            event,
+            event: {
+              type: "run.completed",
+              runId: message.run.id,
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error),
+              createdAt: nowIsoDateTime(),
+            },
             sentAt: nowIsoDateTime(),
           });
+          completedStatus = "failed";
+        } finally {
+          if (completedStatus === "succeeded") {
+            try {
+              const change = await createProjectChangeIfNeeded({
+                env,
+                logger,
+                message,
+              });
+
+              if (change !== null) {
+                send(ws, {
+                  type: "project.change.created",
+                  requestId: randomUUID(),
+                  change: change.change,
+                  diff: change.diff,
+                  sentAt: nowIsoDateTime(),
+                });
+              }
+            } catch (error) {
+              logger.error(
+                { err: error, runId: message.run.id },
+                "Failed to create project change after run",
+              );
+            }
+          }
+          activeRun.resolveDone();
+          activeRuns.delete(message.run.id);
+          logger.info({ runId: message.run.id }, "Daemon run finished");
         }
-      } catch (error) {
-        logger.error({ err: error, runId: message.run.id }, "Daemon run failed");
-        send(ws, {
-          type: "run.event",
-          runId: message.run.id,
-          event: {
-            type: "run.completed",
-            runId: message.run.id,
-            status: "failed",
-            error: error instanceof Error ? error.message : String(error),
-            createdAt: nowIsoDateTime(),
-          },
-          sentAt: nowIsoDateTime(),
-        });
-      } finally {
-        abortControllers.delete(message.run.id);
-        logger.info({ runId: message.run.id }, "Daemon run finished");
-      }
+      })();
     })();
   };
 
@@ -523,18 +914,18 @@ export async function startDaemon(): Promise<void> {
       reconnectDelayMs = initialReconnectDelayMs;
       let runtimes: DaemonRuntime[] = [];
 
-      try {
-        runtimes = [
-          {
+      for (const adapter of Object.values(adapters)) {
+        try {
+          runtimes.push({
             ...(await adapter.detect()),
             daemonDeviceId: env.AGENTHUB_DEVICE_ID,
-          },
-        ];
-      } catch (error) {
-        logger.warn(
-          { err: error },
-          "Codex runtime detection failed",
-        );
+          });
+        } catch (error) {
+          logger.warn(
+            { err: error, runtimeKind: adapter.runtimeKind },
+            "Daemon runtime detection failed",
+          );
+        }
       }
 
       send(ws, {
@@ -550,7 +941,7 @@ export async function startDaemon(): Promise<void> {
       send(ws, {
         type: "daemon.heartbeat",
         deviceId: env.AGENTHUB_DEVICE_ID,
-        runningRunIds: Array.from(abortControllers.keys()),
+        runningRunIds: Array.from(activeRuns.keys()),
         sentAt: nowIsoDateTime(),
       });
     }, 10_000);
@@ -561,8 +952,9 @@ export async function startDaemon(): Promise<void> {
 
     ws.on("close", () => {
       clearInterval(heartbeat);
-      for (const abortController of abortControllers.values()) {
-        abortController.abort();
+      for (const activeRun of activeRuns.values()) {
+        activeRun.abortReason = "cancelled";
+        activeRun.abortController.abort("cancelled");
       }
       for (const [uploadId, pending] of pendingArtifactUploads) {
         clearTimeout(pending.timer);

@@ -5,6 +5,7 @@ import {
   agentRuntimeBindings,
   agents,
   agentWorkspaces,
+  conversationGoalTasks,
   conversationMessages,
   conversations,
   createDb,
@@ -30,7 +31,7 @@ import {
   listConversationsForUser,
   updateGroupConversation,
 } from "@agent-hub/server";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const runDbIntegrationTests = process.env.RUN_DB_INTEGRATION_TESTS === "true";
@@ -106,6 +107,7 @@ describeDb("conversation repository integration", () => {
 
     await db.insert(daemonDevices).values({
       id: daemonDeviceId,
+      name: daemonDeviceId,
       status: "online",
       createdAt: now,
       updatedAt: now,
@@ -765,7 +767,146 @@ describeDb("conversation repository integration", () => {
     });
     expect(task?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
     expect(messages?.map((message) => message.content)).toContain(
-      `@dudu 已创建任务：Write the report\nGoal ID: [${goalId}](/chat/${group.conversation.id}/goals/${goalId})\n[Task #0](/chat/${group.conversation.id}/goals/${goalId}/tasks/0)`,
+      `@dudu 已创建任务：\nGoal: [Agent report](/chat/${group.conversation.id}/goals/${goalId})\n[Task #0 Write the report](/chat/${group.conversation.id}/goals/${goalId}/tasks/0)`,
     );
+  });
+
+  it("preempts an active assigned task run without interrupting the handed off task", async () => {
+    const ownerUserId = await createUser(
+      `conversation-task-handoff-owner-${randomUUID()}@example.com`,
+    );
+    const orchestratorAgentId = await createAgent(ownerUserId, "orch");
+    const assigneeAgentId = await createAgent(ownerUserId, "dudu");
+    await markAgentReady(orchestratorAgentId);
+    await markAgentReady(assigneeAgentId);
+    const group = await createGroupConversation(db, {
+      ownerUserId,
+      title: "Task handoff",
+      agentIds: [orchestratorAgentId, assigneeAgentId],
+      orchestratorAgentId,
+    });
+
+    expect(group.status).toBe("created");
+    if (group.status !== "created") {
+      return;
+    }
+
+    conversationIds.push(group.conversation.id);
+
+    const orchestratorJob = createJob({
+      agentId: orchestratorAgentId,
+      conversationId: group.conversation.id,
+    });
+    runIds.push(orchestratorJob.run.id);
+    await createUserMessageAndRuns(db, {
+      ownerUserId,
+      conversationId: group.conversation.id,
+      jobs: [orchestratorJob],
+      userMessageContent: "make a report",
+    });
+
+    const goalResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: orchestratorJob.run.id,
+      toolCallId: "tool_create_goal",
+      name: "create_goal",
+      input: {
+        title: "Agent report",
+      },
+      createdAt: "2026-05-26T00:00:00.500Z",
+    });
+    const goalId = goalResult.toolResult !== undefined && "goal" in goalResult.toolResult
+      ? goalResult.toolResult.goal.id
+      : undefined;
+    expect(goalId).toBeDefined();
+    if (goalId === undefined) {
+      return;
+    }
+
+    const createTaskResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: orchestratorJob.run.id,
+      toolCallId: "tool_create_task",
+      name: "create_task",
+      input: {
+        goalId,
+        title: "Write the report",
+        assigneeAgentId,
+      },
+      createdAt: "2026-05-26T00:00:01.000Z",
+    });
+    const oldTaskRun = createTaskResult.dispatchJobs[0];
+    expect(oldTaskRun).toBeDefined();
+    if (oldTaskRun === undefined) {
+      return;
+    }
+    runIds.push(oldTaskRun.run.id);
+
+    await appendRunEvent(db, {
+      type: "run.started",
+      runId: oldTaskRun.run.id,
+      workspacePath: "/workspace",
+      createdAt: "2026-05-26T00:00:02.000Z",
+    });
+
+    const mentionResult = await appendRunEvent(db, {
+      type: "agenthub.tool.call",
+      runId: orchestratorJob.run.id,
+      toolCallId: "tool_mention_assignee",
+      name: "send_message",
+      input: { content: "@dudu continue the assigned task" },
+      createdAt: "2026-05-26T00:00:03.000Z",
+    });
+    const handoffRun = mentionResult.dispatchJobs[0];
+    expect(handoffRun).toBeDefined();
+    if (handoffRun === undefined) {
+      return;
+    }
+    runIds.push(handoffRun.run.id);
+
+    const [oldRunRow] = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.id, oldTaskRun.run.id))
+      .limit(1);
+    expect(oldRunRow.status).toBe("interrupted");
+    expect(oldRunRow.preemptedByRunId).toBe(handoffRun.run.id);
+
+    const oldRunEvents = await db
+      .select()
+      .from(runEvents)
+      .where(eq(runEvents.runId, oldTaskRun.run.id));
+    expect(oldRunEvents.some((event) => event.eventType === "run.completed")).toBe(true);
+
+    const [taskAfterHandoff] = await db
+      .select()
+      .from(conversationGoalTasks)
+      .where(eq(conversationGoalTasks.goalId, goalId))
+      .limit(1);
+    expect(taskAfterHandoff.assigneeRunId).toBe(handoffRun.run.id);
+    expect(taskAfterHandoff.status).toBe("running");
+    expect(handoffRun.prompt).toContain("<agenthub_assigned_task>");
+    expect(handoffRun.prompt).toContain("You are continuing the same assigned task");
+    expect(handoffRun.prompt).toContain(`Goal ID: ${goalId}`);
+    expect(handoffRun.prompt).toContain("Task Index: 0");
+    expect(handoffRun.agentHubMcpTools).toContain("complete_task");
+    expect(handoffRun.agentHubMcpTools).toContain("upload_artifact");
+    expect(handoffRun.agentHubMcpTools).toContain("download_artifact");
+
+    await appendRunEvent(db, {
+      type: "run.completed",
+      runId: oldTaskRun.run.id,
+      status: "interrupted",
+      error: "Daemon reported interruption after server preemption.",
+      createdAt: "2026-05-26T00:00:04.000Z",
+    });
+
+    const [taskAfterDuplicateInterrupt] = await db
+      .select()
+      .from(conversationGoalTasks)
+      .where(eq(conversationGoalTasks.id, taskAfterHandoff.id))
+      .limit(1);
+    expect(taskAfterDuplicateInterrupt.assigneeRunId).toBe(handoffRun.run.id);
+    expect(taskAfterDuplicateInterrupt.status).toBe("running");
   });
 });

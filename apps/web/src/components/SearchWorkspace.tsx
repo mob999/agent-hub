@@ -56,17 +56,15 @@ function highlightText(text: string, query: string): ReactNode {
   )
 }
 
-function resultCountLabel(results: SearchConversationsResponse | null): string {
-  if (results === null) {
-    return 'Search chats, channels, and DMs'
-  }
-
-  return `${results.totalCount} results`
-}
-
 function conversationKindLabel(hit: ConversationSearchHit): string {
-  return hit.conversationType === 'group' ? 'Channel' : 'Direct message'
+  return hit.conversationType === 'group' ? 'Group' : 'Direct'
 }
+
+const filterSelectClass =
+  'h-9 rounded-full border border-[#dde1e6] bg-white py-0 pl-3 pr-9 text-xs font-semibold uppercase leading-9 tracking-normal text-[#3f4551] shadow-[0_1px_1px_rgba(0,0,0,0.03)] outline-none transition-colors hover:border-[#c7ced8] focus:border-[#0f62fe] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--cds-focus)]'
+
+const resultSectionTitleClass =
+  'text-xs font-semibold uppercase tracking-wide text-[#69707d]'
 
 export function SearchWorkspace({
   agents,
@@ -113,20 +111,33 @@ export function SearchWorkspace({
 
   return (
     <section
-      className="grid h-screen min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--cds-background)]"
+      className="grid h-full min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa]"
       aria-label="Search chats"
     >
-      <header className="border-b border-[var(--cds-border-subtle-01)] px-6 py-4 max-[671px]:px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-02)]">
-            <Search size={18} />
-          </span>
-          <label className="flex min-w-0 flex-1 items-center gap-3 max-[671px]:items-start max-[671px]:gap-2 max-[671px]:flex-col">
-            <span className="shrink-0 text-sm font-semibold text-[var(--cds-text-secondary)]">Search</span>
+      <header className="border-b border-[#eef0f3] bg-white px-6 py-5 max-[671px]:px-4">
+        <div className="grid min-w-0 gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#d8dee6] bg-[#f7f8fa] text-[#3f4551] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+              <Search size={18} />
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-semibold leading-7 text-[#161616]">Search</h1>
+              <p className="truncate text-sm leading-5 text-[#69707d]">
+                Find messages, groups, direct chats, and agent replies.
+              </p>
+            </div>
+          </div>
+          <label className="relative grid min-w-0" htmlFor="workspace-search-input">
+            <span className="sr-only">Search messages</span>
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[#69707d]"
+              size={18}
+            />
             <input
               ref={inputRef}
-              className="min-w-0 flex-1 self-stretch border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] px-3 py-2 text-base text-[var(--cds-text-primary)] outline-none focus:border-[var(--cds-focus)]"
-              placeholder="Search channels, DMs, messages..."
+              id="workspace-search-input"
+              className="h-11 min-w-0 rounded-2xl border border-[#d8dee6] bg-white py-2 pl-10 pr-3 text-base leading-6 text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.05)] outline-none placeholder:text-[#8d95a3] focus:border-[#b9c3cf] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--cds-focus)]"
+              placeholder="Search messages, groups, or agents"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
             />
@@ -134,11 +145,12 @@ export function SearchWorkspace({
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-[var(--cds-border-subtle-01)] px-6 py-3 max-[671px]:px-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] bg-white px-6 py-3 max-[671px]:px-4">
         <select
-          className="min-h-10 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-3 text-sm text-[var(--cds-text-primary)]"
+          className={filterSelectClass}
           value={selectedSender ?? ''}
           onChange={(event) => onSenderChange(event.target.value || undefined)}
+          aria-label="Filter by sender"
         >
           {senderOptions.map((option) => (
             <option key={option.value || 'any'} value={option.value}>
@@ -147,9 +159,10 @@ export function SearchWorkspace({
           ))}
         </select>
         <select
-          className="min-h-10 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-3 text-sm text-[var(--cds-text-primary)]"
+          className={filterSelectClass}
           value={selectedChannelId ?? ''}
           onChange={(event) => onChannelChange(event.target.value || undefined)}
+          aria-label="Filter by group"
         >
           <option value="">ANY GROUP</option>
           {channelOptions.map((option) => (
@@ -159,78 +172,106 @@ export function SearchWorkspace({
           ))}
         </select>
         <select
-          className="min-h-10 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-3 text-sm text-[var(--cds-text-primary)]"
+          className={filterSelectClass}
           value={time}
           onChange={(event) => onTimeChange(event.target.value as SearchTimeFilter)}
+          aria-label="Filter by time"
         >
           <option value="any">ANY TIME</option>
-          <option value="24h">Last 24 hours</option>
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
+          <option value="24h">LAST 24 HOURS</option>
+          <option value="7d">LAST 7 DAYS</option>
+          <option value="30d">LAST 30 DAYS</option>
         </select>
-        <div className="ml-auto inline-flex overflow-hidden border border-[var(--cds-border-strong-01)]">
+        <div className="ml-auto inline-flex h-9 overflow-hidden rounded-full bg-[#eef0f4] p-0.5" role="group" aria-label="Sort results">
           {(['relevant', 'recent'] as const).map((value) => {
             const selected = sort === value
 
             return (
               <button
-                className={`min-h-10 min-w-22 px-3 text-sm font-semibold ${
+                className={`min-w-20 cursor-pointer rounded-full border-0 px-3 text-sm font-semibold capitalize transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selected
-                    ? 'bg-[var(--cds-layer-selected-02)] text-[var(--cds-text-primary)]'
-                    : 'bg-[var(--cds-layer-01)] text-[var(--cds-text-secondary)] hover:bg-[var(--cds-layer-hover-01)]'
+                    ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                    : 'bg-transparent text-[#69707d] hover:text-[#161616]'
                 }`}
                 key={value}
                 type="button"
+                aria-pressed={selected}
                 onClick={() => onSortChange(value)}
               >
-                {value === 'relevant' ? 'Relevant' : 'Recent'}
+                {value}
               </button>
             )
           })}
         </div>
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-6 py-4 max-[671px]:px-4">
-        <div className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--cds-text-secondary)]">
-          {isLoading ? 'Searching...' : resultCountLabel(results)}
+      <div className="min-h-0 overflow-y-auto px-6 py-5 max-[671px]:px-4">
+        <div className="mb-4 flex min-h-6 items-center justify-between gap-3">
+          <div className={resultSectionTitleClass}>
+            {isLoading
+              ? 'Searching'
+              : results === null
+                ? 'Ready to search'
+                : `${results.totalCount} ${results.totalCount === 1 ? 'result' : 'results'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
+          </div>
+          {query.trim().length > 0 && (
+            <div className="truncate text-xs text-[#69707d]">
+              Press Enter in a result to open it.
+            </div>
+          )}
         </div>
         {error && (
-          <div className="mb-4 border border-[var(--cds-support-error)] bg-[var(--cds-layer-01)] px-4 py-3 text-sm text-[var(--cds-text-error)]">
+          <div className="mb-4 rounded-xl border border-[#ffd7d9] bg-[#fff1f1] px-4 py-3 text-sm text-[var(--cds-text-error)]">
             {error}
           </div>
         )}
         {!isLoading && query.trim().length === 0 && (
-          <div className="grid min-h-80 place-items-center text-center text-[var(--cds-text-secondary)]">
-            Start typing to search active channels, DMs, and messages.
+          <div className="grid min-h-80 place-items-center text-center">
+            <div className="grid max-w-md justify-items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-md border border-[#d8dee6] bg-white text-[#69707d] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+                <Search size={22} />
+              </span>
+              <div className="grid gap-1">
+                <h2 className="text-base font-semibold text-[#161616]">Search across conversations</h2>
+                <p className="text-sm leading-5 text-[#69707d]">
+                  Type a keyword to find matching messages, groups, direct chats, and agent replies.
+                </p>
+              </div>
+            </div>
           </div>
         )}
         {!isLoading && query.trim().length > 0 && results !== null && results.totalCount === 0 && (
-          <div className="grid min-h-80 place-items-center text-center text-[var(--cds-text-secondary)]">
-            No matches found for this search.
+          <div className="grid min-h-80 place-items-center text-center">
+            <div className="grid max-w-md gap-1">
+              <h2 className="text-base font-semibold text-[#161616]">No matching messages</h2>
+              <p className="text-sm leading-5 text-[#69707d]">
+                Try a shorter keyword, choose ANY GROUP, or widen the sender and time filters.
+              </p>
+            </div>
           </div>
         )}
         {results !== null && results.conversationHits.length > 0 && (
           <section className="mb-6">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--cds-text-secondary)]">
-              Channels &amp; DMs
+            <div className={`mb-2 ${resultSectionTitleClass}`}>
+              Conversations
             </div>
             <div className="grid gap-2">
               {results.conversationHits.map((hit) => (
                 <button
-                  className="grid gap-1 border border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] px-4 py-3 text-left hover:bg-[var(--cds-layer-hover-01)]"
+                  className="grid cursor-pointer gap-1 rounded-xl border border-[#e1e5ea] bg-white px-4 py-3 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-[#c7ced8] hover:bg-[#f9fafb] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   key={hit.conversationId}
                   type="button"
                   onClick={() => onOpenConversation(hit.conversationId)}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-[var(--cds-text-primary)]">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-[#161616]">
                       {highlightText(hit.title, query)}
                     </span>
-                    <span className="border border-[var(--cds-border-subtle-01)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--cds-text-secondary)]">
+                    <span className="shrink-0 rounded-md border border-[#dde1e6] bg-[#f7f8fa] px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-4 text-[#69707d]">
                       {conversationKindLabel(hit)}
                     </span>
                   </div>
-                  <div className="truncate text-sm text-[var(--cds-text-secondary)]">
+                  <div className="truncate text-sm leading-5 text-[#69707d]">
                     {highlightText(hit.subtitle, query)}
                   </div>
                 </button>
@@ -240,23 +281,23 @@ export function SearchWorkspace({
         )}
         {results !== null && results.messageHits.length > 0 && (
           <section>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--cds-text-secondary)]">
+            <div className={`mb-2 ${resultSectionTitleClass}`}>
               Messages
             </div>
             <div className="grid gap-2">
               {results.messageHits.map((hit) => (
                 <button
-                  className="grid gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] px-4 py-3 text-left hover:border-[var(--cds-border-strong-01)] hover:bg-[var(--cds-layer-hover-01)]"
+                  className="grid cursor-pointer gap-2 rounded-xl border border-[#e1e5ea] bg-white px-4 py-3 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-[#c7ced8] hover:bg-[#f9fafb] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   key={hit.messageId}
                   type="button"
                   onClick={() => onOpenMessage(hit.conversationId, hit.messageId)}
                 >
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--cds-text-secondary)]">
-                    <span className="font-semibold text-[var(--cds-text-primary)]">{hit.senderLabel}</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-[#69707d]">
+                    <span className="font-semibold text-[#161616]">{hit.senderLabel}</span>
                     <span>in {hit.conversationLabel}</span>
                     <span>{formatTime(hit.createdAt)}</span>
                   </div>
-                  <div className="text-sm leading-5 text-[var(--cds-text-primary)]">
+                  <div className="line-clamp-3 text-sm leading-5 text-[#161616]">
                     {highlightText(hit.snippet, query)}
                   </div>
                 </button>

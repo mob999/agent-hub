@@ -1,0 +1,75 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch or ref to fast-forward main from"
+        required: true
+        default: "dev"
+        type: string
+      run_checks:
+        description: "Run pnpm check before promoting"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: promote-production-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      SOURCE_REF: ${{ inputs.source_ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_ref }}
+
+      - name: Setup pnpm
+        if: ${{ inputs.run_checks }}
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        if: ${{ inputs.run_checks }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: ${{ inputs.run_checks }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Run checks
+        if: ${{ inputs.run_checks }}
+        run: pnpm check
+
+      - name: Fast-forward main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          SOURCE_SHA="$(git rev-parse HEAD)"
+
+          if ! git merge-base --is-ancestor origin/main "${SOURCE_SHA}"; then
+            echo "main cannot be fast-forwarded to ${SOURCE_REF}. Merge or rebase ${SOURCE_REF} onto main first."
+            exit 1
+          fi
+
+          git checkout main
+          git reset --hard origin/main
+          git merge --ff-only "${SOURCE_SHA}"
+          git push origin HEAD:main

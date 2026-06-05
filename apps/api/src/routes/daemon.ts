@@ -100,7 +100,7 @@ export function createDaemonRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     parseDaemonCommandPlatform,
     normalizeDaemonDeviceName,
     daemonDeviceCommandResponse,
-    buildDaemonSourceCommand,
+    buildDaemonCommand,
     daemonDeviceIdPattern,
   } = context.services;
 
@@ -331,7 +331,21 @@ export function createDaemonRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
   });
 
   app.use("/daemon/registration-command", requireAuth);
-  openApiRoute(app, "post", "/daemon/registration-command", (c) => {
+  openApiRoute(app, "post", "/daemon/registration-command", async (c) => {
+    const user = c.get("user");
+
+    if (!user) {
+      return c.json(
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Authentication required.",
+          },
+        },
+        401,
+      );
+    }
+
     const platform = parseDaemonCommandPlatform(c.req.query("platform"));
     const requestedDeviceId = c.req.query("deviceId")?.trim();
 
@@ -351,18 +365,45 @@ export function createDaemonRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     }
 
     const deviceId = requestedDeviceId ?? `device-${randomUUID().slice(0, 8)}`;
+    const shell = platform === "windows" ? "powershell" : "sh";
+    const device = requestedDeviceId === undefined
+      ? await createDaemonDeviceForUser(c.get("db"), {
+          id: deviceId,
+          name: deviceId,
+          ownerUserId: user.id,
+          registrationShell: shell,
+        })
+      : await getDaemonDeviceForUser(c.get("db"), {
+          deviceId,
+          ownerUserId: user.id,
+        }) ?? await createDaemonDeviceForUser(c.get("db"), {
+          id: deviceId,
+          name: deviceId,
+          ownerUserId: user.id,
+          registrationShell: shell,
+        });
     const gatewayUrl = env.AGENTHUB_DAEMON_GATEWAY_URL;
 
     return c.json({
-      command: buildDaemonSourceCommand({
+      command: buildDaemonCommand({
         deviceId,
         gatewayUrl,
-        token: env.AGENTHUB_DAEMON_TOKEN,
         platform,
       }),
+      device: {
+        id: device.id,
+        ownerUserId: device.ownerUserId ?? undefined,
+        name: device.name,
+        status: device.status,
+        registrationShell: device.registrationShell ?? undefined,
+        lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+        createdAt: device.createdAt.toISOString(),
+        updatedAt: device.updatedAt.toISOString(),
+        deletedAt: device.deletedAt?.toISOString(),
+      },
       deviceId,
       gatewayUrl,
-      shell: platform === "windows" ? "powershell" : "sh",
+      shell,
     });
   });
 

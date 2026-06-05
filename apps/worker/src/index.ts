@@ -32,6 +32,7 @@ import {
   ensureProjectCloneQueueGroup,
   ensureRunQueueGroup,
   getArtifactActionAssignment,
+  getActiveDaemonDeviceById,
   getConversationForUser,
   getRunById,
   markConversationArtifactActionRunning,
@@ -52,6 +53,7 @@ import {
   updateProjectChangeStatus,
   upsertDaemonRuntime,
   upsertDaemonDevice,
+  verifyDaemonDeviceToken,
 } from "@agent-hub/server";
 
 import { DaemonGateway } from "./daemon/gateway.js";
@@ -65,6 +67,20 @@ const logger = createLogger({
     service: "worker",
   },
 });
+
+function requireDaemonTokenSecret(): string {
+  if (env.AGENTHUB_DAEMON_TOKEN_SECRET !== undefined) {
+    return env.AGENTHUB_DAEMON_TOKEN_SECRET;
+  }
+
+  if (env.NODE_ENV !== "production") {
+    return env.AGENTHUB_DAEMON_TOKEN;
+  }
+
+  throw new Error("AGENTHUB_DAEMON_TOKEN_SECRET is required in production.");
+}
+
+const daemonTokenSecret = requireDaemonTokenSecret();
 
 async function publishConversationUpdated(input: {
   conversationId: string;
@@ -160,8 +176,23 @@ async function appendAgentHubToolResultEvent(input: {
 }
 
 const gateway = new DaemonGateway({
-  daemonToken: env.AGENTHUB_DAEMON_TOKEN,
   logger,
+  verifyDaemonToken: async ({ deviceId, token }) => {
+    if (env.NODE_ENV !== "production") {
+      return token === env.AGENTHUB_DAEMON_TOKEN;
+    }
+
+    const device = await getActiveDaemonDeviceById(db, { deviceId });
+    if (device === null) {
+      return false;
+    }
+
+    return verifyDaemonDeviceToken({
+      deviceId,
+      secret: daemonTokenSecret,
+      token,
+    });
+  },
   onDaemonConnected: async (deviceId, runtimes) => {
     await upsertDaemonDevice(db, {
       id: deviceId,

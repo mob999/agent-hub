@@ -257,6 +257,24 @@ export async function getDaemonDeviceForUser(
   return device ?? null;
 }
 
+export async function getActiveDaemonDeviceById(
+  db: Db,
+  input: { deviceId: string },
+) {
+  const [device] = await db
+    .select()
+    .from(daemonDevices)
+    .where(
+      and(
+        eq(daemonDevices.id, input.deviceId),
+        isNull(daemonDevices.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return device ?? null;
+}
+
 export async function updateDaemonDeviceForUser(
   db: Db,
   input: { deviceId: string; name: string; ownerUserId: string },

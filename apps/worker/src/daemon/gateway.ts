@@ -21,8 +21,11 @@ import type {
 import { WebSocket, WebSocketServer } from "ws";
 
 export interface DaemonGatewayOptions {
-  daemonToken: string;
   logger?: AgentHubLogger;
+  verifyDaemonToken(input: {
+    deviceId: DaemonDeviceId;
+    token: string;
+  }): boolean | Promise<boolean>;
   onDaemonConnected?(
     deviceId: DaemonDeviceId,
     runtimes: DaemonRuntime[],
@@ -122,34 +125,47 @@ export class DaemonGateway {
         }
 
         if (message.type === "daemon.hello") {
-          if (message.token !== this.#options.daemonToken) {
-            ws.close(1008, "Invalid daemon token");
-            return;
-          }
-
-          connection = {
-            deviceId: message.deviceId,
-            ws,
-            runningRunIds: new Set(),
-            lastSeenAt: nowIsoDateTime(),
-          };
-          this.#connections.set(message.deviceId, connection);
           void Promise.resolve(
-            this.#options.onDaemonConnected?.(message.deviceId, message.runtimes),
-          ).catch((error) => {
-            this.#options.logger?.error(
-              { err: toError(error), deviceId: message.deviceId },
-              "Failed to persist daemon connection state",
+            this.#options.verifyDaemonToken({
+              deviceId: message.deviceId,
+              token: message.token,
+            }),
+          ).then((accepted) => {
+            if (!accepted) {
+              ws.close(1008, "Invalid daemon token");
+              return;
+            }
+
+            connection = {
+              deviceId: message.deviceId,
+              ws,
+              runningRunIds: new Set(),
+              lastSeenAt: nowIsoDateTime(),
+            };
+            this.#connections.set(message.deviceId, connection);
+            void Promise.resolve(
+              this.#options.onDaemonConnected?.(message.deviceId, message.runtimes),
+            ).catch((error) => {
+              this.#options.logger?.error(
+                { err: toError(error), deviceId: message.deviceId },
+                "Failed to persist daemon connection state",
+              );
+            });
+            this.#options.logger?.info(
+              { deviceId: message.deviceId },
+              "Daemon connected",
             );
-          });
-          this.#options.logger?.info(
-            { deviceId: message.deviceId },
-            "Daemon connected",
-          );
-          send(ws, {
-            type: "daemon.hello.ack",
-            deviceId: message.deviceId,
-            serverTime: nowIsoDateTime(),
+            send(ws, {
+              type: "daemon.hello.ack",
+              deviceId: message.deviceId,
+              serverTime: nowIsoDateTime(),
+            });
+          }).catch((error) => {
+            this.#options.logger?.warn(
+              { err: toError(error), deviceId: message.deviceId },
+              "Daemon token verification failed",
+            );
+            ws.close(1008, "Invalid daemon token");
           });
           return;
         }

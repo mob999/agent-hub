@@ -101,7 +101,7 @@ describe("DaemonGateway", () => {
   it("accepts daemon hello and tracks the online device", async () => {
     const connectedDevices: string[] = [];
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onDaemonConnected: (deviceId, runtimes) => {
         connectedDevices.push(`${deviceId}:${runtimes[0]?.runtimeKind}`);
       },
@@ -127,9 +127,33 @@ describe("DaemonGateway", () => {
     ]);
   });
 
+  it("rejects daemon hello with an invalid token", async () => {
+    const gateway = new DaemonGateway({
+      verifyDaemonToken: (input) => input.token === token,
+      onRunEvent: () => undefined,
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+    ws = new WebSocket(listening.url);
+
+    await waitForOpen(ws);
+    ws.send(
+      JSON.stringify({
+        type: "daemon.hello",
+        deviceId: "local-dev",
+        token: "wrong-token",
+        runtimes: [],
+        sentAt: "2026-05-25T00:00:00.000Z",
+      }),
+    );
+
+    await new Promise<void>((resolve) => ws?.once("close", () => resolve()));
+    expect(gateway.listDevices()).toEqual([]);
+  });
+
   it("assigns runs to connected daemons and rejects offline assignment", async () => {
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
     });
     const listening = await createGatewayServer(gateway);
@@ -157,7 +181,7 @@ describe("DaemonGateway", () => {
   it("forwards daemon run events to the callback", async () => {
     const events: RunEvent[] = [];
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: (event) => events.push(event),
     });
     const listening = await createGatewayServer(gateway);
@@ -191,7 +215,7 @@ describe("DaemonGateway", () => {
 
   it("round-trips AgentHub MCP tool calls through the callback", async () => {
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
       onAgentHubToolCall: (message) => ({
         accepted: true,
@@ -238,7 +262,7 @@ describe("DaemonGateway", () => {
 
   it("acks persisted artifact uploads", async () => {
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
       onArtifactUpload: (message) => ({
         id: "artifact_1",
@@ -293,7 +317,7 @@ describe("DaemonGateway", () => {
 
   it("acks persisted static site deployments", async () => {
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
       onStaticSiteDeploy: (message) => ({
         id: message.deploymentId,
@@ -351,7 +375,7 @@ describe("DaemonGateway", () => {
   it("assigns memory append requests to connected daemons", async () => {
     const appended: string[] = [];
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
       onMemoryAppended: (message) => {
         appended.push(message.requestId);
@@ -416,7 +440,7 @@ describe("DaemonGateway", () => {
 
   it("provisions agents through a connected daemon", async () => {
     const gateway = new DaemonGateway({
-      daemonToken: token,
+      verifyDaemonToken: (input) => input.token === token,
       onRunEvent: () => undefined,
     });
     const listening = await createGatewayServer(gateway);
@@ -479,3 +503,4 @@ describe("DaemonGateway", () => {
     });
   });
 });
+

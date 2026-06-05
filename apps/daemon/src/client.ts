@@ -19,9 +19,9 @@ import type {
   ConversationProjectChange,
   RunId,
 } from "@agent-hub/core";
-import { createLogger } from "@agent-hub/server";
 import WebSocket from "ws";
 
+import { createDaemonLogger } from "./logger";
 import { appendMemory } from "./memory";
 import { AgentHubMcpRelay } from "./mcp/relay";
 import {
@@ -198,7 +198,7 @@ async function prepareProjectWorktree(input: {
 async function createProjectChangeIfNeeded(input: {
   env: ReturnType<typeof loadDaemonEnv>;
   message: Extract<DaemonServerMessage, { type: "run.assigned" }>;
-  logger: ReturnType<typeof createLogger>;
+  logger: ReturnType<typeof createDaemonLogger>;
 }): Promise<{ change: ConversationProjectChange; diff: string } | null> {
   const projectRun = input.message.projectRun;
 
@@ -330,7 +330,7 @@ export async function startDaemon(): Promise<void> {
     mcpRelay,
     mcpServerCommand: createAgentHubMcpServerCommand(),
   });
-  const logger = createLogger({
+  const logger = createDaemonLogger({
     bindings: {
       deviceId: env.AGENTHUB_DEVICE_ID,
       service: "daemon",

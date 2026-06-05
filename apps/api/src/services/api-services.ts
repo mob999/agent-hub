@@ -36,6 +36,7 @@ import {
   type RunnableAgent,
   type RunQueueJob,
   type UserMessageAttachmentUpload,
+  createDaemonDeviceToken,
   writeArtifactBuffer,
 } from "@agent-hub/server";
 
@@ -96,6 +97,71 @@ export function createApiServices(context: ApiContext) {
       "pnpm --filter @agent-hub/daemon dev",
     ].join("; ");
   }
+
+  function buildDaemonNpxCommand(input: {
+    deviceId: string;
+    gatewayUrl: string;
+    token: string;
+    platform: "windows" | "posix";
+  }): string {
+    const quote = input.platform === "windows" ? powerShellQuote : posixShellQuote;
+
+    return [
+      "npx",
+      "-y",
+      "@tavro/daemon@latest",
+      "connect",
+      "--gateway-url",
+      quote(input.gatewayUrl),
+      "--device-id",
+      quote(input.deviceId),
+      "--token",
+      quote(input.token),
+    ].join(" ");
+  }
+
+  function requireDaemonTokenSecret(): string {
+    if (env.AGENTHUB_DAEMON_TOKEN_SECRET !== undefined) {
+      return env.AGENTHUB_DAEMON_TOKEN_SECRET;
+    }
+
+    if (env.NODE_ENV !== "production") {
+      return env.AGENTHUB_DAEMON_TOKEN;
+    }
+
+    throw new Error("AGENTHUB_DAEMON_TOKEN_SECRET is required in production.");
+  }
+
+  function daemonTokenForDevice(deviceId: string): string {
+    if (env.NODE_ENV !== "production") {
+      return env.AGENTHUB_DAEMON_TOKEN;
+    }
+
+    return createDaemonDeviceToken({
+      deviceId,
+      secret: requireDaemonTokenSecret(),
+    });
+  }
+
+  function buildDaemonCommand(input: {
+    deviceId: string;
+    gatewayUrl: string;
+    platform: "windows" | "posix";
+  }): string {
+    const token = daemonTokenForDevice(input.deviceId);
+
+    if (env.NODE_ENV !== "production") {
+      return buildDaemonSourceCommand({
+        ...input,
+        token,
+      });
+    }
+
+    return buildDaemonNpxCommand({
+      ...input,
+      token,
+    });
+  }
   
   function parseDaemonCommandPlatform(value: string | undefined): "windows" | "posix" {
     return value === "posix" ? "posix" : "windows";
@@ -127,10 +193,9 @@ export function createApiServices(context: ApiContext) {
     const gatewayUrl = env.AGENTHUB_DAEMON_GATEWAY_URL;
   
     return {
-      command: buildDaemonSourceCommand({
+      command: buildDaemonCommand({
         deviceId: input.device.id,
         gatewayUrl,
-        token: env.AGENTHUB_DAEMON_TOKEN,
         platform: input.platform,
       }),
       device: {
@@ -1267,6 +1332,8 @@ export function createApiServices(context: ApiContext) {
     deploymentResponse,
     getDeploymentRequestedPath,
     buildDaemonSourceCommand,
+    buildDaemonCommand,
+    buildDaemonNpxCommand,
     daemonDeviceIdPattern,
     memoryDatePattern,
     projectChangeStatuses,

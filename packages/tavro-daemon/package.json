@@ -16,7 +16,7 @@
   "scripts": {
     "build": "pnpm --filter @agent-hub/daemon build && tsup",
     "pack:dry-run": "npm pack --dry-run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "pnpm --filter @agent-hub/daemon build && tsc --noEmit"
   },
   "type": "module",
   "dependencies": {

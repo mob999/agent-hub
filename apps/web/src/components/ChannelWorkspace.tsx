@@ -713,6 +713,18 @@ export function ChannelWorkspace({
         : [...current, goalId],
     )
   }
+  const openGoalDetailRoute = (goalId: string, taskIndex?: number | null) => {
+    if (activeConversation?.id !== undefined) {
+      setWorkspacePanel({ conversationId: activeConversation.id, view: 'tasks' })
+    }
+    setTaskAggregationMode('goal')
+    setExpandedGoalIds((current) =>
+      current.includes(goalId)
+        ? current
+        : [...current, goalId],
+    )
+    openGoalRoute(goalId, taskIndex)
+  }
 
   const showFiles =
     editorConversationId !== null &&
@@ -803,7 +815,7 @@ export function ChannelWorkspace({
     }, 0)
 
     return () => window.clearTimeout(timeout)
-  }, [activeConversation?.id, focusedGoalId])
+  }, [activeConversation?.id, focusedGoalId, focusedGoalTaskIndex])
 
   useEffect(() => {
     if (activeConversation?.id === undefined || !taskRouteActive) {
@@ -866,7 +878,7 @@ export function ChannelWorkspace({
           key={`${goal.id}:${task.id}`}
           className="grid cursor-pointer gap-2 rounded-lg border border-[#e0e0e0] bg-white p-3 text-left text-sm text-[var(--cds-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-[box-shadow,transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-[#c6c6c6] hover:shadow-[0_6px_16px_rgba(0,0,0,0.10)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
           type="button"
-          onClick={() => openGoalRoute(goal.id, task.index)}
+          onClick={() => openGoalDetailRoute(goal.id, task.index)}
         >
           <span className="w-fit rounded-md border border-[#e5e5e5] bg-[#fafafa] px-2 py-1 text-xs font-semibold text-[var(--cds-text-secondary)]">
               Goal: {goal.id.slice(0, 8)} #{task.index}
@@ -949,7 +961,7 @@ export function ChannelWorkspace({
                     key={index}
                     className="cursor-pointer rounded-md border border-[#e5e5e5] bg-[#fafafa] px-1.5 py-0.5 text-xs font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:bg-[var(--cds-layer-hover-01)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                     type="button"
-                    onClick={() => openGoalRoute(goal.id, index)}
+                    onClick={() => openGoalDetailRoute(goal.id, index)}
                   >
                     #{index}
                   </button>
@@ -1040,7 +1052,7 @@ export function ChannelWorkspace({
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation()
-                      openGoalRoute(goal.id, null)
+                      openGoalDetailRoute(goal.id, null)
                     }}
                   >
                     {goal.id.slice(0, 8)}
@@ -1177,7 +1189,7 @@ export function ChannelWorkspace({
                       <button
                         className={inlineLink}
                         type="button"
-                        onClick={() => openGoalRoute(deployment.goalId!, deployment.taskIndex ?? null)}
+                        onClick={() => openGoalDetailRoute(deployment.goalId!, deployment.taskIndex ?? null)}
                       >
                         {deployment.goalId.slice(0, 8)}
                         {deployment.taskIndex === undefined ? '' : ` #${deployment.taskIndex}`}

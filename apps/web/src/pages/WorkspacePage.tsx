@@ -932,6 +932,7 @@ export function WorkspacePage({
 
     const timer = window.setInterval(() => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents('default') })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
       void loadAgents()
     }, 2000)
 
@@ -1956,7 +1957,6 @@ export function WorkspacePage({
       setSelectedRunId(null)
       if (agentCreateAfterSubmit === 'stay') {
         setAgentModalOpen(false)
-        void loadAgents()
         return
       }
 

@@ -542,7 +542,8 @@ export function WelcomePage({
     hasConnectedDaemon &&
     hasReadyRuntime
   const agentStepComplete =
-    !freshOnboardingPreview && onboarding?.prerequisites.hasReadyAgent === true
+    !freshOnboardingPreview &&
+    (readyAgents.length > 0 || onboarding?.prerequisites.hasReadyAgent === true)
   const workspaceStepComplete =
     !freshOnboardingPreview && onboarding?.prerequisites.hasWorkspaceConversation === true
   const showDashboard =

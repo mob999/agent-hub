@@ -46,7 +46,10 @@ interface WelcomePageProps {
   onWelcomeUpdated: (summary: WelcomeSummary) => void
 }
 
-const panelClass = 'rounded-2xl border border-[#e4e7ec] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+const dashboardPanelClass =
+  'grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#dde3ea] bg-white/[0.94] shadow-[0_24px_70px_rgba(15,23,42,0.11),0_8px_24px_rgba(15,23,42,0.06),0_1px_0_rgba(255,255,255,0.92)_inset] backdrop-blur transition-[box-shadow,border-color,background-color] duration-200 ease-out hover:border-[#c8d2de] hover:bg-white hover:shadow-[0_28px_82px_rgba(15,23,42,0.14),0_10px_28px_rgba(15,23,42,0.075),0_1px_0_rgba(255,255,255,0.96)_inset]'
+const dashboardRowClass =
+  'grid w-full cursor-pointer border-0 border-b border-[#eef1f5] bg-transparent text-left transition-[background-color,transform] duration-150 last:border-b-0 hover:-translate-y-px hover:bg-[#f5f7fb] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]'
 const subtleButton =
   'inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d8dee6] bg-white px-3 text-sm font-semibold text-[#344054] shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#e1e5ea] disabled:bg-[#f4f4f4] disabled:text-[#a2a9b0] disabled:shadow-none'
 const primaryButton =
@@ -146,7 +149,7 @@ function onlineDaemonDevices(devices: DaemonDevice[]): DaemonDevice[] {
 function compactPreview(value: string): string {
   const compacted = value.replace(/\s+/g, ' ').trim()
   if (compacted.length === 0) {
-    return 'No text content'
+    return ''
   }
 
   return compacted.length > 110 ? `${compacted.slice(0, 107)}...` : compacted
@@ -178,8 +181,51 @@ function dashboardConversationTitle(conversation: Conversation, agents: AgentDet
   return conversationLabel(conversation)
 }
 
-function dashboardConversationPreview(content: string | undefined): string {
-  return content === undefined ? 'No messages yet.' : compactPreview(content)
+function dashboardConversationPreview(content: string | undefined, fallback: string): string {
+  if (content === undefined) {
+    return fallback
+  }
+
+  return compactPreview(content) || fallback
+}
+
+function formatDashboardDate(locale: string): string {
+  const normalizedLocale = locale === 'zh-CN' ? 'zh-CN' : 'en'
+  const date = new Date()
+
+  if (normalizedLocale === 'zh-CN') {
+    const day = new Intl.DateTimeFormat(normalizedLocale, {
+      day: 'numeric',
+      month: 'long',
+    }).format(date)
+    const weekday = new Intl.DateTimeFormat(normalizedLocale, {
+      weekday: 'long',
+    }).format(date)
+
+    return `${day} · ${weekday}`
+  }
+
+  return new Intl.DateTimeFormat(normalizedLocale, {
+    day: 'numeric',
+    month: 'long',
+    weekday: 'long',
+  }).format(date)
+}
+
+function goalStatusTagType(status: string): 'blue' | 'green' | 'red' | 'warm-gray' {
+  if (status === 'completed') {
+    return 'green'
+  }
+
+  if (status === 'failed') {
+    return 'red'
+  }
+
+  if (status === 'cancelled') {
+    return 'warm-gray'
+  }
+
+  return 'blue'
 }
 
 function ConversationAvatar({
@@ -442,7 +488,7 @@ export function WelcomePage({
   onRefreshData,
   onWelcomeUpdated,
 }: WelcomePageProps) {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   const [deviceName, setDeviceName] = useState('My computer')
   const [daemonCommand, setDaemonCommand] = useState<DaemonRegistrationCommandResponse | null>(null)
   const [daemonError, setDaemonError] = useState<string | null>(null)
@@ -508,6 +554,27 @@ export function WelcomePage({
     activeOnboardingStepIndex >= 0 && activeOnboardingStepIndex < onboardingSteps.length - 1
       ? onboardingSteps[activeOnboardingStepIndex + 1]!
       : null
+  const dashboardDate = formatDashboardDate(i18n.resolvedLanguage ?? i18n.language)
+  const dashboardConversations = summary?.dashboard.conversations ?? []
+  const dashboardGoals = summary?.dashboard.goals ?? []
+  const dashboardGoalTaskSummary = (taskCounts: WelcomeSummary['dashboard']['goals'][number]['taskCounts']): string => {
+    const entries = Object.entries(taskCounts)
+      .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
+    const total = entries.reduce((sum, [, count]) => sum + count, 0)
+
+    if (total === 0) {
+      return t('welcome.noGoalTasks')
+    }
+
+    const statusSummary = entries
+      .slice(0, 3)
+      .map(([status, count]) => `${t(`status.task.${status}`, { defaultValue: status })} ${count}`)
+
+    return [
+      t('welcome.goalTaskSummary', { count: total }),
+      ...statusSummary,
+    ].join(' · ')
+  }
 
   const completeOnboarding = useCallback(async (conversationId: string | null) => {
     setCompleteLoading(true)
@@ -650,17 +717,39 @@ export function WelcomePage({
 
   if (showDashboard) {
     return (
-      <section className="grid h-full min-h-0 overflow-hidden bg-[#fafafa] p-6 max-[671px]:p-4" aria-label="Welcome dashboard">
-        <div className="mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5">
-          <header className="flex items-start justify-between gap-4 max-[671px]:grid">
-            <div className="grid gap-1">
-              <h1 className="text-2xl font-semibold leading-8 text-[#161616]">{t('welcome.dashboardTitle')}</h1>
-              <p className="text-sm text-[#69707d]">{t('welcome.dashboardSubtitle')}</p>
+      <section
+        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-y-auto max-[671px]:p-4"
+        style={{
+          backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #f5f6f8 38%, #d9dde4 72%, #111827 100%)',
+        }}
+        aria-label="Welcome dashboard"
+      >
+        <div className="relative mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5 max-[960px]:h-auto max-[960px]:min-h-full">
+          <header className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4 max-[760px]:grid-cols-1">
+            <div className="grid max-w-3xl gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#6b7280]">
+                <span>{dashboardDate}</span>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex min-w-0 items-start gap-3">
+                  <img
+                    src="/favicon.svg"
+                    alt=""
+                    className="mt-1 h-11 w-11 shrink-0 max-[671px]:h-9 max-[671px]:w-9"
+                  />
+                  <h1 className="max-w-3xl text-[clamp(1.8rem,3.4vw,3.2rem)] font-semibold leading-[1.05] tracking-normal text-[#161616]">
+                    {t('welcome.dashboardTitle')}
+                  </h1>
+                </div>
+                <p className="max-w-2xl text-sm leading-6 text-[#5f6877]">
+                  {t('welcome.dashboardSubtitle')}
+                </p>
+              </div>
             </div>
             {devMode && (
-              <div className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-1 self-start text-xs">
                 <button
-                  className={subtleButton}
+                  className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   type="button"
                   onClick={() => {
                     setActiveOnboardingStep('daemon')
@@ -672,7 +761,7 @@ export function WelcomePage({
                   {t('welcome.tutorial')}
                 </button>
                 <button
-                  className={subtleButton}
+                  className="inline-flex h-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   type="button"
                   onClick={() => {
                     setActiveOnboardingStep('daemon')
@@ -686,36 +775,53 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="grid min-h-0 grid-cols-2 gap-5 max-[960px]:grid-cols-1 max-[960px]:grid-rows-2">
-            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label={t('welcome.recentConversations')}>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">{t('welcome.recentConversations')}</h2>
-                <ChatBot size={20} />
+          <div className="grid min-h-0 grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 max-[960px]:grid-cols-1 max-[960px]:overflow-visible">
+            <section className={dashboardPanelClass} aria-label={t('welcome.recentConversations')}>
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestMessage')}</p>
+                  <ChatBot size={19} />
+                </div>
+                <h2 className="text-lg font-semibold leading-6 text-[#161616]">{t('welcome.recentConversations')}</h2>
+                <p className="text-sm leading-5 text-[#69707d]">{t('welcome.conversationsPanelSubtitle')}</p>
               </div>
-              {summary.dashboard.conversations.length === 0 ? (
-                <div className="min-h-0 overflow-y-auto pr-1">
-                  <p className="text-sm text-[#69707d]">{t('welcome.noRecentConversations')}</p>
+              {dashboardConversations.length === 0 ? (
+                <div className="grid min-h-0 place-items-center px-8 py-12 text-center">
+                  <div className="grid max-w-sm justify-items-center gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-lg border border-[#dde3ea] bg-[#f7f9fc] text-[#596171]">
+                      <ChatBot size={20} />
+                    </span>
+                    <div className="grid gap-1">
+                      <h3 className="text-base font-semibold text-[#161616]">{t('welcome.noRecentConversationsTitle')}</h3>
+                      <p className="text-sm leading-6 text-[#69707d]">{t('welcome.noRecentConversationsSubtitle')}</p>
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-                  {summary.dashboard.conversations.map(({ conversation, latestMessage }) => (
+                <div className="min-h-0 overflow-y-auto">
+                  {dashboardConversations.map(({ conversation, latestMessage }, index) => (
                     <button
                       key={conversation.id}
                       type="button"
-                      className="grid min-h-16 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 bg-[#f7f8fa] px-3 py-3 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      className={`${dashboardRowClass} min-h-[4.75rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 max-[671px]:grid-cols-[auto_minmax(0,1fr)] ${index === 0 ? 'bg-[#f8fbff]' : ''}`}
                       onClick={() => onOpenConversation(conversation.id)}
                     >
                       <ConversationAvatar agents={agents} conversation={conversation} />
-                      <span className="min-w-0">
-                        <strong className="block truncate text-[#161616]">
-                          {dashboardConversationTitle(conversation, agents)}
-                        </strong>
+                      <span className="grid min-w-0 gap-1">
+                        <span className="flex min-w-0 flex-wrap items-center gap-2">
+                          <strong className="truncate text-base leading-6 text-[#161616]">
+                            {dashboardConversationTitle(conversation, agents)}
+                          </strong>
+                          <span className="rounded-full border border-[#e1e6ee] bg-white/85 px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide text-[#69707d]">
+                            {t(`welcome.conversationType.${conversation.type}`)}
+                          </span>
+                        </span>
                         <span className="mt-1 block truncate text-sm text-[#596171]">
-                          {dashboardConversationPreview(latestMessage?.content)}
+                          {dashboardConversationPreview(latestMessage?.content, t('welcome.noMessagePreview'))}
                         </span>
                       </span>
                       <time
-                        className="whitespace-nowrap text-xs text-[#69707d]"
+                        className="whitespace-nowrap text-xs font-medium text-[#8a94a6] max-[671px]:col-start-2 max-[671px]:justify-self-start"
                         dateTime={latestMessage?.updatedAt ?? conversation.lastMessageAt ?? conversation.updatedAt}
                       >
                         {formatMessageTime(latestMessage?.updatedAt ?? conversation.lastMessageAt ?? conversation.updatedAt)}
@@ -726,35 +832,53 @@ export function WelcomePage({
               )}
             </section>
 
-            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label={t('welcome.recentGoals')}>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">{t('welcome.recentGoals')}</h2>
-                <Task size={20} />
+            <section className={dashboardPanelClass} aria-label={t('welcome.recentGoals')}>
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestGoal')}</p>
+                  <Task size={19} />
+                </div>
+                <h2 className="text-lg font-semibold leading-6 text-[#161616]">{t('welcome.goalsPanelTitle')}</h2>
+                <p className="text-sm leading-5 text-[#69707d]">{t('welcome.goalsPanelSubtitle')}</p>
               </div>
-              {summary.dashboard.goals.length === 0 ? (
-                <div className="min-h-0 overflow-y-auto pr-1">
-                  <p className="text-sm text-[#69707d]">{t('welcome.noGoals')}</p>
+              {dashboardGoals.length === 0 ? (
+                <div className="grid min-h-0 place-items-center px-8 py-12 text-center">
+                  <div className="grid max-w-sm justify-items-center gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-lg border border-[#dde3ea] bg-[#f7f9fc] text-[#596171]">
+                      <Task size={20} />
+                    </span>
+                    <div className="grid gap-1">
+                      <h3 className="text-base font-semibold text-[#161616]">{t('welcome.noGoalsTitle')}</h3>
+                      <p className="text-sm leading-6 text-[#69707d]">{t('welcome.noGoalsSubtitle')}</p>
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-                  {summary.dashboard.goals.map(({ conversation, goal, taskCounts }) => (
+                <div className="min-h-0 overflow-y-auto">
+                  {dashboardGoals.map(({ conversation, goal, taskCounts }, index) => (
                     <button
                       key={goal.id}
                       type="button"
-                      className="grid cursor-pointer gap-2 rounded-xl border-0 bg-[#f7f8fa] px-3 py-3 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      className={`${dashboardRowClass} gap-2 px-4 py-3.5 ${index === 0 ? 'bg-[#f8fbff]' : ''}`}
                       onClick={() => onOpenGoal(conversation.id, goal.id)}
                     >
-                      <span className="flex min-w-0 items-center justify-between gap-3">
-                        <strong className="truncate text-[#161616]">{goal.title}</strong>
-                        <Tag size="sm" type={goal.status === 'completed' ? 'green' : goal.status === 'failed' ? 'red' : 'blue'}>
+                      <span className="flex min-w-0 items-start justify-between gap-3">
+                        <span className="grid min-w-0 gap-1">
+                          {index === 0 && (
+                            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#69707d]">
+                              {t('welcome.latestGoal')}
+                            </span>
+                          )}
+                          <strong className="line-clamp-2 text-base leading-6 text-[#161616]">{goal.title}</strong>
+                        </span>
+                        <Tag className="shrink-0" size="sm" type={goalStatusTagType(goal.status)}>
                           {t(`status.task.${goal.status}`, { defaultValue: goal.status })}
                         </Tag>
                       </span>
-                      <span className="flex flex-wrap gap-1.5 text-xs text-[#69707d]">
-                        <span>{conversationLabel(conversation)}</span>
-                        {Object.entries(taskCounts).map(([status, count]) => (
-                          <span key={status}>{t(`status.task.${status}`, { defaultValue: status })}: {count}</span>
-                        ))}
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-[#69707d]">
+                        <span className="font-semibold text-[#596171]">{conversationLabel(conversation)}</span>
+                        <span className="h-1 w-1 rounded-full bg-[#c7d0dc]" aria-hidden="true" />
+                        <span>{dashboardGoalTaskSummary(taskCounts)}</span>
                       </span>
                     </button>
                   ))}

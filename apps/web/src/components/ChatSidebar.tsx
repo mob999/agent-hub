@@ -147,7 +147,7 @@ export function ChatSidebar({
       aria-label={t('chat.chatNavigation')}
     >
       <header className="flex min-h-16 items-center px-4">
-        <h2 className="min-w-0 truncate text-lg font-semibold text-[#161616]">Chat</h2>
+        <h2 className="min-w-0 truncate text-lg font-semibold text-[#161616]">{t('chat.title')}</h2>
       </header>
 
       <section className="grid shrink-0 gap-1 px-3 pb-3 pt-2" aria-label={t('chat.quickActions')}>

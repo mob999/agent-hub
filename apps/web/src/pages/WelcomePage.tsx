@@ -643,8 +643,8 @@ export function WelcomePage({
 
   if (showDashboard) {
     return (
-      <section className="h-full min-h-0 overflow-y-auto bg-[#fafafa] p-6 max-[671px]:p-4" aria-label="Welcome dashboard">
-        <div className="mx-auto grid max-w-6xl gap-5">
+      <section className="grid h-full min-h-0 overflow-hidden bg-[#fafafa] p-6 max-[671px]:p-4" aria-label="Welcome dashboard">
+        <div className="mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5">
           <header className="flex items-start justify-between gap-4 max-[671px]:grid">
             <div className="grid gap-1">
               <h1 className="text-2xl font-semibold leading-8 text-[#161616]">Welcome back</h1>
@@ -679,16 +679,18 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="grid grid-cols-2 gap-5 max-[960px]:grid-cols-1">
-            <section className={`${panelClass} min-h-[28rem]`} aria-label="Recent conversations">
+          <div className="grid min-h-0 grid-cols-2 gap-5 max-[960px]:grid-cols-1 max-[960px]:grid-rows-2">
+            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label="Recent conversations">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent conversations</h2>
                 <ChatBot size={20} />
               </div>
               {summary.dashboard.conversations.length === 0 ? (
-                <p className="text-sm text-[#69707d]">No recent conversations yet. Open a group, project, or agent chat to start.</p>
+                <div className="min-h-0 overflow-y-auto pr-1">
+                  <p className="text-sm text-[#69707d]">No recent conversations yet. Open a group, project, or agent chat to start.</p>
+                </div>
               ) : (
-                <div className="grid gap-3">
+                <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
                   {summary.dashboard.conversations.map(({ conversation, latestMessage }) => (
                     <button
                       key={conversation.id}
@@ -717,15 +719,17 @@ export function WelcomePage({
               )}
             </section>
 
-            <section className={`${panelClass} min-h-[28rem]`} aria-label="Recent goals">
+            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label="Recent goals">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent goals</h2>
                 <Task size={20} />
               </div>
               {summary.dashboard.goals.length === 0 ? (
-                <p className="text-sm text-[#69707d]">Use Task mode in a group or project to create goals.</p>
+                <div className="min-h-0 overflow-y-auto pr-1">
+                  <p className="text-sm text-[#69707d]">Use Task mode in a group or project to create goals.</p>
+                </div>
               ) : (
-                <div className="grid gap-3">
+                <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
                   {summary.dashboard.goals.map(({ conversation, goal, taskCounts }) => (
                     <button
                       key={goal.id}

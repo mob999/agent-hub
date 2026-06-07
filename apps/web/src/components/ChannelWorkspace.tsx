@@ -3,6 +3,7 @@ import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, Circle
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
@@ -326,6 +327,7 @@ export function ChannelWorkspace({
   deploymentRouteActive = false,
   welcomeActive = false,
 }: ChannelWorkspaceProps) {
+  const { t } = useTranslation()
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{
     conversationId: string
@@ -456,13 +458,13 @@ export function ChannelWorkspace({
       : []
   const createAgentLink = (
     <button className={inlineLink} type="button" onClick={openCreateAgent}>
-      create an agent
+      {t('chat.composerCreateAgent')}
     </button>
   )
   const chatTitle = !hasSelectedConversation
     ? welcomeActive
-      ? 'Welcome'
-      : 'Chat'
+      ? t('welcome.dashboardTitle')
+      : t('appRail.chat')
     : isAgentDirectMessage
       ? selectedAgent?.agent.name ?? activeConversation.title
       : activeConversation.title
@@ -470,67 +472,67 @@ export function ChannelWorkspace({
     hasSelectedConversation && activeConversation.type === 'group' ? `#${activeConversation.title}` : chatTitle
   const chatDescription = !hasSelectedConversation
     ? welcomeActive
-      ? 'Choose a conversation or create a new workspace from the sidebar.'
-      : 'No conversation selected'
+      ? t('chat.chooseConversation')
+      : t('chat.noConversation')
     : isAgentDirectMessage
-      ? selectedAgent?.agent.description?.trim() || 'Private conversation with this agent'
+      ? selectedAgent?.agent.description?.trim() || t('chat.privateConversationDescription')
       : activeConversation.type === 'project'
-        ? activeConversation.description?.trim() || activeConversation.project?.remoteUrl || 'Project conversation'
+        ? activeConversation.description?.trim() || activeConversation.project?.remoteUrl || t('chat.projectConversationDescription')
         : activeConversation.key === 'all'
-          ? 'General channel for members and agent runs'
-          : activeConversation.description?.trim() || 'Group channel for selected agents'
+          ? t('chat.generalChannelDescription')
+          : activeConversation.description?.trim() || t('chat.groupChannelDescription')
   const emptyTitle = !hasSelectedConversation
     ? welcomeActive
-      ? 'Welcome to Tavro'
-      : 'No conversation selected'
+      ? t('chat.welcomeTitle')
+      : t('chat.noConversation')
     : isAgentDirectMessage
-      ? 'No private messages yet'
-      : 'No messages yet'
+      ? t('chat.noPrivateMessages')
+      : t('chat.noMessages')
   const emptyMessage = !hasSelectedConversation
     ? welcomeActive
-      ? 'Pick an existing chat, open a project, or start by creating an agent.'
+      ? t('chat.chooseExisting')
       : readyAgentCount > 0
-        ? 'Choose #all or an agent from the sidebar.'
+        ? t('chat.chooseSidebar')
         : (
             <>
-              Choose #all after you{' '}
+              {t('chat.chooseAllAfterPrefix')}{' '}
               {createAgentLink}
               .
             </>
           )
     : isAgentDirectMessage
       ? selectedAgentReady && selectedAgent
-        ? `Message ${selectedAgent.agent.name} to start a private run.`
-        : 'This agent is not ready to receive messages yet.'
+        ? t('chat.messageAgentStart', { name: selectedAgent.agent.name })
+        : t('chat.notReadyAgentMessage')
       : readyMemberAgentCount > 0
-        ? `Message ${chatDisplayName} to start a run.`
+        ? t('chat.messageGroupStart', { name: chatDisplayName })
         : (
             <>
-              First, {createAgentLink}; then message #all to start a run.
+              {t('chat.firstCreateAgentPrefix')} {createAgentLink}; {t('chat.firstCreateAgentSuffix')}
             </>
           )
   const warningTitle = isAgentDirectMessage
-    ? 'Agent is not ready'
-    : 'No ready agent available'
+    ? t('chat.notReadyAgent')
+    : t('chat.noReadyAgentAvailable')
   const warningSubtitle = isAgentDirectMessage
-    ? 'Wait for provisioning to finish, or choose another ready agent.'
-    : 'Choose a conversation with a ready agent before sending a message.'
+    ? t('chat.notReadyAgentSubtitle')
+    : t('chat.chooseReadyConversation')
   const composerPlaceholder = !hasSelectedConversation
-    ? 'Select a conversation first'
+    ? t('chat.selectConversationFirst')
     : selectedAgentReady
       ? isAgentDirectMessage
-        ? `Message ${selectedAgent?.agent.name ?? activeConversation.title}`
-        : `Message ${chatDisplayName}`
+        ? t('chat.messageAgent', { name: selectedAgent?.agent.name ?? activeConversation.title })
+        : t('chat.messageAgent', { name: chatDisplayName })
       : isAgentDirectMessage
-        ? 'Agent is not ready yet'
-        : 'Create a ready agent first'
+        ? t('chat.notReadyAgentPlaceholder')
+        : t('chat.createReadyAgentFirst')
   const chatAriaLabel = !hasSelectedConversation
-    ? 'Chat'
+    ? t('appRail.chat')
     : isAgentDirectMessage
       ? `Private chat ${chatTitle}`
       : isProjectConversation
-        ? `Project ${chatDisplayName}`
-        : `Group ${chatDisplayName}`
+        ? `${t('chat.project')} ${chatDisplayName}`
+        : `${t('nav.groups')} ${chatDisplayName}`
   const projectIcon = isProjectConversation && activeConversation !== null
     ? getProjectIcon(activeConversation)
     : null
@@ -926,7 +928,7 @@ export function ChannelWorkspace({
         </div>
         <div className="grid gap-1.5 text-sm leading-5 text-[var(--cds-text-secondary)]">
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Assignee</span>
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{t('chat.assignee')}</span>
             {assignee ? (
               <button
                 className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -939,7 +941,7 @@ export function ChannelWorkspace({
               <span>{task.assigneeAgentId}</span>
             )}
             <span aria-hidden="true">·</span>
-            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Run</span>
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{t('chat.run')}</span>
             {task.assigneeRunId ? (
               <button
                 className="cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
@@ -953,7 +955,7 @@ export function ChannelWorkspace({
             )}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">Depends on</span>
+            <span className="font-semibold uppercase text-[var(--cds-text-primary)]">{t('chat.dependsOn')}</span>
             {task.dependsOnTaskIndexes && task.dependsOnTaskIndexes.length > 0 ? (
               <span className="flex flex-wrap gap-1">
                 {task.dependsOnTaskIndexes.map((index) => (
@@ -974,19 +976,19 @@ export function ChannelWorkspace({
         </div>
         {task.blockedReason && (
           <div className="text-xs text-[var(--cds-text-secondary)]">
-            <span className="font-semibold text-[var(--cds-text-primary)]">Blocked:</span>{' '}
+            <span className="font-semibold text-[var(--cds-text-primary)]">{t('chat.blocked')}</span>{' '}
             {task.blockedReason}
           </div>
         )}
         {task.summary && (
           <div className="rounded-lg bg-[#f8f8f8] p-3">
-            <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Summary</h5>
+            <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">{t('chat.summary')}</h5>
             <MessageContent className="mt-1 block text-sm leading-5" content={task.summary} />
           </div>
         )}
         {task.artifacts && task.artifacts.length > 0 && (
           <div className="grid gap-1 rounded-lg bg-[#f8f8f8] p-3">
-            <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">Reports</h5>
+            <h5 className="text-xs font-semibold uppercase text-[var(--cds-text-secondary)]">{t('chat.reports')}</h5>
             {task.artifacts.map((artifact) => (
               <button
                 key={artifact.id}
@@ -1094,12 +1096,12 @@ export function ChannelWorkspace({
               <div className="grid gap-3 border-t border-white/70 bg-white/55 p-4">
                 {goal.summary && (
                   <div className="rounded-xl border border-[#d8e6ff] bg-[#f3f7ff] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
-                    <h4 className="text-xs font-semibold uppercase text-[#0f3f9c]">Goal summary</h4>
+                    <h4 className="text-xs font-semibold uppercase text-[#0f3f9c]">{t('chat.goalSummary')}</h4>
                     <MessageContent className="mt-1 block text-sm leading-5" content={goal.summary} />
                   </div>
                 )}
                 {goal.tasks.length === 0 ? (
-                  <p className="rounded-xl bg-white p-4 text-center text-sm text-[var(--cds-text-secondary)]">No tasks</p>
+                  <p className="rounded-xl bg-white p-4 text-center text-sm text-[var(--cds-text-secondary)]">{t('chat.noTasks')}</p>
                 ) : (
                   <div className="grid gap-2">
                     {goal.tasks.map((task) => renderGoalTaskCard(goal, task))}
@@ -1136,7 +1138,7 @@ export function ChannelWorkspace({
               </div>
               {statusTasks.length === 0 ? (
                 <div className="grid min-h-0 place-items-center rounded-xl text-sm text-[var(--cds-text-placeholder)]">
-                  No tasks
+                  {t('chat.noTasks')}
                 </div>
               ) : (
                 <div className="grid min-h-0 content-start gap-3 overflow-y-auto overscroll-contain pr-1">
@@ -1157,7 +1159,7 @@ export function ChannelWorkspace({
       {deployments.length === 0 ? (
         <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
           <Launch size={32} />
-          <h2 className="cds--type-heading-compact-02">No deployments yet</h2>
+          <h2 className="cds--type-heading-compact-02">{t('chat.noDeployments')}</h2>
         </div>
       ) : (
         deployments.map((deployment) => (
@@ -1254,7 +1256,7 @@ export function ChannelWorkspace({
                     className="relative top-[-0.0625rem] h-1.5 w-1.5 animate-[agenthub-breathe_1.4s_ease-in-out_infinite] rounded-full bg-[var(--cds-support-info)]"
                     aria-hidden="true"
                   />
-                  输入中
+                  {t('chat.typing')}
                 </span>
               )}
             </div>
@@ -1269,7 +1271,7 @@ export function ChannelWorkspace({
         <div className="flex min-w-0 items-center gap-3">
           <IconButton
             kind={showTasks ? 'secondary' : 'ghost'}
-            label="Tasks"
+            label={t('chat.tasks')}
             size="md"
             align="bottom"
             type="button"
@@ -1291,7 +1293,7 @@ export function ChannelWorkspace({
           {activeConversation?.type === 'project' && (
             <IconButton
               kind={showProjectWorkspace ? 'secondary' : 'ghost'}
-              label="Project"
+              label={t('chat.project')}
               size="md"
               align="bottom"
               type="button"
@@ -1312,7 +1314,7 @@ export function ChannelWorkspace({
           )}
           <IconButton
             kind={showFiles ? 'secondary' : 'ghost'}
-            label="Files"
+            label={t('chat.files')}
             size="md"
             align="bottom"
             type="button"
@@ -1333,7 +1335,7 @@ export function ChannelWorkspace({
           </IconButton>
           <IconButton
             kind={showDeployments ? 'secondary' : 'ghost'}
-            label="Deployments"
+            label={t('chat.deployments')}
             size="md"
             align="bottom"
             type="button"
@@ -1358,7 +1360,7 @@ export function ChannelWorkspace({
           {hasSelectedConversation && (
             <IconButton
               kind="ghost"
-              label="Settings"
+              label={t('common.settings')}
               size="md"
               align="bottom-end"
               type="button"
@@ -1376,10 +1378,10 @@ export function ChannelWorkspace({
         {runError && (
           <InlineNotification
             kind="error"
-            title="Message was not sent"
+            title={t('chat.warningMessageNotSent')}
             subtitle={runError}
             lowContrast
-            aria-label="Close notification"
+            aria-label={t('common.closeNotification')}
           />
         )}
       </div>
@@ -1400,9 +1402,9 @@ export function ChannelWorkspace({
             <Loading
               small
               withOverlay={false}
-              description="Loading Conversation"
+              description={t('chat.loadingConversation')}
             />
-            <p className="text-sm font-medium leading-5">Loading Conversation</p>
+            <p className="text-sm font-medium leading-5">{t('chat.loadingConversation')}</p>
           </div>
         ) : showWorkspacePage && showTasks ? (
           <div
@@ -1411,7 +1413,7 @@ export function ChannelWorkspace({
             <div
               className="inline-flex h-8 w-fit items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
               role="group"
-              aria-label="Task aggregation"
+              aria-label={t('chat.taskAggregation')}
             >
               {(['goal', 'status'] as const).map((mode) => {
                 const selected = taskAggregationMode === mode
@@ -1428,7 +1430,7 @@ export function ChannelWorkspace({
                     aria-pressed={selected}
                     onClick={() => setTaskAggregationMode(mode)}
                   >
-                    {mode === 'goal' ? 'Goals' : 'Status'}
+                    {mode === 'goal' ? t('chat.goals') : t('chat.status')}
                   </button>
                 )
               })}
@@ -1437,7 +1439,7 @@ export function ChannelWorkspace({
               {goals.length === 0 ? (
                 <div className="grid h-full min-h-[22rem] place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
                   <Task size={32} />
-                  <h2 className="cds--type-heading-compact-02">No goals yet</h2>
+                  <h2 className="cds--type-heading-compact-02">{t('chat.noGoals')}</h2>
                 </div>
               ) : (
                 taskAggregationMode === 'goal' ? renderGoalListView() : renderStatusBoardView()
@@ -1532,7 +1534,7 @@ export function ChannelWorkspace({
                           <UserAdmin size={10} />
                         </span>
                         <span className="pointer-events-none absolute -right-2 -top-7 whitespace-nowrap rounded-full border border-[#bfe8c8] bg-[#defbe6] px-2 py-0.5 text-[0.65rem] font-semibold leading-4 text-[#0e6027] opacity-0 shadow-[0_4px_12px_rgba(15,23,42,0.12)] transition-opacity group-hover:opacity-100">
-                          Orchestrator
+                          {t('modals.agentMembers.orchestrator')}
                         </span>
                       </>
                     )}
@@ -1561,7 +1563,7 @@ export function ChannelWorkspace({
                           {senderName}
                         </strong>
                       )}
-                        {senderIsOrchestrator && <span className="sr-only">Orchestrator</span>}
+                        {senderIsOrchestrator && <span className="sr-only">{t('modals.agentMembers.orchestrator')}</span>}
                       </span>
                       <time className="text-xs leading-4 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
                         {formatMessageTime(message.updatedAt)}
@@ -1626,7 +1628,7 @@ export function ChannelWorkspace({
                         type="button"
                         onClick={() => openRun(message.runId as string)}
                       >
-                        Run {message.runId.slice(0, 8)}
+                        {t('chat.run')} {message.runId.slice(0, 8)}
                       </button>
                     )}
                   </span>
@@ -1655,7 +1657,7 @@ export function ChannelWorkspace({
         )}
         <div className="grid w-full overflow-hidden rounded-2xl border border-[#d8dee6] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.05)] focus-within:border-[#b9c3cf] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--cds-focus)]">
           <label className="sr-only" htmlFor="run-prompt">
-            {`Message ${chatDisplayName}`}
+            {t('chat.messageAgent', { name: chatDisplayName })}
           </label>
           {mentionSuggestions.length > 0 && (
             <div className="mx-2 mt-2 grid max-h-48 overflow-y-auto rounded-xl border border-[#d8dee6] bg-white shadow-lg">
@@ -1683,7 +1685,7 @@ export function ChannelWorkspace({
                       </span>
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="min-w-0 truncate font-semibold">@all</span>
-                        <span className="truncate text-xs text-[var(--cds-text-secondary)]">All ready agents</span>
+                        <span className="truncate text-xs text-[var(--cds-text-secondary)]">{t('chat.allReadyAgents')}</span>
                       </span>
                     </button>
                   )
@@ -1731,7 +1733,7 @@ export function ChannelWorkspace({
                     </span>
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="min-w-0 truncate font-semibold">@{agent.agent.name}</span>
-                      {agentIsOrchestrator && <span className="sr-only">Orchestrator</span>}
+                        {agentIsOrchestrator && <span className="sr-only">{t('modals.agentMembers.orchestrator')}</span>}
                     </span>
                     <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--cds-support-success)]" aria-hidden="true" />
                   </button>
@@ -1784,7 +1786,7 @@ export function ChannelWorkspace({
                       <button
                         type="button"
                         className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[var(--cds-text-secondary)] hover:bg-[#eef0f4] hover:text-[var(--cds-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                        aria-label={`Remove ${attachment.file.name}`}
+                        aria-label={t('chat.removeAttachment', { name: attachment.file.name })}
                         onClick={() => removePendingAttachment(attachment.id)}
                       >
                         <Close size={16} />
@@ -1811,11 +1813,11 @@ export function ChannelWorkspace({
               className="hidden"
               onChange={handleAttachmentInputChange}
             />
-            <div className="flex items-center gap-1.5" aria-label="Message tools">
+            <div className="flex items-center gap-1.5" aria-label={t('chat.messageTools')}>
               <button
                 className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-[#dde1e6] bg-white text-[var(--cds-text-primary)] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
                 type="button"
-                aria-label="Add image"
+                aria-label={t('chat.addImage')}
                 disabled={isCreatingRun || !selectedAgentReady}
                 onClick={() => imageInputRef.current?.click()}
               >
@@ -1824,7 +1826,7 @@ export function ChannelWorkspace({
               <button
                 className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-[#dde1e6] bg-white text-[var(--cds-text-primary)] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
                 type="button"
-                aria-label="Attach file"
+                aria-label={t('chat.attachFile')}
                 disabled={isCreatingRun || !selectedAgentReady}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -1835,7 +1837,7 @@ export function ChannelWorkspace({
               <div
                 className="ml-1 inline-flex h-8 items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
                 role="group"
-                aria-label="Message mode"
+                aria-label={t('chat.messageMode')}
               >
                 {(['chat', 'task'] as const).map((mode) => {
                   const selected = composerMode === mode
@@ -1852,7 +1854,7 @@ export function ChannelWorkspace({
                       aria-pressed={selected}
                       onClick={() => setComposerMode(mode)}
                     >
-                      {mode}
+                      {mode === 'chat' ? t('appRail.chat') : t('chat.tasks')}
                     </button>
                   )
                 })}
@@ -1860,11 +1862,11 @@ export function ChannelWorkspace({
             )}
             <div className="ml-auto flex items-center">
           {isCreatingRun ? (
-            <InlineLoading description="Queueing run..." status="active" />
+            <InlineLoading description={t('chat.queueingRun')} status="active" />
           ) : (
             <button
               type="submit"
-              aria-label="Send"
+              aria-label={t('chat.send')}
               className={`inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                 canSendMessage
                   ? 'cursor-pointer border-[#c7d0dc] bg-white text-[#161616] shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-[#b9c3cf] hover:bg-[#eef0f4]'

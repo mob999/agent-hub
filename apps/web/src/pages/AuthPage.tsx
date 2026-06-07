@@ -2,6 +2,7 @@ import {
   InlineNotification,
 } from '@carbon/react'
 import { useState, type SVGProps } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BrandLockup } from '../components/BrandLockup'
 import { PublicFooter } from '../components/PublicFooter'
 import { PublicHeader } from '../components/PublicHeader'
@@ -21,21 +22,8 @@ interface AuthPageProps {
   navigate: (path: RoutePath) => void
 }
 
-function readOAuthError(): string | null {
-  const error = new URLSearchParams(window.location.search).get('error')
-  if (!error) {
-    return null
-  }
-
-  const messages: Record<string, string> = {
-    github_email_unavailable: 'GitHub did not return a verified primary email.',
-    github_invalid_state: 'The GitHub login session expired. Try again.',
-    github_profile_unavailable: 'GitHub profile details could not be loaded.',
-    github_token_exchange_failed: 'GitHub authorization could not be completed.',
-    github_user_create_failed: 'Your Tavro account could not be created.',
-  }
-
-  return messages[error] ?? 'GitHub login could not be completed.'
+function readOAuthErrorCode(): string | null {
+  return new URLSearchParams(window.location.search).get('error')
 }
 
 function GitHubIcon(props: SVGProps<SVGSVGElement>) {
@@ -47,13 +35,14 @@ function GitHubIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 export function AuthPage({ navigate }: AuthPageProps) {
+  const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
-  const [serverError, setServerError] = useState<string | null>(() => readOAuthError())
+  const [serverErrorCode, setServerErrorCode] = useState<string | null>(() => readOAuthErrorCode())
   useAuthenticatedRedirect(navigate)
 
   const startGitHubLogin = () => {
     setSubmitting(true)
-    setServerError(null)
+    setServerErrorCode(null)
 
     const redirect = readPendingAuthRedirect() ?? '/welcome'
     const url = new URL(apiUrl('/auth/github/start'))
@@ -65,7 +54,7 @@ export function AuthPage({ navigate }: AuthPageProps) {
   return (
     <main
       className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)_auto] bg-[#fafafa]"
-      aria-label="Log in"
+      aria-label={t('auth.ariaLabel')}
     >
       <PublicHeader navigate={navigate} />
       <section className="grid min-h-0 place-items-center px-6 py-12 max-[671px]:px-4">
@@ -80,16 +69,16 @@ export function AuthPage({ navigate }: AuthPageProps) {
             <span className="grid h-6 w-6 place-items-center rounded-full bg-white">
               <GitHubIcon className="h-4 w-4" />
             </span>
-            {submitting ? 'Opening GitHub...' : 'Continue with GitHub'}
+            {submitting ? t('auth.opening') : t('auth.button')}
           </button>
 
-          {serverError && (
+          {serverErrorCode && (
             <InlineNotification
               kind="error"
-              title="Login failed"
-              subtitle={serverError}
+              title={t('auth.errorTitle')}
+              subtitle={t(`auth.errors.${serverErrorCode}`, { defaultValue: t('auth.errors.fallback') })}
               lowContrast
-              aria-label="Close notification"
+              aria-label={t('common.closeNotification')}
             />
           )}
         </div>

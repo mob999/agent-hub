@@ -1,4 +1,5 @@
 import { Checkbox } from '@carbon/react'
+import { useTranslation } from 'react-i18next'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails } from '../lib/api'
 
@@ -23,10 +24,12 @@ export function AgentMemberSelector({
   onSelectOrchestrator,
   onToggleAgent,
 }: AgentMemberSelectorProps) {
+  const { t } = useTranslation()
+
   return (
-    <div className="grid gap-2" aria-label="Agents">
+    <div className="grid gap-2" aria-label={t('modals.agentMembers.agents')}>
       <p className="text-sm font-semibold text-[var(--cds-text-primary)]">
-        Agents
+        {t('modals.agentMembers.agents')}
       </p>
       <div className="grid rounded-xl border border-[#d8dee6] bg-white">
         {agents.map((agent) => {
@@ -56,7 +59,7 @@ export function AgentMemberSelector({
                 disabled={disabled}
                 onClick={() => onSelectOrchestrator(isOrchestrator ? null : agentId)}
               >
-                Orchestrator
+                {t('modals.agentMembers.orchestrator')}
               </button>
               <AgentStatusIndicator agent={agent} />
             </div>

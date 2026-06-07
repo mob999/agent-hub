@@ -1,6 +1,7 @@
 import { InlineNotification, Tag } from '@carbon/react'
 import { ChevronDown, ChevronRight, JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DaemonDevice, LocalRun, RunEvent, RunStatus } from '../lib/api'
 import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
@@ -9,7 +10,6 @@ import {
   eventTitle,
   formatTime,
   isDisplayRunEvent,
-  runStatusLabel,
   runTagType,
 } from '../lib/format'
 import { parsePromptSections, type PromptSection } from '../lib/promptSections'
@@ -47,8 +47,10 @@ function promptLineTitle(line: string): string {
     .trim()
 }
 
-function runDisplayTitle(localRun: LocalRun): string {
-  const agentLabel = localRun.agentName ?? 'Agent'
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+function runDisplayTitle(localRun: LocalRun, agentFallback: string): string {
+  const agentLabel = localRun.agentName ?? agentFallback
 
   for (const line of localRun.prompt.split(/\r?\n/)) {
     const trimmed = line.trim()
@@ -71,31 +73,31 @@ function runDisplayTitle(localRun: LocalRun): string {
   return localRun.agentName ?? `Run ${localRun.run.id.slice(0, 8)}`
 }
 
-function eventDetails(event: RunEvent): EventDetail[] {
+function eventDetails(event: RunEvent, t: Translate): EventDetail[] {
   const details: EventDetail[] = []
   const logLine = eventLogLine(event)
 
   if (event.input !== undefined) {
-    details.push({ label: 'Parameters', value: event.input })
+    details.push({ label: t('runs.detailParameters'), value: event.input })
   }
 
   if (event.output !== undefined) {
-    details.push({ label: 'Result', value: event.output })
+    details.push({ label: t('runs.detailResult'), value: event.output })
   }
 
   if (event.error) {
-    details.push({ label: 'Error', value: event.error })
+    details.push({ label: t('runs.detailError'), value: event.error })
   }
 
   if (logLine) {
     details.push({
-      label: event.stream === 'stderr' ? 'Error log' : 'Log line',
+      label: event.stream === 'stderr' ? t('runs.detailErrorLog') : t('runs.detailLogLine'),
       value: logLine,
     })
   }
 
   if (event.raw !== undefined && event.type !== 'runtime.event') {
-    details.push({ label: 'Raw runtime event', value: event.raw })
+    details.push({ label: t('runs.detailRawRuntimeEvent'), value: event.raw })
   }
 
   return details
@@ -109,6 +111,7 @@ export function RunsPage({
   selectedRunId,
   selectRun,
 }: RunsPageProps) {
+  const { t } = useTranslation()
   const selectedRun = runs.find((localRun) => localRun.run.id === selectedRunId) ?? runs[0] ?? null
   const [expandedPromptByRunId, setExpandedPromptByRunId] = useState<Record<string, boolean>>({})
   const [promptViewByRunId, setPromptViewByRunId] = useState<Record<string, 'structured' | 'raw'>>({})
@@ -118,7 +121,7 @@ export function RunsPage({
     .map(eventMessageContent)
     .filter(Boolean)
     .join('')
-  const selectedRunTitle = selectedRun ? runDisplayTitle(selectedRun) : 'No run selected'
+  const selectedRunTitle = selectedRun ? runDisplayTitle(selectedRun, t('search.agentType')) : t('runs.noRunSelected')
   const selectedRunDeviceName = selectedRun
     ? devices.find((device) => device.id === selectedRun.run.daemonDeviceId)?.name ?? selectedRun.run.daemonDeviceId
     : ''
@@ -131,23 +134,23 @@ export function RunsPage({
     <section
       id="main-content"
       className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
-      aria-label="Runs management"
+      aria-label={t('runs.aria')}
     >
       <aside
         className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:h-auto max-[671px]:max-h-72"
-        aria-label="Run list"
+        aria-label={t('runs.listAria')}
       >
         <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
-          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">Runs</h1>
+          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">{t('runs.title')}</h1>
           <span className="rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
-            {activeRunCount} active
+            {t('runs.active', { count: activeRunCount })}
           </span>
         </header>
 
         {runs.length === 0 ? (
           <div className="grid gap-3 p-4 text-[#69707d]">
             <JobRun size={24} />
-            <p>No runs yet. Send a message in Chat to create one.</p>
+            <p>{t('runs.noRunsSidebar')}</p>
           </div>
         ) : (
           <div className="grid gap-1 p-3">
@@ -169,7 +172,7 @@ export function RunsPage({
                   <JobRun size={18} />
                 </span>
                 <span className="grid min-w-0 gap-0.5">
-                  <strong className="truncate leading-6">{runDisplayTitle(localRun)}</strong>
+                  <strong className="truncate leading-6">{runDisplayTitle(localRun, t('search.agentType'))}</strong>
                   <small className="truncate font-normal leading-5 text-[#69707d]">
                     Run {localRun.run.id.slice(0, 8)} · {formatTime(localRun.run.createdAt)}
                   </small>
@@ -182,7 +185,7 @@ export function RunsPage({
       </aside>
 
       <WorkspacePanel>
-        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label="Run detail">
+        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label={t('runs.detailAria')}>
           <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
             <div className="flex min-w-0 items-center gap-3">
               <span
@@ -201,7 +204,7 @@ export function RunsPage({
             <>
               <section
                 className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-4 p-6 max-[671px]:grid-cols-[4rem_minmax(0,1fr)] max-[671px]:p-4"
-                aria-label="Selected run"
+                aria-label={t('runs.selectedAria')}
               >
                 <span
                   className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
@@ -215,7 +218,7 @@ export function RunsPage({
                 </h2>
                 <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
                   <StatusDot status={selectedRun.run.status} />
-                  <span>{runStatusLabel(selectedRun.run.status)}</span>
+                  <span>{t(`status.run.${selectedRun.run.status}`)}</span>
                 </p>
                 <small className="mt-1 block truncate text-[var(--cds-text-secondary)]">
                   Run {selectedRun.run.id}
@@ -226,11 +229,11 @@ export function RunsPage({
                 type={runTagType(selectedRun.run.status)}
                 size="sm"
               >
-                {runStatusLabel(selectedRun.run.status)}
+                {t(`status.run.${selectedRun.run.status}`)}
               </Tag>
               </section>
 
-              <DetailSection title="Prompt">
+              <DetailSection title={t('runs.prompt')}>
               <details
                 className="overflow-hidden rounded-xl border border-[#e1e5ea] bg-[#f7f8fa]"
                 open={promptExpanded}
@@ -248,11 +251,11 @@ export function RunsPage({
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-3 py-2.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)] [&::-webkit-details-marker]:hidden">
                   <span className="min-w-0 truncate text-sm text-[#69707d]">
-                    {promptLength.toLocaleString()} characters
+                    {t('runs.characters', { count: promptLength })}
                   </span>
                   <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-[#dde1e6] bg-white px-2.5 text-xs font-semibold text-[#3f4551] shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
                     {promptExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    {promptExpanded ? 'Hide prompt' : 'Show prompt'}
+                    {promptExpanded ? t('runs.hidePrompt') : t('runs.showPrompt')}
                   </span>
                 </summary>
                 <div className="border-t border-[#e1e5ea] p-3">
@@ -273,7 +276,7 @@ export function RunsPage({
                           }))
                         }}
                       >
-                        {view === 'structured' ? 'Structured' : 'Raw'}
+                        {view === 'structured' ? t('runs.structured') : t('runs.raw')}
                       </button>
                     ))}
                   </div>
@@ -288,33 +291,33 @@ export function RunsPage({
               </details>
               </DetailSection>
 
-              <DetailSection title="Info">
+              <DetailSection title={t('runs.info')}>
               <div className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-3 max-[671px]:grid-cols-1">
-                <span className="text-[var(--cds-text-secondary)]">Agent</span>
+                <span className="text-[var(--cds-text-secondary)]">{t('runs.agent')}</span>
                 <span className="grid min-w-0 gap-0.5">
                   <strong className="truncate">{selectedRun.agentName ?? selectedRun.run.agentId}</strong>
                   {selectedRun.agentName && (
                     <small className="truncate text-[var(--cds-text-secondary)]">{selectedRun.run.agentId}</small>
                   )}
                 </span>
-                <span className="text-[var(--cds-text-secondary)]">Daemon</span>
+                <span className="text-[var(--cds-text-secondary)]">{t('runs.daemon')}</span>
                 <strong className="truncate">{selectedRunDeviceName}</strong>
-                <span className="text-[var(--cds-text-secondary)]">Created</span>
+                <span className="text-[var(--cds-text-secondary)]">{t('runs.created')}</span>
                 <strong className="truncate">{formatTime(selectedRun.run.createdAt)}</strong>
-                <span className="text-[var(--cds-text-secondary)]">Updated</span>
+                <span className="text-[var(--cds-text-secondary)]">{t('runs.updated')}</span>
                 <strong className="truncate">{formatTime(selectedRun.run.updatedAt)}</strong>
               </div>
               </DetailSection>
 
               <DetailSection
-              title="Events"
+              title={t('runs.events')}
               aside={<span className="text-sm text-[var(--cds-text-secondary)]">{displayEvents.length}</span>}
             >
               {displayEvents.length === 0 ? (
                 <InlineNotification
                   kind="info"
-                  title="No events loaded"
-                  subtitle="Run lifecycle events will appear here when the worker reports progress."
+                  title={t('runs.noEventsTitle')}
+                  subtitle={t('runs.noEventsSubtitle')}
                   lowContrast
                   hideCloseButton
                 />
@@ -331,7 +334,7 @@ export function RunsPage({
               )}
               </DetailSection>
 
-              <DetailSection title="Output">
+              <DetailSection title={t('runs.output')}>
               <div className="grid min-h-20 grid-cols-[1.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-[#e1e5ea] bg-[#f7f8fa] p-3">
                 <Terminal size={20} />
                 {agentOutput ? (
@@ -339,7 +342,7 @@ export function RunsPage({
                     {agentOutput}
                   </pre>
                 ) : (
-                  <p className="text-[var(--cds-text-secondary)]">No agent output yet.</p>
+                  <p className="text-[var(--cds-text-secondary)]">{t('runs.noOutput')}</p>
                 )}
               </div>
               </DetailSection>
@@ -347,9 +350,9 @@ export function RunsPage({
           ) : (
             <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 px-6 text-center max-[671px]:px-4">
               <ListBoxes size={32} />
-              <h2 className="cds--type-heading-compact-02">No runs yet</h2>
+              <h2 className="cds--type-heading-compact-02">{t('runs.noRuns')}</h2>
               <p className="max-w-md text-[var(--cds-text-secondary)]">
-                Send a message in Chat. Runs created from that conversation will appear here.
+                {t('runs.noRunsDetail')}
               </p>
             </div>
           )}
@@ -369,6 +372,7 @@ interface PromptSectionListProps {
 }
 
 function PromptSectionList({ sections }: PromptSectionListProps) {
+  const { t } = useTranslation()
   const [openBySectionId, setOpenBySectionId] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
       sections.map((section, index) => [
@@ -405,7 +409,7 @@ function PromptSectionList({ sections }: PromptSectionListProps) {
                 )}
               </span>
               <span className="text-xs text-[var(--cds-text-secondary)]">
-                {section.content.length.toLocaleString()} chars
+                {t('runs.chars', { count: section.content.length })}
               </span>
             </summary>
             <pre className="max-h-96 min-w-0 overflow-auto border-t border-[#e1e5ea] bg-[#f7f8fa] p-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--cds-text-primary)]">
@@ -418,7 +422,8 @@ function PromptSectionList({ sections }: PromptSectionListProps) {
 }
 
 function EventRow({ event, index }: EventRowProps) {
-  const details = eventDetails(event)
+  const { t } = useTranslation()
+  const details = eventDetails(event, t)
   const logLine = eventLogLine(event)
   const isErrorLog = event.type === 'log.line' && event.stream === 'stderr'
   const isToolEvent = event.type.startsWith('tool.call') || event.type.startsWith('agenthub.tool')
@@ -463,7 +468,7 @@ function EventRow({ event, index }: EventRowProps) {
       {details.length > 0 && (
         <details className="ml-[calc(13rem+1rem)] min-w-0 max-[671px]:ml-0">
           <summary className="w-fit cursor-pointer text-sm text-[var(--cds-link-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]">
-            Details
+            {t('runs.details')}
           </summary>
           <div className="mt-3 grid gap-3">
             {details.map((detail) => (
@@ -508,6 +513,7 @@ interface StatusDotProps {
 }
 
 function StatusDot({ status }: StatusDotProps) {
+  const { t } = useTranslation()
   const colorClass = {
     queued: 'border-[var(--cds-icon-secondary)] bg-[var(--cds-layer-01)]',
     running: 'border-[var(--cds-interactive)] bg-[var(--cds-interactive)]',
@@ -520,8 +526,8 @@ function StatusDot({ status }: StatusDotProps) {
   return (
     <span
       className={`h-2.5 w-2.5 rounded-full border ${colorClass}`}
-      aria-label={runStatusLabel(status)}
-      title={runStatusLabel(status)}
+      aria-label={t(`status.run.${status}`)}
+      title={t(`status.run.${status}`)}
     />
   )
 }

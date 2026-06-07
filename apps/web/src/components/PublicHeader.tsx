@@ -1,4 +1,5 @@
 import type { MouseEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BrandLockup } from './BrandLockup'
 import type { RoutePath } from '../pages/AuthPage'
 
@@ -7,6 +8,7 @@ interface PublicHeaderProps {
 }
 
 export function PublicHeader({ navigate }: PublicHeaderProps) {
+  const { t } = useTranslation()
   const openLogin = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault()
     navigate('/login')
@@ -29,7 +31,7 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
         href="/login"
         onClick={openLogin}
       >
-        Sign In
+        {t('publicHeader.signIn')}
       </a>
     </header>
   )

@@ -1,4 +1,5 @@
 import { ArrowRight, CheckmarkFilled, Terminal } from '@carbon/react/icons'
+import { useTranslation } from 'react-i18next'
 import { PublicFooter } from '../components/PublicFooter'
 import { PublicHeader } from '../components/PublicHeader'
 import { useAuthenticatedRedirect } from '../lib/useAuthenticatedRedirect'
@@ -8,28 +9,29 @@ interface PublicHomePageProps {
   navigate: (path: RoutePath) => void
 }
 
-const previewMessages = [
-  {
-    avatar: 'M',
-    name: 'Mia',
-    text: '@Codex can you inspect the deployment diff and open a task for the failing route?',
-    time: '10:31',
-  },
-  {
-    avatar: 'C',
-    name: 'Codex',
-    text: 'Found the preview proxy issue. I queued a run, patched the route, and attached the diff.',
-    time: '10:32',
-  },
-  {
-    avatar: 'O',
-    name: 'Ops Bot',
-    text: 'Daemon online. Workspace ready. Tool call completed in 4.2s.',
-    time: '10:33',
-  },
-]
-
 function ChatPreview() {
+  const { t } = useTranslation()
+  const previewMessages = [
+    {
+      avatar: 'M',
+      name: 'Mia',
+      text: t('publicHome.preview.messageMia'),
+      time: '10:31',
+    },
+    {
+      avatar: 'C',
+      name: 'Codex',
+      text: t('publicHome.preview.messageCodex'),
+      time: '10:32',
+    },
+    {
+      avatar: 'O',
+      name: 'Ops Bot',
+      text: t('publicHome.preview.messageOps'),
+      time: '10:33',
+    },
+  ]
+
   return (
     <div className="relative mx-auto w-full max-w-[34rem]" aria-hidden="true">
       <div className="absolute -left-5 top-10 grid h-16 w-16 rotate-[-8deg] place-items-center rounded-2xl border border-[#d8dee6] bg-white shadow-[0_10px_30px_rgba(15,23,42,0.12)] max-[671px]:hidden">
@@ -47,11 +49,11 @@ function ChatPreview() {
             </span>
             <div className="min-w-0">
               <strong className="block truncate text-sm text-[#161616]">engineering</strong>
-              <span className="block truncate text-xs text-[#69707d]">3 agents connected</span>
+              <span className="block truncate text-xs text-[#69707d]">{t('publicHome.preview.agentsConnected')}</span>
             </div>
           </div>
           <span className="rounded-full border border-[#d8e6ff] bg-[#f3f7ff] px-3 py-1 text-xs font-semibold text-[#0f3f9c]">
-            Run active
+            {t('publicHome.preview.runActive')}
           </span>
         </header>
 
@@ -75,13 +77,13 @@ function ChatPreview() {
         <div className="grid gap-2 border-t border-[#eef0f3] bg-[#fafafa] px-5 py-4">
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-[#defbe6] px-3 py-1 text-xs font-semibold text-[#0e6027]">
-              Codex ready
+              {t('publicHome.preview.codexReady')}
             </span>
             <span className="rounded-full bg-[#edf5ff] px-3 py-1 text-xs font-semibold text-[#0f62fe]">
-              Daemon online
+              {t('publicHome.preview.daemonOnline')}
             </span>
             <span className="rounded-full bg-[#f4f0ff] px-3 py-1 text-xs font-semibold text-[#6929c4]">
-              Tool output saved
+              {t('publicHome.preview.toolOutputSaved')}
             </span>
           </div>
           <div className="rounded-xl border border-[#dde1e6] bg-white px-3 py-2 font-mono text-xs text-[#525252]">
@@ -94,6 +96,7 @@ function ChatPreview() {
 }
 
 export function PublicHomePage({ navigate }: PublicHomePageProps) {
+  const { t } = useTranslation()
   useAuthenticatedRedirect(navigate)
 
   const openLogin = () => navigate('/login')
@@ -108,13 +111,13 @@ export function PublicHomePage({ navigate }: PublicHomePageProps) {
         <div className="grid max-w-[48rem] gap-7">
           <div className="grid gap-4">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#69707d]">
-              Agent-native IM workspace
+              {t('publicHome.hero.eyebrow')}
             </p>
             <h1 className="max-w-[15ch] text-6xl font-semibold leading-[1.02] tracking-normal text-[#161616] max-[1055px]:max-w-[14ch] max-[671px]:text-4xl">
-              Agent-Hub for Human and Agent Collabrate.
+              {t('publicHome.hero.title')}
             </h1>
             <p className="max-w-[34rem] text-lg leading-8 text-[#596171] max-[671px]:text-base max-[671px]:leading-7">
-              Tavro AI keeps chats, local daemon runs, tasks, files, and agent outputs in one shared workspace.
+              {t('publicHome.hero.subtitle')}
             </p>
           </div>
 
@@ -124,7 +127,7 @@ export function PublicHomePage({ navigate }: PublicHomePageProps) {
               type="button"
               onClick={openLogin}
             >
-              Get started
+              {t('publicHome.hero.getStarted')}
               <ArrowRight size={18} />
             </button>
           </div>

@@ -12,6 +12,7 @@ import {
   Undo,
 } from '@carbon/react/icons'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import type { AgentDetails, Conversation } from '../lib/api'
 import { getProjectIcon } from '../lib/projectIcon'
@@ -73,12 +74,14 @@ const shortcutBadge =
   'rounded-md border border-[#dde1e6] bg-white px-2 py-0.5 text-xs font-medium leading-5 text-[#69707d] shadow-[0_1px_1px_rgba(0,0,0,0.03)]'
 
 function UnreadBadge({ count }: { count: number }) {
+  const { t } = useTranslation()
+
   if (count <= 0) {
     return null
   }
 
   return (
-    <span className={unreadBadge} aria-label={`${count} unread messages`}>
+    <span className={unreadBadge} aria-label={t('chat.unreadMessages', { count })}>
       {count > 99 ? '99+' : count}
     </span>
   )
@@ -109,6 +112,7 @@ export function ChatSidebar({
   selectProject,
   selectAgent,
 }: ChatSidebarProps) {
+  const { t } = useTranslation()
   const [confirmingDeleteKey, setConfirmingDeleteKey] = useState<string | null>(null)
   const [groupsCollapsed, setGroupsCollapsed] = useState(false)
   const [projectsCollapsed, setProjectsCollapsed] = useState(false)
@@ -140,20 +144,20 @@ export function ChatSidebar({
   return (
     <aside
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#fafafa] text-[#596171]"
-      aria-label="Chat navigation"
+      aria-label={t('chat.chatNavigation')}
     >
       <header className="flex min-h-16 items-center px-4">
         <h2 className="min-w-0 truncate text-lg font-semibold text-[#161616]">Chat</h2>
       </header>
 
-      <section className="grid shrink-0 gap-1 px-3 pb-3 pt-2" aria-label="Quick actions">
+      <section className="grid shrink-0 gap-1 px-3 pb-3 pt-2" aria-label={t('chat.quickActions')}>
         <button
           className={`${sidebarButton} ${transparentListItem} min-h-10 grid-cols-[1.25rem_minmax(0,1fr)_auto] gap-3 px-3 py-2`}
           type="button"
           onClick={onOpenSearch}
         >
           <Search size={20} />
-          <span className="truncate text-base">Search</span>
+          <span className="truncate text-base">{t('nav.search')}</span>
           <kbd className={shortcutBadge}>Ctrl K</kbd>
         </button>
         <button
@@ -162,7 +166,7 @@ export function ChatSidebar({
           onClick={onOpenActivity}
         >
           <Activity size={20} />
-          <span className="truncate text-base">Activity</span>
+          <span className="truncate text-base">{t('nav.activity')}</span>
           <span className="grid min-w-6 justify-items-center text-xs font-semibold text-[#69707d]">
             {activeRunCount}
           </span>
@@ -176,7 +180,7 @@ export function ChatSidebar({
           onClick={onToggleSaved}
         >
           <Bookmark size={20} />
-          <span className="truncate text-base">Archived</span>
+          <span className="truncate text-base">{t('nav.archived')}</span>
           <span className="grid min-w-6 justify-items-center text-xs font-semibold text-[#69707d]">
             {archivedCount}
           </span>
@@ -184,7 +188,7 @@ export function ChatSidebar({
         {savedOpen && (
           <div className="mx-1 mt-1 grid gap-1 rounded-xl bg-[#f1f3f6] p-2">
             {archivedCount === 0 ? (
-              <p className="px-2 py-2 text-sm text-[#69707d]">No archived items.</p>
+              <p className="px-2 py-2 text-sm text-[#69707d]">{t('chat.noArchivedItems')}</p>
             ) : (
               <>
                 {archivedGroupConversations.map((conversation) => {
@@ -202,8 +206,8 @@ export function ChatSidebar({
                         <button
                           className={archivedRestoreButton}
                           type="button"
-                          title={`Restore ${conversation.title}`}
-                          aria-label={`Restore ${conversation.title}`}
+                          title={t('chat.restore', { name: conversation.title })}
+                          aria-label={t('chat.restore', { name: conversation.title })}
                           onClick={() => {
                             setConfirmingDeleteKey(null)
                             onRestoreGroup(conversation.id)
@@ -216,13 +220,13 @@ export function ChatSidebar({
                           type="button"
                           title={
                             confirmingDelete
-                              ? `Confirm permanent delete ${conversation.title}`
-                              : `Permanently delete ${conversation.title}`
+                              ? t('chat.confirmPermanentDelete', { name: conversation.title })
+                              : t('chat.permanentDelete', { name: conversation.title })
                           }
                           aria-label={
                             confirmingDelete
-                              ? `Confirm permanent delete ${conversation.title}`
-                              : `Permanently delete ${conversation.title}`
+                              ? t('chat.confirmPermanentDelete', { name: conversation.title })
+                              : t('chat.permanentDelete', { name: conversation.title })
                           }
                           onClick={() => {
                             if (!confirmingDelete) {
@@ -265,8 +269,8 @@ export function ChatSidebar({
                         <button
                           className={archivedRestoreButton}
                           type="button"
-                          title={`Restore ${agent.agent.name}`}
-                          aria-label={`Restore ${agent.agent.name}`}
+                          title={t('chat.restore', { name: agent.agent.name })}
+                          aria-label={t('chat.restore', { name: agent.agent.name })}
                           onClick={() => {
                             setConfirmingDeleteKey(null)
                             onRestoreAgent(agent.agent.id)
@@ -279,13 +283,13 @@ export function ChatSidebar({
                           type="button"
                           title={
                             confirmingDelete
-                              ? `Confirm permanent delete ${agent.agent.name}`
-                              : `Permanently delete ${agent.agent.name}`
+                              ? t('chat.confirmPermanentDelete', { name: agent.agent.name })
+                              : t('chat.permanentDelete', { name: agent.agent.name })
                           }
                           aria-label={
                             confirmingDelete
-                              ? `Confirm permanent delete ${agent.agent.name}`
-                              : `Permanently delete ${agent.agent.name}`
+                              ? t('chat.confirmPermanentDelete', { name: agent.agent.name })
+                              : t('chat.permanentDelete', { name: agent.agent.name })
                           }
                           onClick={() => {
                             if (!confirmingDelete) {
@@ -315,9 +319,9 @@ export function ChatSidebar({
             <Loading
               small
               withOverlay={false}
-              description="Loading Coversations"
+              description={t('chat.loadingConversations')}
             />
-            <p className="text-sm font-medium leading-5">Loading Coversations</p>
+            <p className="text-sm font-medium leading-5">{t('chat.loadingConversations')}</p>
           </div>
         ) : (
         <div className="grid gap-2">
@@ -334,7 +338,7 @@ export function ChatSidebar({
               onClick={() => setGroupsCollapsed((collapsed) => !collapsed)}
             >
               <span id="groups-heading" className={sectionHeadingText}>
-                Groups
+                {t('nav.groups')}
               </span>
               <span className={sidebarSectionChevron} aria-hidden="true">
                 {groupsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -343,7 +347,7 @@ export function ChatSidebar({
             <button
               className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
               type="button"
-              aria-label="Add group"
+              aria-label={t('modals.groupCreate.heading')}
               onClick={onCreateGroup}
             >
               <Add className="block h-4 w-4" size={16} />
@@ -400,7 +404,7 @@ export function ChatSidebar({
               onClick={() => setProjectsCollapsed((collapsed) => !collapsed)}
             >
               <span id="projects-heading" className={sectionHeadingText}>
-                Projects
+                {t('nav.projects')}
               </span>
               <span className={sidebarSectionChevron} aria-hidden="true">
                 {projectsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -409,7 +413,7 @@ export function ChatSidebar({
             <button
               className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
               type="button"
-              aria-label="Create project"
+              aria-label={t('modals.projectCreate.heading')}
               onClick={onCreateProject}
             >
               <Add className="block h-4 w-4" size={16} />
@@ -417,7 +421,7 @@ export function ChatSidebar({
           </div>
           {!projectsCollapsed && (projectConversations.length === 0 ? (
             <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
-              No projects yet.
+              {t('chat.noProjectsYet')}
             </p>
           ) : (
             <div id="projects-list" className="pr-1">
@@ -455,19 +459,19 @@ export function ChatSidebar({
                       <span className="flex min-w-6 items-center justify-end gap-2">
                         <UnreadBadge count={unreadCounts[conversation.id] ?? 0} />
                         {cloneStatus === 'cloning' ? (
-                          <span className="grid h-6 w-6 place-items-center" title="Cloning project">
+                          <span className="grid h-6 w-6 place-items-center" title={t('chat.cloningProject')}>
                             <Loading
                               small
                               withOverlay={false}
-                              description="Cloning project"
+                              description={t('chat.cloningProject')}
                               className="h-4 w-4"
                             />
                           </span>
                         ) : cloneStatus === 'failed' ? (
                           <span
                             className="h-2 w-2 rounded-full bg-[var(--cds-support-error)]"
-                            title="Clone failed"
-                            aria-label="Clone failed"
+                            title={t('chat.cloneFailed')}
+                            aria-label={t('chat.cloneFailed')}
                           />
                         ) : null}
                       </span>
@@ -492,7 +496,7 @@ export function ChatSidebar({
               onClick={() => setAgentsCollapsed((collapsed) => !collapsed)}
             >
               <span id="agents-heading" className={sectionHeadingText}>
-                Agents
+                {t('nav.agents')}
               </span>
               <span className={sidebarSectionChevron} aria-hidden="true">
                 {agentsCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -501,7 +505,7 @@ export function ChatSidebar({
             <button
               className="flex h-7 w-7 items-center justify-center rounded-lg border-0 bg-transparent p-0 leading-none text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
               type="button"
-              aria-label="Create agent"
+              aria-label={t('modals.agentCreate.heading')}
               onClick={onCreateAgent}
             >
               <Add className="block h-4 w-4" size={16} />
@@ -509,7 +513,7 @@ export function ChatSidebar({
           </div>
           {!agentsCollapsed && (agents.length === 0 ? (
             <p className="px-3 pb-3 pt-1 text-sm text-[#69707d]">
-              No agents yet.
+              {t('chat.noAgentsYet')}
             </p>
           ) : (
             <div id="agents-list" className="pr-1">

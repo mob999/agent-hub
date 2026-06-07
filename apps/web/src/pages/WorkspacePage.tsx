@@ -2,6 +2,7 @@ import { InlineNotification, SkeletonText } from '@carbon/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentCreateModal } from '../components/AgentCreateModal'
 import { AgentEditModal } from '../components/AgentEditModal'
 import { AppRail } from '../components/AppRail'
@@ -223,6 +224,7 @@ export function WorkspacePage({
   editorRoute = null,
   navigate,
 }: WorkspacePageProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const authQuery = useQuery({
     queryFn: fetchAuthMe,
@@ -1127,7 +1129,7 @@ export function WorkspacePage({
       if (error instanceof ApiRequestError) {
         setSettingsError(error.message)
       } else {
-        setSettingsError('Unable to save settings. Try again in a moment.')
+        setSettingsError(t('settings.saveFallbackError'))
       }
     } finally {
       setIsSavingSettings(false)

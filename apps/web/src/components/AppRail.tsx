@@ -1,5 +1,6 @@
 import { Button, Theme } from '@carbon/react'
 import { Chat, Devices, JobRun, Logout, Renew, Settings, UserAvatar } from '@carbon/react/icons'
+import { useTranslation } from 'react-i18next'
 import type { User, WorkspaceView } from '../lib/api'
 
 interface AppRailProps {
@@ -28,6 +29,7 @@ export function AppRail({
   logout,
   openSettings,
 }: AppRailProps) {
+  const { t } = useTranslation()
   const displayName = user?.name?.trim() || user?.email || 'A'
   const avatar = user?.avatar ?? null
 
@@ -36,13 +38,13 @@ export function AppRail({
       theme="g100"
       as="aside"
       className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] justify-items-center border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)] py-2"
-      aria-label="Primary workspace tools"
+      aria-label={t('appRail.primaryTools')}
     >
       <a
-        className="absolute left-2 top-2 z-20 -translate-y-20 bg-[var(--cds-layer-01)] p-2 text-[var(--cds-text-primary)] focus:translate-y-0"
+        className="sr-only z-20 whitespace-nowrap bg-[var(--cds-layer-01)] p-2 text-[var(--cds-text-primary)] focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:outline-2 focus:outline-offset-2 focus:outline-[var(--cds-focus)]"
         href="#main-content"
       >
-        Skip to workspace
+        {t('appRail.skip')}
       </a>
       <button
         className={`mb-2 grid h-10 w-10 cursor-pointer place-items-center border bg-[var(--cds-layer-01)] text-sm font-semibold text-[var(--cds-text-primary)] hover:border-[var(--cds-border-strong-01)] hover:bg-[var(--cds-layer-selected-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
@@ -51,7 +53,7 @@ export function AppRail({
             : 'border-[var(--cds-border-subtle-01)]'
         }`}
         type="button"
-        aria-label="Account"
+        aria-label={t('appRail.account')}
         aria-expanded={accountExpanded}
         onClick={toggleAccount}
       >
@@ -61,7 +63,7 @@ export function AppRail({
         <div
           className="absolute left-12 top-2 z-10 grid w-64 gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4 shadow-2xl"
           role="dialog"
-          aria-label="Account"
+          aria-label={t('appRail.account')}
         >
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[var(--cds-layer-02)] shadow-[0_1px_3px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.12)_inset]">
@@ -72,7 +74,7 @@ export function AppRail({
               )}
             </span>
             <div className="min-w-0">
-              <p className="cds--type-label-01">Signed in as</p>
+              <p className="cds--type-label-01">{t('appRail.signedInAs')}</p>
               <strong className="block truncate">{displayName}</strong>
             </div>
           </div>
@@ -84,15 +86,15 @@ export function AppRail({
             renderIcon={Logout}
             onClick={logout}
           >
-            Log out
+            {t('appRail.logOut')}
           </Button>
         </div>
       )}
-      <nav className="flex flex-col items-center gap-1.5" aria-label="Workspace sections">
+      <nav className="flex flex-col items-center gap-1.5" aria-label={t('appRail.sections')}>
         <button
           className={`${railButton} ${activeView === 'chat' ? activeRailButton : ''}`}
           type="button"
-          aria-label="Chat"
+          aria-label={t('appRail.chat')}
           aria-current={activeView === 'chat' ? 'page' : undefined}
           onClick={() => setActiveView('chat')}
         >
@@ -101,7 +103,7 @@ export function AppRail({
         <button
           className={`${railButton} ${activeView === 'runs' ? activeRailButton : ''}`}
           type="button"
-          aria-label="Runs"
+          aria-label={t('appRail.runs')}
           aria-current={activeView === 'runs' ? 'page' : undefined}
           onClick={() => setActiveView('runs')}
         >
@@ -110,7 +112,7 @@ export function AppRail({
         <button
           className={`${railButton} ${activeView === 'daemon' ? activeRailButton : ''}`}
           type="button"
-          aria-label="Daemon"
+          aria-label={t('appRail.daemon')}
           aria-current={activeView === 'daemon' ? 'page' : undefined}
           onClick={() => setActiveView('daemon')}
         >
@@ -118,10 +120,10 @@ export function AppRail({
         </button>
       </nav>
       <div className="flex flex-col items-center gap-1.5">
-        <button className={railButton} type="button" aria-label="Refresh" onClick={refreshWorkspace}>
+        <button className={railButton} type="button" aria-label={t('common.refresh')} onClick={refreshWorkspace}>
           <Renew size={20} />
         </button>
-        <button className={railButton} type="button" aria-label="Settings" onClick={openSettings}>
+        <button className={railButton} type="button" aria-label={t('common.settings')} onClick={openSettings}>
           <Settings size={20} />
         </button>
       </div>

@@ -1,6 +1,7 @@
 import { Search } from '@carbon/react/icons'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type {
   AgentDetails,
   Conversation,
@@ -56,16 +57,16 @@ function highlightText(text: string, query: string): ReactNode {
   )
 }
 
-function conversationKindLabel(hit: ConversationSearchHit): string {
+function conversationKindLabel(hit: ConversationSearchHit, t: (key: string) => string): string {
   if (hit.conversationType === 'group') {
-    return 'Group'
+    return t('search.groupType')
   }
 
   if (hit.conversationType === 'project') {
-    return 'Project'
+    return t('search.projectType')
   }
 
-  return 'Agent'
+  return t('search.agentType')
 }
 
 const filterSelectClass =
@@ -93,6 +94,7 @@ export function SearchWorkspace({
   sort,
   time,
 }: SearchWorkspaceProps) {
+  const { t } = useTranslation()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const channelOptions = useMemo(
     () => conversations.map((conversation) => ({
@@ -103,14 +105,14 @@ export function SearchWorkspace({
   )
   const senderOptions = useMemo(
     () => [
-      { value: '', label: 'ANY SENDER' },
-      { value: 'user', label: 'User' },
+      { value: '', label: t('search.anySender') },
+      { value: 'user', label: t('search.userSender') },
       ...agents.map((agent) => ({
         value: agent.agent.id,
         label: agent.agent.name,
       })),
     ],
-    [agents],
+    [agents, t],
   )
 
   useEffect(() => {
@@ -120,7 +122,7 @@ export function SearchWorkspace({
   return (
     <section
       className="grid h-full min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[#f7f8fa]"
-      aria-label="Search chats"
+      aria-label={t('search.aria')}
     >
       <header className="border-b border-[#eef0f3] bg-white px-6 py-5 max-[671px]:px-4">
         <div className="grid min-w-0 gap-4">
@@ -129,14 +131,14 @@ export function SearchWorkspace({
               <Search size={18} />
             </span>
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-semibold leading-7 text-[#161616]">Search</h1>
+              <h1 className="truncate text-xl font-semibold leading-7 text-[#161616]">{t('search.title')}</h1>
               <p className="truncate text-sm leading-5 text-[#69707d]">
-                Find messages, groups, direct chats, and agent replies.
+                {t('search.findSubtitle')}
               </p>
             </div>
           </div>
           <label className="relative grid min-w-0" htmlFor="workspace-search-input">
-            <span className="sr-only">Search messages</span>
+            <span className="sr-only">{t('search.messagesLabel')}</span>
             <Search
               className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[#69707d]"
               size={18}
@@ -145,7 +147,7 @@ export function SearchWorkspace({
               ref={inputRef}
               id="workspace-search-input"
               className="h-11 min-w-0 rounded-2xl border border-[#d8dee6] bg-white py-2 pl-10 pr-3 text-base leading-6 text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.05)] outline-none placeholder:text-[#8d95a3] focus:border-[#b9c3cf] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--cds-focus)]"
-              placeholder="Search messages, groups, or agents"
+              placeholder={t('search.placeholder')}
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
             />
@@ -158,7 +160,7 @@ export function SearchWorkspace({
           className={filterSelectClass}
           value={selectedSender ?? ''}
           onChange={(event) => onSenderChange(event.target.value || undefined)}
-          aria-label="Filter by sender"
+          aria-label={t('search.filterSender')}
         >
           {senderOptions.map((option) => (
             <option key={option.value || 'any'} value={option.value}>
@@ -170,9 +172,9 @@ export function SearchWorkspace({
           className={filterSelectClass}
           value={selectedChannelId ?? ''}
           onChange={(event) => onChannelChange(event.target.value || undefined)}
-          aria-label="Filter by group"
+          aria-label={t('search.filterGroup')}
         >
-          <option value="">ANY GROUP</option>
+          <option value="">{t('search.anyGroup')}</option>
           {channelOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
@@ -183,20 +185,20 @@ export function SearchWorkspace({
           className={filterSelectClass}
           value={time}
           onChange={(event) => onTimeChange(event.target.value as SearchTimeFilter)}
-          aria-label="Filter by time"
+          aria-label={t('search.filterTime')}
         >
-          <option value="any">ANY TIME</option>
-          <option value="24h">LAST 24 HOURS</option>
-          <option value="7d">LAST 7 DAYS</option>
-          <option value="30d">LAST 30 DAYS</option>
+          <option value="any">{t('search.anyTime')}</option>
+          <option value="24h">{t('search.last24Hours')}</option>
+          <option value="7d">{t('search.last7Days')}</option>
+          <option value="30d">{t('search.last30Days')}</option>
         </select>
-        <div className="ml-auto inline-flex h-9 overflow-hidden rounded-full bg-[#eef0f4] p-0.5" role="group" aria-label="Sort results">
+        <div className="ml-auto inline-flex h-9 overflow-hidden rounded-full bg-[#eef0f4] p-0.5" role="group" aria-label={t('search.sort')}>
           {(['relevant', 'recent'] as const).map((value) => {
             const selected = sort === value
 
             return (
               <button
-                className={`min-w-20 cursor-pointer rounded-full border-0 px-3 text-sm font-semibold capitalize transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                className={`min-w-20 cursor-pointer rounded-full border-0 px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
                   selected
                     ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
                     : 'bg-transparent text-[#69707d] hover:text-[#161616]'
@@ -206,7 +208,7 @@ export function SearchWorkspace({
                 aria-pressed={selected}
                 onClick={() => onSortChange(value)}
               >
-                {value}
+                {value === 'relevant' ? t('search.relevant') : t('search.recent')}
               </button>
             )
           })}
@@ -217,14 +219,16 @@ export function SearchWorkspace({
         <div className="mb-4 flex min-h-6 items-center justify-between gap-3">
           <div className={resultSectionTitleClass}>
             {isLoading
-              ? 'Searching'
+              ? t('search.searching')
               : results === null
-                ? 'Ready to search'
-                : `${results.totalCount} ${results.totalCount === 1 ? 'result' : 'results'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
+                ? t('search.ready')
+                : query.trim()
+                  ? t('search.resultCountFor', { count: results.totalCount, query: query.trim() })
+                  : t('search.resultCount', { count: results.totalCount })}
           </div>
           {query.trim().length > 0 && (
             <div className="truncate text-xs text-[#69707d]">
-              Press Enter in a result to open it.
+              {t('search.pressEnterHint')}
             </div>
           )}
         </div>
@@ -240,9 +244,9 @@ export function SearchWorkspace({
                 <Search size={22} />
               </span>
               <div className="grid gap-1">
-                <h2 className="text-base font-semibold text-[#161616]">Search across conversations</h2>
+                <h2 className="text-base font-semibold text-[#161616]">{t('search.welcomeTitle')}</h2>
                 <p className="text-sm leading-5 text-[#69707d]">
-                  Type a keyword to find matching messages, groups, direct chats, and agent replies.
+                  {t('search.typeSubtitle')}
                 </p>
               </div>
             </div>
@@ -251,9 +255,9 @@ export function SearchWorkspace({
         {!isLoading && query.trim().length > 0 && results !== null && results.totalCount === 0 && (
           <div className="grid min-h-80 place-items-center text-center">
             <div className="grid max-w-md gap-1">
-              <h2 className="text-base font-semibold text-[#161616]">No matching messages</h2>
+              <h2 className="text-base font-semibold text-[#161616]">{t('search.noMatches')}</h2>
               <p className="text-sm leading-5 text-[#69707d]">
-                Try a shorter keyword, choose ANY GROUP, or widen the sender and time filters.
+                {t('search.noMatchesSubtitle')}
               </p>
             </div>
           </div>
@@ -261,7 +265,7 @@ export function SearchWorkspace({
         {results !== null && results.conversationHits.length > 0 && (
           <section className="mb-6">
             <div className={`mb-2 ${resultSectionTitleClass}`}>
-              Conversations
+              {t('search.conversations')}
             </div>
             <div className="grid gap-2">
               {results.conversationHits.map((hit) => (
@@ -276,7 +280,7 @@ export function SearchWorkspace({
                       {highlightText(hit.title, query)}
                     </span>
                     <span className="shrink-0 rounded-md border border-[#dde1e6] bg-[#f7f8fa] px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-4 text-[#69707d]">
-                      {conversationKindLabel(hit)}
+                      {conversationKindLabel(hit, t)}
                     </span>
                   </div>
                 </button>
@@ -287,7 +291,7 @@ export function SearchWorkspace({
         {results !== null && results.messageHits.length > 0 && (
           <section>
             <div className={`mb-2 ${resultSectionTitleClass}`}>
-              Messages
+              {t('search.messages')}
             </div>
             <div className="grid gap-2">
               {results.messageHits.map((hit) => (
@@ -299,7 +303,7 @@ export function SearchWorkspace({
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-[#69707d]">
                     <span className="font-semibold text-[#161616]">{hit.senderLabel}</span>
-                    <span>in {hit.conversationLabel}</span>
+                    <span>{t('search.inConversation', { conversation: hit.conversationLabel })}</span>
                     <span>{formatTime(hit.createdAt)}</span>
                   </div>
                   <div className="line-clamp-3 text-sm leading-5 text-[#161616]">

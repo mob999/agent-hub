@@ -1,5 +1,6 @@
 import { InlineNotification, Modal, Select, SelectItem, TextArea, TextInput } from '@carbon/react'
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails, DaemonDevice } from '../lib/api'
 
@@ -28,6 +29,7 @@ export function ProjectCreateModal({
   onClose,
   onCreate,
 }: ProjectCreateModalProps) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [remoteUrl, setRemoteUrl] = useState('')
@@ -89,9 +91,9 @@ export function ProjectCreateModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Create project"
-      primaryButtonText={isCreating ? 'Creating...' : 'Create'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.projectCreate.heading')}
+      primaryButtonText={isCreating ? t('modals.agentCreate.creating') : t('common.create')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canCreate}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -112,7 +114,7 @@ export function ProjectCreateModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Project was not created"
+            title={t('modals.projectCreate.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -121,8 +123,8 @@ export function ProjectCreateModal({
         {availableDevices.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No daemon available"
-            subtitle="Connect an online daemon before creating a project."
+            title={t('modals.projectCreate.daemonRequiredTitle')}
+            subtitle={t('modals.projectCreate.daemonRequiredSubtitle')}
             lowContrast
             hideCloseButton
           />
@@ -130,15 +132,15 @@ export function ProjectCreateModal({
         {availableDevices.length > 0 && selectedDaemonAgents.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No ready agents on this daemon"
-            subtitle="Select a daemon with ready agents, or create one on this daemon first."
+            title={t('modals.projectCreate.noReadyAgentsTitle')}
+            subtitle={t('modals.projectCreate.noReadyAgentsSubtitle')}
             lowContrast
             hideCloseButton
           />
         )}
         <TextInput
           id="project-remote-url"
-          labelText="Git remote URL"
+          labelText={t('modals.projectCreate.remoteUrl')}
           value={remoteUrl}
           disabled={isCreating}
           placeholder="https://github.com/acme/app.git"
@@ -146,16 +148,16 @@ export function ProjectCreateModal({
         />
         <TextInput
           id="project-name"
-          labelText="Project name"
+          labelText={t('modals.projectCreate.name')}
           value={title}
           disabled={isCreating}
           maxLength={80}
-          placeholder="Inferred from remote if empty"
+          placeholder={t('modals.projectCreate.namePlaceholder')}
           onChange={(event) => setTitle(event.target.value)}
         />
         <TextArea
           id="project-description"
-          labelText="Description"
+          labelText={t('modals.agentCreate.description')}
           rows={3}
           value={description}
           disabled={isCreating}
@@ -163,7 +165,7 @@ export function ProjectCreateModal({
         />
         <Select
           id="project-daemon"
-          labelText="Daemon"
+          labelText={t('modals.projectCreate.daemon')}
           value={selectedDaemonDeviceId}
           disabled={isCreating || availableDevices.length === 0}
           onChange={(event) => {
@@ -173,7 +175,7 @@ export function ProjectCreateModal({
           }}
         >
           {availableDevices.length === 0 ? (
-            <SelectItem value="" text="No daemon available" />
+            <SelectItem value="" text={t('modals.projectCreate.daemonRequiredTitle')} />
           ) : (
             availableDevices.map((device) => (
               <SelectItem key={device.id} value={device.id} text={device.name} />
@@ -183,7 +185,7 @@ export function ProjectCreateModal({
         <AgentMemberSelector
           agents={selectedDaemonAgents}
           disabled={isCreating || selectedDaemonDeviceId.length === 0}
-          helpText="Only ready agents on the selected daemon are shown."
+          helpText={t('modals.agentMembers.projectHelp')}
           idPrefix="project-agent"
           orchestratorAgentId={validOrchestratorAgentId}
           selectedAgentIds={validSelectedAgentIds}

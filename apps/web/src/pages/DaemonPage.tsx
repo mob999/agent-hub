@@ -1,6 +1,7 @@
 import { InlineNotification, Modal, TextInput } from '@carbon/react'
 import { Add, Checkmark, Copy, Devices, Renew, TrashCan } from '@carbon/react/icons'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MarkdownCodeBlock } from '../components/MarkdownCodeBlock'
@@ -14,6 +15,8 @@ interface DaemonPageProps {
   onDevicesChanged: () => void
 }
 
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
 function detectDaemonCommandPlatform(): 'windows' | 'posix' {
   if (typeof navigator === 'undefined') {
     return 'posix'
@@ -23,6 +26,7 @@ function detectDaemonCommandPlatform(): 'windows' | 'posix' {
 }
 
 export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPageProps) {
+  const { t } = useTranslation()
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
   const [registrationMode, setRegistrationMode] = useState<'create' | 'reconnect'>('create')
@@ -82,7 +86,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       }
       onDevicesChanged()
     } catch (error) {
-      setRegistrationError(error instanceof Error ? error.message : 'Unable to generate daemon command.')
+      setRegistrationError(error instanceof Error ? error.message : t('daemon.unableGenerate'))
     } finally {
       setRegistrationLoading(false)
     }
@@ -124,7 +128,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       await navigator.clipboard.writeText(registrationCommand.command)
       setCommandCopied(true)
     } catch {
-      setRegistrationError('Copy failed. Select the command and copy it manually.')
+      setRegistrationError(t('daemon.copyFailed'))
     }
   }
 
@@ -132,7 +136,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     const name = registrationName.trim().replace(/\s+/g, ' ')
 
     if (name.length === 0 || name.length > 80) {
-      setRegistrationError('Device name must be 1-80 characters.')
+      setRegistrationError(t('daemon.deviceNameInvalid'))
       return
     }
 
@@ -147,7 +151,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     const name = activeDeviceNameDraft.trim().replace(/\s+/g, ' ')
 
     if (name.length === 0 || name.length > 80) {
-      setDeviceSaveError('Device name must be 1-80 characters.')
+      setDeviceSaveError(t('daemon.deviceNameInvalid'))
       return
     }
 
@@ -160,7 +164,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       })
       onDevicesChanged()
     } catch (error) {
-      setDeviceSaveError(error instanceof Error ? error.message : 'Unable to update device.')
+      setDeviceSaveError(error instanceof Error ? error.message : t('daemon.unableUpdate'))
     } finally {
       setDeviceSaving(false)
     }
@@ -185,7 +189,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       setSelectedDeviceId(null)
       onDevicesChanged()
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Unable to delete device.')
+      setDeleteError(error instanceof Error ? error.message : t('daemon.unableDelete'))
     } finally {
       setDeleteLoading(false)
     }
@@ -195,18 +199,18 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     <section
       id="main-content"
       className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
-      aria-label="Daemon management"
+      aria-label={t('daemon.title')}
     >
       <aside
         className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:hidden"
-        aria-label="Daemon list"
+        aria-label={t('daemon.listAria')}
       >
         <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
-          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">Daemon</h1>
+          <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">{t('daemon.title')}</h1>
           <button
             className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
-            aria-label="Add daemon"
+            aria-label={t('daemon.add')}
             onClick={openRegistrationModal}
           >
             <Add size={16} />
@@ -214,7 +218,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
         </header>
 
         {devices.length === 0 ? (
-          <p className="p-4 text-[#69707d]">No daemon connected.</p>
+          <p className="p-4 text-[#69707d]">{t('daemon.empty')}</p>
         ) : (
           <div className="grid gap-1 p-3">
             {devices.map((device) => (
@@ -243,7 +247,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                 <span className="grid min-w-0 gap-0.5">
                   <strong className="truncate">{device.name}</strong>
                   <small className="truncate font-normal text-[#69707d]">
-                    daemon {device.status}
+                    daemon {t(`daemon.${device.status}`)}
                   </small>
                 </span>
                 <StatusDot status={device.status} />
@@ -254,7 +258,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       </aside>
 
       <WorkspacePanel>
-        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label="Daemon detail">
+        <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label={t('daemon.detailAria')}>
           <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
             <div className="flex min-w-0 items-center gap-3">
               <span
@@ -263,7 +267,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
               >
                 <Devices size={18} />
               </span>
-              <strong className="truncate">{selectedDevice?.name ?? 'No daemon selected'}</strong>
+              <strong className="truncate">{selectedDevice?.name ?? t('daemon.noSelected')}</strong>
             </div>
           </header>
 
@@ -271,10 +275,10 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             <InlineNotification
               className="mx-6 mt-4 max-w-none max-[671px]:mx-4"
               kind="error"
-              title="Daemon unavailable"
+              title={t('daemon.unavailable')}
               subtitle={deviceError}
               lowContrast
-              aria-label="Close notification"
+              aria-label={t('common.closeNotification')}
             />
           )}
 
@@ -282,7 +286,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             <>
               <section
                 className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 p-6 max-[671px]:p-4"
-                aria-label="Selected daemon"
+                aria-label={t('daemon.noSelected')}
               >
                 <span
                   className="grid h-16 w-16 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa]"
@@ -294,26 +298,26 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                   <h2 className="truncate text-xl font-semibold leading-snug">{selectedDevice.name}</h2>
                   <p className="mt-1 flex items-center gap-1.5 text-[var(--cds-text-secondary)]">
                     <StatusDot status={selectedDevice.status} />
-                    <span>{selectedDevice.status}</span>
+                    <span>{t(`daemon.${selectedDevice.status}`)}</span>
                   </p>
                   <small className="mt-1 block truncate text-[var(--cds-text-secondary)]">
-                    Last seen {formatTime(selectedDevice.lastSeenAt)}
+                    {t('daemon.lastSeen', { time: formatTime(selectedDevice.lastSeenAt) })}
                   </small>
                 </div>
               </section>
 
-              <section className="border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label="Runtimes">
+              <section className="border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label={t('daemon.runtimes')}>
                 {selectedDevice.runtimes.length === 0 ? (
-                  <p className="text-[var(--cds-text-secondary)]">No runtimes reported by this daemon yet.</p>
+                  <p className="text-[var(--cds-text-secondary)]">{t('daemon.emptyRuntime')}</p>
                 ) : (
                   <div className="grid">
                     <div
                       className="grid grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.85fr)_minmax(11rem,0.8fr)] gap-4 border-b border-[#eef0f3] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)] max-[760px]:hidden"
                       aria-hidden="true"
                     >
-                      <span>Runtimes</span>
-                      <span>Version</span>
-                      <span>Status</span>
+                      <span>{t('daemon.runtimes')}</span>
+                      <span>{t('daemon.version')}</span>
+                      <span>{t('daemon.status')}</span>
                     </div>
                     {selectedDevice.runtimes.map((runtime) => (
                       <div
@@ -329,15 +333,15 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                 )}
               </section>
 
-              <section className="daemon-device-settings border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label="Device settings">
+              <section className="daemon-device-settings border-t border-[#eef0f3] p-6 max-[671px]:p-4" aria-label={t('daemon.settingsAria')}>
                 <div className="grid max-w-xl gap-4">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--cds-text-secondary)]">
-                    Settings
+                    {t('common.settings')}
                   </h3>
                   {deviceSaveError && (
                     <InlineNotification
                       kind="error"
-                      title="Device was not updated"
+                      title={t('daemon.deviceSaveErrorTitle')}
                       subtitle={deviceSaveError}
                       lowContrast
                       hideCloseButton
@@ -346,7 +350,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                   {deleteError && (
                     <InlineNotification
                       kind="error"
-                      title="Device was not deleted"
+                      title={t('daemon.deleteErrorTitle')}
                       subtitle={deleteError}
                       lowContrast
                       hideCloseButton
@@ -358,7 +362,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                         className="text-sm font-semibold text-[#161616]"
                         htmlFor="daemon-device-name"
                       >
-                        Name
+                        {t('daemon.deviceName')}
                       </label>
                       <div className="flex items-center gap-2">
                         <TextInput
@@ -382,8 +386,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                           onClick={() => {
                             void saveDeviceName()
                           }}
-                          title={deviceSaving ? 'Saving' : 'Save name'}
-                          aria-label={deviceSaving ? 'Saving device name' : 'Save device name'}
+                          title={deviceSaving ? t('common.saving') : t('daemon.saveName')}
+                          aria-label={deviceSaving ? t('common.saving') : t('daemon.saveDeviceName')}
                         >
                           <Checkmark size={16} />
                         </button>
@@ -391,21 +395,21 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                     </div>
 
                     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-[#eef0f3] py-3">
-                      <p className="text-sm font-semibold text-[#161616]">Reconnect</p>
+                      <p className="text-sm font-semibold text-[#161616]">{t('common.reconnect')}</p>
                       <span aria-hidden="true" />
                       <button
                         type="button"
                         className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#f1d27a] bg-[#fff8df] text-[#b28600] transition hover:border-[#d7af2f] hover:bg-[#fff1bf]"
                         onClick={openReconnectModal}
-                        title="Reconnect"
-                        aria-label="Reconnect daemon device"
+                        title={t('common.reconnect')}
+                        aria-label={t('daemon.reconnectDevice')}
                       >
                         <Renew size={16} />
                       </button>
                     </div>
 
                     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 py-3">
-                      <p className="text-sm font-semibold text-[#161616]">Delete</p>
+                      <p className="text-sm font-semibold text-[#161616]">{t('daemon.delete')}</p>
                       <span aria-hidden="true" />
                       <button
                         type="button"
@@ -414,8 +418,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                         onClick={() => {
                           void deleteDevice()
                         }}
-                        title={deleteConfirming ? 'Confirm delete' : 'Delete'}
-                        aria-label={deleteConfirming ? 'Confirm delete daemon device' : 'Delete daemon device'}
+                        title={deleteConfirming ? t('daemon.deleteConfirm') : t('daemon.delete')}
+                        aria-label={deleteConfirming ? t('daemon.deleteConfirmDevice') : t('daemon.deleteDevice')}
                       >
                         {deleteLoading ? (
                           <span
@@ -436,9 +440,9 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
           ) : (
             <div className="grid min-h-[calc(100vh-4.5rem)] content-center justify-items-center gap-3 text-center">
               <Devices size={32} />
-              <h2 className="cds--type-heading-compact-02">No daemon connected</h2>
+              <h2 className="cds--type-heading-compact-02">{t('daemon.empty')}</h2>
               <p className="text-[var(--cds-text-secondary)]">
-                Start a local daemon and it will appear in this page.
+                {t('daemon.startLocal')}
               </p>
             </div>
           )}
@@ -448,7 +452,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       <Modal
         className="centered-modal-actions daemon-registration-modal"
         open={registrationOpen}
-        modalHeading={registrationMode === 'create' ? 'Create daemon' : 'Reconnect daemon'}
+        modalHeading={registrationMode === 'create' ? t('daemon.create') : t('daemon.reconnect')}
         passiveModal
         onRequestClose={closeRegistrationModal}
       >
@@ -458,7 +462,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
               <div className="grid max-w-lg grid-cols-[minmax(0,1fr)_5rem] items-end gap-2">
                 <TextInput
                   id="daemon-registration-name"
-                  labelText="Device name"
+                  labelText={t('daemon.deviceName')}
                   value={registrationName}
                   maxLength={80}
                   onChange={(event) => setRegistrationName(event.target.value)}
@@ -474,7 +478,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                   disabled={registrationLoading || registrationName.trim().length === 0}
                   onClick={createNamedDevice}
                 >
-                  <span>{registrationLoading ? 'Wait' : 'Generate'}</span>
+                  <span>{registrationLoading ? t('common.wait') : t('daemon.generate')}</span>
                 </button>
               </div>
             </div>
@@ -483,7 +487,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
           {registrationError && (
             <InlineNotification
               kind="error"
-              title="Command was not generated"
+              title={t('daemon.commandFailed')}
               subtitle={registrationError}
               lowContrast
               hideCloseButton
@@ -503,8 +507,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
                   {registrationCommand
                     ? `\`\`\`${registrationCommand.shell}\n${registrationCommand.command}\n\`\`\``
                     : registrationLoading
-                      ? 'Generating command...'
-                      : 'Command unavailable.'}
+                      ? t('daemon.generatingCommand')
+                      : t('daemon.commandUnavailable')}
                 </ReactMarkdown>
               </div>
             </div>
@@ -512,8 +516,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             <button
               className="grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-[#d8dee6] bg-white text-[#596171] shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:border-[#c7d0dc] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:opacity-50"
               type="button"
-              aria-label="Copy daemon command"
-              title={commandCopied ? 'Copied' : 'Copy'}
+              aria-label={t('daemon.copyCommand')}
+              title={commandCopied ? t('common.copied') : t('common.copy')}
               disabled={!registrationCommand?.command}
               onClick={() => {
                 void copyRegistrationCommand()
@@ -525,17 +529,17 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
           )}
 
           {registrationCommand && (
-            <p className="text-sm leading-5 text-[#69707d]">Copy and run it in your terminal.</p>
+            <p className="text-sm leading-5 text-[#69707d]">{t('daemon.copyRun')}</p>
           )}
 
           {registrationCommand && (
             <InlineNotification
               kind={registrationConnected ? 'success' : 'warning'}
-              title={registrationConnected ? 'Daemon connected' : 'Waiting for daemon connection'}
+              title={registrationConnected ? t('daemon.registrationConnectedTitle') : t('daemon.registrationWaitingTitle')}
               subtitle={
                 registrationConnected
-                  ? 'Device is online.'
-                  : 'Run the command and wait for this device to connect.'
+                  ? t('daemon.registrationConnectedSubtitle')
+                  : t('daemon.registrationWaitingSubtitle')
               }
               lowContrast
               hideCloseButton
@@ -594,15 +598,18 @@ function RuntimeBrandIcon({ runtimeKind }: { runtimeKind: RuntimeKind }) {
 }
 
 function RuntimeVersion({ runtime }: { runtime: DaemonRuntime }) {
+  const { t } = useTranslation()
+
   return (
-    <span className="min-w-0 truncate text-[#596171]" title={runtime.runtimeVersion ?? 'No version reported'}>
-      {runtime.runtimeVersion ?? 'Not reported'}
+    <span className="min-w-0 truncate text-[#596171]" title={runtime.runtimeVersion ?? t('daemon.noVersionReported')}>
+      {runtime.runtimeVersion ?? t('daemon.notReported')}
     </span>
   )
 }
 
 function RuntimeStatus({ status }: { status: DaemonRuntime['status'] }) {
-  const meta = runtimeStatusMeta(status)
+  const { t } = useTranslation()
+  const meta = runtimeStatusMeta(status, t)
 
   return (
     <span className="flex min-w-0 items-center gap-2">
@@ -636,26 +643,26 @@ function runtimeDisplayName(runtimeKind: RuntimeKind): string {
   return 'Custom runtime'
 }
 
-function runtimeStatusMeta(status: DaemonRuntime['status']): {
+function runtimeStatusMeta(status: DaemonRuntime['status'], t: Translate): {
   label: string
   dot: string
 } {
   if (status === 'ready') {
     return {
-      label: 'Ready',
+      label: t('common.ready'),
       dot: 'bg-[var(--cds-support-success)]',
     }
   }
 
   if (status === 'disabled') {
     return {
-      label: 'Disabled',
+      label: t('common.disabled'),
       dot: 'bg-[#8d8d8d]',
     }
   }
 
   return {
-    label: 'Unavailable',
+    label: t('common.unavailable'),
     dot: 'bg-[var(--cds-support-error)]',
   }
 }
@@ -665,7 +672,9 @@ interface StatusDotProps {
 }
 
 function StatusDot({ status }: StatusDotProps) {
+  const { t } = useTranslation()
   const isOnline = status === 'online'
+  const label = t(`daemon.${status}`)
 
   return (
     <span
@@ -674,8 +683,8 @@ function StatusDot({ status }: StatusDotProps) {
           ? 'border-[var(--cds-support-success)] bg-[var(--cds-support-success)]'
           : 'border-[var(--cds-border-strong-01)] bg-[var(--cds-text-placeholder)]'
       }`}
-      aria-label={status}
-      title={status}
+      aria-label={label}
+      title={label}
     />
   )
 }

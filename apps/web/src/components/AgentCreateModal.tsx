@@ -7,6 +7,7 @@ import {
   TextInput,
 } from '@carbon/react'
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DaemonDevice, RuntimeKind } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AvatarPicker } from './AvatarPicker'
@@ -46,6 +47,7 @@ export function AgentCreateModal({
   onClose,
   onCreate,
 }: AgentCreateModalProps) {
+  const { t } = useTranslation()
   const availableDevices = useMemo(() => readyRuntimeDevices(devices), [devices])
   const initialDeviceId =
     availableDevices.find((device) => device.id === defaultDaemonDeviceId)?.id ??
@@ -76,9 +78,9 @@ export function AgentCreateModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Create agent"
-      primaryButtonText={isCreating ? 'Creating...' : 'Create'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.agentCreate.heading')}
+      primaryButtonText={isCreating ? t('modals.agentCreate.creating') : t('common.create')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canCreate}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -99,7 +101,7 @@ export function AgentCreateModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Agent was not created"
+            title={t('modals.agentCreate.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -108,15 +110,15 @@ export function AgentCreateModal({
         {availableDevices.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No runtime available"
-            subtitle="Connect a daemon with a detected runtime before creating an agent."
+            title={t('modals.agentCreate.noRuntimeTitle')}
+            subtitle={t('modals.agentCreate.noRuntimeSubtitle')}
             lowContrast
             hideCloseButton
           />
         )}
         <TextInput
           id="agent-name"
-          labelText="Name"
+          labelText={t('modals.agentCreate.name')}
           value={name}
           disabled={isCreating}
           maxLength={120}
@@ -124,21 +126,21 @@ export function AgentCreateModal({
         />
         <TextArea
           id="agent-description"
-          labelText="Description"
+          labelText={t('modals.agentCreate.description')}
           rows={3}
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
         />
         <AvatarPicker
-          label="Avatar"
+          label={t('modals.agentCreate.avatar')}
           value={avatar}
           disabled={isCreating}
           onChange={setAvatar}
         />
         <Select
           id="agent-daemon"
-          labelText="Daemon"
+          labelText={t('modals.agentCreate.daemon')}
           value={selectedDaemonDeviceId}
           disabled={isCreating || availableDevices.length === 0}
           onChange={(event) => {
@@ -152,7 +154,7 @@ export function AgentCreateModal({
         </Select>
         <Select
           id="agent-runtime"
-          labelText="Runtime"
+          labelText={t('modals.agentCreate.runtime')}
           value={selectedRuntimeKind}
           disabled={isCreating || !selectedDevice}
           onChange={(event) => setRuntimeKind(event.target.value as RuntimeKind)}

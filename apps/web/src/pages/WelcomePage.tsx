@@ -17,6 +17,7 @@ import {
 } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   apiRequest,
   type AgentDetails,
@@ -243,7 +244,8 @@ function StepIcon({ complete }: { complete: boolean }) {
 }
 
 function RuntimeStatusDot({ status }: { status: DaemonDevice['runtimes'][number]['status'] }) {
-  const meta = runtimeStatusMeta(status)
+  const { t } = useTranslation()
+  const meta = runtimeStatusMeta(status, t)
 
   return (
     <span className="flex min-w-0 items-center gap-2">
@@ -294,10 +296,12 @@ function RuntimeBrandIcon({ runtimeKind }: { runtimeKind: RuntimeKind }) {
 }
 
 function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
+  const { t } = useTranslation()
+
   if (devices.length === 0) {
     return (
       <p className="rounded-xl border border-[#dde1e6] bg-white px-3 py-2 text-sm text-[#69707d]">
-        Runtime details are still refreshing.
+        {t('welcome.runtimeRefreshing')}
       </p>
     )
   }
@@ -308,11 +312,11 @@ function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
         <div className="grid gap-2" key={device.id}>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <strong className="truncate text-sm text-[#161616]">{device.name}</strong>
-            <Tag size="sm" type="green">online</Tag>
+            <Tag size="sm" type="green">{t('daemon.online')}</Tag>
           </div>
           {device.runtimes.length === 0 ? (
             <p className="rounded-xl border border-[#dde1e6] bg-white px-3 py-2 text-sm text-[#69707d]">
-              No runtimes reported by this daemon yet.
+              {t('daemon.emptyRuntime')}
             </p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-[#dde1e6] bg-white">
@@ -320,9 +324,9 @@ function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
                 className="grid grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(9rem,0.7fr)] gap-3 border-b border-[#eef0f3] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#69707d] max-[760px]:hidden"
                 aria-hidden="true"
               >
-                <span>Runtimes</span>
-                <span>Version</span>
-                <span>Status</span>
+                <span>{t('daemon.runtimes')}</span>
+                <span>{t('daemon.version')}</span>
+                <span>{t('daemon.status')}</span>
               </div>
               {device.runtimes.map((runtime) => (
                 <div
@@ -330,8 +334,8 @@ function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
                   key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
                 >
                   <RuntimeIdentity runtimeKind={runtime.runtimeKind} />
-                  <span className="min-w-0 truncate text-[#596171]" title={runtime.runtimeVersion ?? 'No version reported'}>
-                    {runtime.runtimeVersion ?? 'Not reported'}
+                  <span className="min-w-0 truncate text-[#596171]" title={runtime.runtimeVersion ?? t('daemon.noVersionReported')}>
+                    {runtime.runtimeVersion ?? t('daemon.notReported')}
                   </span>
                   <RuntimeStatusDot status={runtime.status} />
                 </div>
@@ -374,27 +378,29 @@ const openAiIconPath =
 const claudeIconPath =
   'm4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z'
 
-function runtimeStatusMeta(status: DaemonDevice['runtimes'][number]['status']): {
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+function runtimeStatusMeta(status: DaemonDevice['runtimes'][number]['status'], t: Translate): {
   dot: string
   label: string
 } {
   if (status === 'ready') {
     return {
       dot: 'bg-[var(--cds-support-success)]',
-      label: 'Ready',
+      label: t('common.ready'),
     }
   }
 
   if (status === 'disabled') {
     return {
       dot: 'bg-[#8d8d8d]',
-      label: 'Disabled',
+      label: t('common.disabled'),
     }
   }
 
   return {
     dot: 'bg-[var(--cds-support-error)]',
-    label: 'Unavailable',
+    label: t('common.unavailable'),
   }
 }
 
@@ -436,6 +442,7 @@ export function WelcomePage({
   onRefreshData,
   onWelcomeUpdated,
 }: WelcomePageProps) {
+  const { t } = useTranslation()
   const [deviceName, setDeviceName] = useState('My computer')
   const [daemonCommand, setDaemonCommand] = useState<DaemonRegistrationCommandResponse | null>(null)
   const [daemonError, setDaemonError] = useState<string | null>(null)
@@ -579,7 +586,7 @@ export function WelcomePage({
     const name = deviceName.trim().replace(/\s+/g, ' ')
 
     if (name.length === 0 || name.length > 80) {
-      setDaemonError('Device name must be 1-80 characters.')
+      setDaemonError(t('daemon.deviceNameInvalid'))
       return
     }
 
@@ -597,7 +604,7 @@ export function WelcomePage({
       setDaemonCommand(response)
       onRefreshData()
     } catch (error) {
-      setDaemonError(error instanceof Error ? error.message : 'Unable to generate daemon command.')
+      setDaemonError(error instanceof Error ? error.message : t('daemon.unableGenerate'))
     } finally {
       setDaemonLoading(false)
     }
@@ -612,7 +619,7 @@ export function WelcomePage({
       await navigator.clipboard.writeText(daemonCommand.command)
       setCommandCopied(true)
     } catch {
-      setDaemonError('Copy failed. Select the command and copy it manually.')
+      setDaemonError(t('daemon.copyFailed'))
     }
   }
 
@@ -632,7 +639,7 @@ export function WelcomePage({
       <section className="h-full min-h-0 overflow-y-auto bg-white p-6" aria-label="Welcome">
         <InlineNotification
           kind="error"
-          title="Welcome unavailable"
+          title={t('welcome.unavailableTitle')}
           subtitle={error}
           lowContrast
           hideCloseButton
@@ -647,8 +654,8 @@ export function WelcomePage({
         <div className="mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5">
           <header className="flex items-start justify-between gap-4 max-[671px]:grid">
             <div className="grid gap-1">
-              <h1 className="text-2xl font-semibold leading-8 text-[#161616]">Welcome back</h1>
-              <p className="text-sm text-[#69707d]">Pick up recent conversations and goals.</p>
+              <h1 className="text-2xl font-semibold leading-8 text-[#161616]">{t('welcome.dashboardTitle')}</h1>
+              <p className="text-sm text-[#69707d]">{t('welcome.dashboardSubtitle')}</p>
             </div>
             {devMode && (
               <div className="flex flex-wrap justify-end gap-2">
@@ -662,7 +669,7 @@ export function WelcomePage({
                   }}
                 >
                   <ArrowLeft size={16} />
-                  Tutorial
+                  {t('welcome.tutorial')}
                 </button>
                 <button
                   className={subtleButton}
@@ -673,21 +680,21 @@ export function WelcomePage({
                     setForceOnboardingTutorial(true)
                   }}
                 >
-                  Fresh start
+                  {t('welcome.freshStart')}
                 </button>
               </div>
             )}
           </header>
 
           <div className="grid min-h-0 grid-cols-2 gap-5 max-[960px]:grid-cols-1 max-[960px]:grid-rows-2">
-            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label="Recent conversations">
+            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label={t('welcome.recentConversations')}>
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent conversations</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">{t('welcome.recentConversations')}</h2>
                 <ChatBot size={20} />
               </div>
               {summary.dashboard.conversations.length === 0 ? (
                 <div className="min-h-0 overflow-y-auto pr-1">
-                  <p className="text-sm text-[#69707d]">No recent conversations yet. Open a group, project, or agent chat to start.</p>
+                  <p className="text-sm text-[#69707d]">{t('welcome.noRecentConversations')}</p>
                 </div>
               ) : (
                 <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
@@ -719,14 +726,14 @@ export function WelcomePage({
               )}
             </section>
 
-            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label="Recent goals">
+            <section className={`${panelClass} grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden`} aria-label={t('welcome.recentGoals')}>
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent goals</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">{t('welcome.recentGoals')}</h2>
                 <Task size={20} />
               </div>
               {summary.dashboard.goals.length === 0 ? (
                 <div className="min-h-0 overflow-y-auto pr-1">
-                  <p className="text-sm text-[#69707d]">Use Task mode in a group or project to create goals.</p>
+                  <p className="text-sm text-[#69707d]">{t('welcome.noGoals')}</p>
                 </div>
               ) : (
                 <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
@@ -740,13 +747,13 @@ export function WelcomePage({
                       <span className="flex min-w-0 items-center justify-between gap-3">
                         <strong className="truncate text-[#161616]">{goal.title}</strong>
                         <Tag size="sm" type={goal.status === 'completed' ? 'green' : goal.status === 'failed' ? 'red' : 'blue'}>
-                          {goal.status}
+                          {t(`status.task.${goal.status}`, { defaultValue: goal.status })}
                         </Tag>
                       </span>
                       <span className="flex flex-wrap gap-1.5 text-xs text-[#69707d]">
                         <span>{conversationLabel(conversation)}</span>
                         {Object.entries(taskCounts).map(([status, count]) => (
-                          <span key={status}>{status}: {count}</span>
+                          <span key={status}>{t(`status.task.${status}`, { defaultValue: status })}: {count}</span>
                         ))}
                       </span>
                     </button>
@@ -765,8 +772,8 @@ export function WelcomePage({
       <div className="flex min-h-full w-full flex-col gap-5">
         <header className="flex items-start justify-between gap-4 max-[671px]:grid">
           <div className="grid gap-1">
-            <h1 className="text-2xl font-semibold leading-8 text-[#161616]">Set up Tavro</h1>
-            <p className="text-sm text-[#69707d]">Let’s connect your local runtime, create an agent, and open your first workspace.</p>
+            <h1 className="text-2xl font-semibold leading-8 text-[#161616]">{t('welcome.onboardingTitle')}</h1>
+            <p className="text-sm text-[#69707d]">{t('welcome.onboardingSubtitle')}</p>
           </div>
           {devMode && forceOnboardingTutorial && (
             <button
@@ -778,7 +785,7 @@ export function WelcomePage({
                 setForceOnboardingTutorial(false)
               }}
             >
-              Back to dashboard
+              {t('welcome.backToDashboard')}
             </button>
           )}
         </header>
@@ -786,7 +793,7 @@ export function WelcomePage({
         {completeError && (
           <InlineNotification
             kind="error"
-            title="Onboarding was not completed"
+            title={t('welcome.onboardingErrorTitle')}
             subtitle={completeError}
             lowContrast
             hideCloseButton
@@ -798,6 +805,8 @@ export function WelcomePage({
           {onboardingSteps.map((step, stepIndex) => {
             const isActive = step.id === activeOnboardingStep
             const stepComplete = isOnboardingStepComplete(step.id)
+            const stepTitle = t(`welcome.steps.${step.id}.title`)
+            const stepDescription = t(`welcome.steps.${step.id}.description`)
             const distanceFromActive = Math.abs(stepIndex - activeOnboardingStepIndex)
             const horizontalOffset =
               stepIndex < activeOnboardingStepIndex
@@ -821,7 +830,7 @@ export function WelcomePage({
               <section
                 key={step.id}
                 aria-hidden={!isActive}
-                aria-label={step.title}
+                aria-label={stepTitle}
                 className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full min-h-[34rem] w-[48%] flex-col rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:h-auto max-[900px]:min-h-0 max-[900px]:w-full`}
                 style={{
                   opacity: isActive ? 1 : distanceFromActive > 1 ? 0.82 : 0.92,
@@ -838,10 +847,10 @@ export function WelcomePage({
               <StepIcon complete={stepComplete} />
               <div className="min-w-0">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
-                  Step {stepIndex + 1} of {onboardingSteps.length}
+                  {t('welcome.stepOf', { current: stepIndex + 1, total: onboardingSteps.length })}
                 </p>
-                <h2 className="text-xl font-semibold leading-7 text-[#161616]">{step.title}</h2>
-                <p className="mt-1 text-sm text-[#69707d]">{step.description}</p>
+                <h2 className="text-xl font-semibold leading-7 text-[#161616]">{stepTitle}</h2>
+                <p className="mt-1 text-sm text-[#69707d]">{stepDescription}</p>
               </div>
             </div>
           </div>
@@ -853,17 +862,17 @@ export function WelcomePage({
                   <div className="flex flex-wrap items-center gap-3">
                     <button className={subtleButton} type="button" onClick={onOpenDaemon}>
                       <Devices size={16} />
-                      Manage daemon
+                      {t('daemon.title')}
                     </button>
                   </div>
                   <p className="text-sm text-[#69707d]">
                     {daemonStepComplete
-                      ? 'A daemon with a ready runtime is online. You can manage it from the Daemon page later.'
-                      : 'The daemon is online. Tavro is waiting for a ready runtime before moving to the next step.'}
+                      ? t('welcome.daemonReadySubtitle')
+                      : t('welcome.daemonWaitingRuntimeSubtitle')}
                   </p>
                   <div>
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
-                      Detected runtimes
+                      {t('welcome.detectedRuntimes')}
                     </h3>
                     <WelcomeRuntimeList devices={connectedDaemonDevices} />
                   </div>
@@ -871,18 +880,18 @@ export function WelcomePage({
               ) : (
                 <form className="grid max-w-3xl gap-3" onSubmit={(event) => void generateDaemonCommand(event)}>
                   {daemonError && (
-                    <InlineNotification kind="error" title="Daemon command failed" subtitle={daemonError} lowContrast hideCloseButton />
+                    <InlineNotification kind="error" title={t('welcome.daemonCommandFailed')} subtitle={daemonError} lowContrast hideCloseButton />
                   )}
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 max-[671px]:grid-cols-1">
                     <TextInput
                       id="welcome-daemon-name"
-                      labelText="Device name"
+                      labelText={t('daemon.deviceName')}
                       value={deviceName}
                       maxLength={80}
                       onChange={(event) => setDeviceName(event.target.value)}
                     />
                     <button className={primaryButton} type="submit" disabled={daemonLoading}>
-                      {daemonLoading ? <InlineLoading description="Generating" /> : 'Generate command'}
+                      {daemonLoading ? <InlineLoading description={t('daemon.generatingCommand')} /> : t('welcome.generateCommand')}
                     </button>
                   </div>
                   {daemonCommand && (
@@ -891,14 +900,14 @@ export function WelcomePage({
                         <pre className="min-w-0 overflow-auto rounded-xl border border-[#dde1e6] bg-[#161616] p-3 text-xs leading-relaxed text-white">
                           {daemonCommand.command}
                         </pre>
-                        <button className={subtleButton} type="button" onClick={() => void copyDaemonCommand()} aria-label="Copy daemon command">
+                        <button className={subtleButton} type="button" onClick={() => void copyDaemonCommand()} aria-label={t('daemon.copyCommand')}>
                           {commandCopied ? <CheckmarkFilled size={16} /> : <Copy size={16} />}
                         </button>
                       </div>
                       <InlineNotification
                         kind="warning"
-                        title="Waiting for daemon connection"
-                        subtitle="Run the command in your terminal. This page refreshes while Tavro waits for the daemon."
+                        title={t('daemon.registrationWaitingTitle')}
+                        subtitle={t('daemon.registrationWaitingSubtitle')}
                         lowContrast
                         hideCloseButton
                       />
@@ -911,12 +920,12 @@ export function WelcomePage({
             {activeOnboardingStep === 'agent' && (
               agentStepComplete ? (
                 <div className="grid max-w-2xl gap-4">
-                  <p className="text-sm text-[#69707d]">Your first agent is ready. You can open it from the Agents area or create more agents later.</p>
+                  <p className="text-sm text-[#69707d]">{t('welcome.agentReadySubtitle')}</p>
                 </div>
               ) : (
                 <div className="grid max-w-2xl gap-4">
                   <p className="text-sm leading-6 text-[#69707d]">
-                    Create your first agent from the shared setup dialog. Tavro will preselect the first ready daemon runtime for you.
+                    {t('welcome.agentStepSubtitle')}
                   </p>
                   <div className="grid max-w-xs gap-2">
                     <button
@@ -926,11 +935,11 @@ export function WelcomePage({
                       onClick={() => onOpenCreateAgent(availableDevices[0]?.id)}
                     >
                       <ChatBot size={16} />
-                      Create agent
+                      {t('modals.agentCreate.heading')}
                     </button>
                   </div>
                   {availableDevices.length === 0 && (
-                    <p className="text-sm text-[#69707d]">Connect a daemon with a ready runtime before creating an agent.</p>
+                    <p className="text-sm text-[#69707d]">{t('welcome.noRuntimeBeforeAgent')}</p>
                   )}
                 </div>
               )
@@ -939,13 +948,13 @@ export function WelcomePage({
             {activeOnboardingStep === 'workspace' && (
               workspaceStepComplete ? (
                 <div className="grid max-w-2xl gap-4">
-                  <p className="text-sm text-[#69707d]">Your first group or project is ready. You can return here for the dashboard after onboarding finishes.</p>
-                  {completeLoading && <InlineLoading description="Finishing onboarding" />}
+                  <p className="text-sm text-[#69707d]">{t('welcome.workspaceReadySubtitle')}</p>
+                  {completeLoading && <InlineLoading description={t('welcome.finishingOnboarding')} />}
                 </div>
               ) : (
                 <div className="grid max-w-2xl gap-4">
                   <p className="text-sm leading-6 text-[#69707d]">
-                    Open a group for shared chat, or start from a project when you want Tavro to work inside a repository.
+                    {t('welcome.workspaceStepSubtitle')}
                   </p>
                   <div className="grid max-w-xs gap-2">
                     <button
@@ -955,7 +964,7 @@ export function WelcomePage({
                       onClick={onOpenCreateGroup}
                     >
                       <ChatBot size={16} />
-                      Create group
+                      {t('modals.groupCreate.heading')}
                     </button>
                     <button
                       className={subtleButton}
@@ -964,11 +973,11 @@ export function WelcomePage({
                       onClick={onOpenCreateProject}
                     >
                       <Folder size={16} />
-                      Create project
+                      {t('modals.projectCreate.heading')}
                     </button>
                   </div>
                   {readyAgents.length === 0 && (
-                    <p className="text-sm text-[#69707d]">Wait for an agent to finish provisioning before creating a group or project.</p>
+                    <p className="text-sm text-[#69707d]">{t('welcome.waitForAgentBeforeWorkspace')}</p>
                   )}
                 </div>
               )
@@ -986,14 +995,14 @@ export function WelcomePage({
                 }
               }}
             >
-              Back
+              {t('welcome.back')}
             </button>
             <span className="text-center text-sm text-[#69707d]">
               {activeOnboardingStepComplete
-                ? 'Step complete. Continue when ready.'
+                ? t('welcome.stepComplete')
                 : devMode
-                  ? 'Development mode lets you preview the next step.'
-                  : 'Complete this step to continue.'}
+                  ? t('welcome.devPreviewStep')
+                  : t('welcome.completeStep')}
             </span>
             <button
               className={primaryButton}
@@ -1002,10 +1011,10 @@ export function WelcomePage({
               onClick={goToNextOnboardingStep}
             >
               {nextOnboardingStep !== null
-                ? 'Next'
+                ? t('welcome.next')
                 : completeLoading
-                  ? <InlineLoading description="Finishing" />
-                  : 'Finish'}
+                  ? <InlineLoading description={t('welcome.finishing')} />
+                  : t('welcome.finish')}
             </button>
           </footer>
                   </>
@@ -1016,21 +1025,21 @@ export function WelcomePage({
                         <StepIcon complete={stepComplete} />
                         <div className="min-w-0">
                           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
-                            Step {stepIndex + 1} of {onboardingSteps.length}
+                            {t('welcome.stepOf', { current: stepIndex + 1, total: onboardingSteps.length })}
                           </p>
-                          <h3 className="truncate text-lg font-semibold leading-7 text-[#161616]">{step.title}</h3>
+                          <h3 className="truncate text-lg font-semibold leading-7 text-[#161616]">{stepTitle}</h3>
                         </div>
                       </div>
                     </div>
-                    <p className="line-clamp-3 text-sm leading-6 text-[#596171]">{step.description}</p>
+                    <p className="line-clamp-3 text-sm leading-6 text-[#596171]">{stepDescription}</p>
                     <div className="mt-auto border-t border-black/10 pt-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-[#69707d]">
-                        {stepComplete ? 'Ready' : 'Upcoming'}
+                        {stepComplete ? t('welcome.ready') : t('welcome.upcoming')}
                       </p>
                       <p className="mt-1 line-clamp-2 text-sm leading-6 text-[#596171]">
                         {stepComplete
-                          ? 'This step is complete and stays available for review.'
-                          : 'Select this step with Next or Back to continue setup.'}
+                          ? t('welcome.previewComplete')
+                          : t('welcome.previewContinue')}
                       </p>
                     </div>
                   </div>

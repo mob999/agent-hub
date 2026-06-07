@@ -1,5 +1,6 @@
 import { InlineNotification, Modal, TextArea, TextInput } from '@carbon/react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails } from '../lib/api'
 
@@ -20,6 +21,7 @@ export function GroupCreateModal({
   onClose,
   onCreate,
 }: GroupCreateModalProps) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [orchestratorAgentId, setOrchestratorAgentId] = useState('')
@@ -53,9 +55,9 @@ export function GroupCreateModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Create group"
-      primaryButtonText={isCreating ? 'Creating...' : 'Create'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.groupCreate.heading')}
+      primaryButtonText={isCreating ? t('modals.agentCreate.creating') : t('common.create')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canCreate}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -75,7 +77,7 @@ export function GroupCreateModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Group was not created"
+            title={t('modals.groupCreate.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -84,15 +86,15 @@ export function GroupCreateModal({
         {agents.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No agents available"
-            subtitle="Create an agent before creating a group."
+            title={t('modals.groupCreate.agentRequiredTitle')}
+            subtitle={t('modals.groupCreate.agentRequiredSubtitle')}
             lowContrast
             hideCloseButton
           />
         )}
         <TextInput
           id="group-name"
-          labelText="Group name"
+          labelText={t('modals.groupCreate.name')}
           value={title}
           disabled={isCreating}
           maxLength={80}
@@ -100,7 +102,7 @@ export function GroupCreateModal({
         />
         <TextArea
           id="group-description"
-          labelText="Description"
+          labelText={t('modals.groupCreate.description')}
           rows={3}
           value={description}
           disabled={isCreating}

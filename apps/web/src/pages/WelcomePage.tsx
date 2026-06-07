@@ -62,6 +62,69 @@ const primaryButton =
   'inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#0f62fe] bg-[#0f62fe] px-3 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:border-[#0353e9] hover:bg-[#0353e9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#a6c8ff] disabled:bg-[#a6c8ff] disabled:text-white disabled:shadow-none'
 const inlineLink =
   'cursor-pointer border-0 bg-transparent p-0 text-sm font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+const roundedFieldStyles = `
+  .welcome-rounded-fields .cds--text-input,
+  .welcome-rounded-fields .cds--text-area,
+  .welcome-rounded-fields .cds--select-input {
+    border: 1px solid #d8dee6;
+    border-radius: 0.75rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .welcome-rounded-fields .cds--text-input:focus,
+  .welcome-rounded-fields .cds--text-area:focus,
+  .welcome-rounded-fields .cds--select-input:focus {
+    border-color: #b9c3cf;
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+  }
+
+  .welcome-rounded-fields .cds--text-input:disabled,
+  .welcome-rounded-fields .cds--text-area:disabled,
+  .welcome-rounded-fields .cds--select-input:disabled {
+    border-color: #e1e5ea;
+    background: #f4f4f4;
+    box-shadow: none;
+  }
+
+  .welcome-card-deck {
+    height: clamp(34rem, calc(100vh - 12rem), 44rem);
+    min-height: 34rem;
+  }
+
+  .welcome-onboarding-card {
+    transition:
+      left 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: left, transform, opacity;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .welcome-onboarding-card {
+      transition: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .welcome-card-deck {
+      height: auto;
+      min-height: 0;
+    }
+
+    .welcome-onboarding-card {
+      position: relative !important;
+      left: auto !important;
+      top: auto !important;
+      transform: none !important;
+      width: 100%;
+      min-height: 0;
+      margin-top: -0.75rem;
+    }
+  }
+`
 
 function detectDaemonCommandPlatform(): 'windows' | 'posix' {
   if (typeof navigator === 'undefined') {
@@ -116,6 +179,29 @@ function StepIcon({ complete }: { complete: boolean }) {
   )
 }
 
+type OnboardingStepId = 'daemon' | 'agent' | 'workspace'
+const onboardingSteps: Array<{
+  description: string;
+  id: OnboardingStepId;
+  title: string;
+}> = [
+  {
+    description: 'Run a local daemon so Tavro can detect Codex, Claude Code, or other runtimes.',
+    id: 'daemon',
+    title: 'Connect a daemon',
+  },
+  {
+    description: 'Pick a ready runtime and create your first local coding agent.',
+    id: 'agent',
+    title: 'Create an agent',
+  },
+  {
+    description: 'Groups are shared chat rooms where agents can receive tasks and report progress.',
+    id: 'workspace',
+    title: 'Create your first group',
+  },
+]
+
 export function WelcomePage({
   agents,
   devices,
@@ -159,6 +245,7 @@ export function WelcomePage({
   const [completeLoading, setCompleteLoading] = useState(false)
   const [forceOnboardingTutorial, setForceOnboardingTutorial] = useState(false)
   const [freshOnboardingPreview, setFreshOnboardingPreview] = useState(false)
+  const [activeOnboardingStep, setActiveOnboardingStep] = useState<OnboardingStepId>('daemon')
 
   const devMode = import.meta.env.DEV
   const availableDevices = useMemo(
@@ -203,6 +290,23 @@ export function WelcomePage({
   const showDashboard =
     !forceOnboardingTutorial &&
     (summary?.onboarding.completed === true || summary?.onboarding.readyToComplete === true)
+  const activeOnboardingStepIndex = onboardingSteps.findIndex((step) => step.id === activeOnboardingStep)
+  const isOnboardingStepComplete = (stepId: OnboardingStepId): boolean =>
+    stepId === 'daemon'
+      ? daemonStepComplete
+      : stepId === 'agent'
+        ? agentStepComplete
+        : workspaceStepComplete
+  const activeOnboardingStepComplete = isOnboardingStepComplete(activeOnboardingStep)
+  const canAdvanceOnboarding = devMode || activeOnboardingStepComplete
+  const previousOnboardingStep =
+    activeOnboardingStepIndex > 0
+      ? onboardingSteps[activeOnboardingStepIndex - 1]!
+      : null
+  const nextOnboardingStep =
+    activeOnboardingStepIndex >= 0 && activeOnboardingStepIndex < onboardingSteps.length - 1
+      ? onboardingSteps[activeOnboardingStepIndex + 1]!
+      : null
 
   const completeOnboarding = useCallback(async (conversationId: string | null) => {
     setCompleteLoading(true)
@@ -221,6 +325,28 @@ export function WelcomePage({
       setCompleteLoading(false)
     }
   }, [onOpenConversation, onWelcomeUpdated])
+
+  const goToNextOnboardingStep = () => {
+    if (nextOnboardingStep !== null) {
+      setActiveOnboardingStep(nextOnboardingStep.id)
+      return
+    }
+
+    if (summary?.onboarding.completed === true) {
+      setFreshOnboardingPreview(false)
+      setForceOnboardingTutorial(false)
+      return
+    }
+
+    if (summary?.onboarding.readyToComplete === true) {
+      void completeOnboarding(null)
+      return
+    }
+
+    if (devMode) {
+      setActiveOnboardingStep('daemon')
+    }
+  }
 
   useEffect(() => {
     if (
@@ -432,6 +558,7 @@ export function WelcomePage({
                   className={subtleButton}
                   type="button"
                   onClick={() => {
+                    setActiveOnboardingStep('daemon')
                     setFreshOnboardingPreview(false)
                     setForceOnboardingTutorial(true)
                   }}
@@ -443,6 +570,7 @@ export function WelcomePage({
                   className={subtleButton}
                   type="button"
                   onClick={() => {
+                    setActiveOnboardingStep('daemon')
                     setFreshOnboardingPreview(true)
                     setForceOnboardingTutorial(true)
                   }}
@@ -586,11 +714,11 @@ export function WelcomePage({
 
   return (
     <section className="h-full min-h-0 overflow-y-auto bg-[#fafafa] p-6 max-[671px]:p-4" aria-label="Welcome onboarding">
-      <div className="mx-auto grid max-w-5xl gap-5">
+      <div className="flex min-h-full w-full flex-col gap-5">
         <header className="flex items-start justify-between gap-4 max-[671px]:grid">
           <div className="grid gap-1">
             <h1 className="text-2xl font-semibold leading-8 text-[#161616]">Set up Tavro</h1>
-            <p className="text-sm text-[#69707d]">Complete these steps once, then this page becomes your daily workspace summary.</p>
+            <p className="text-sm text-[#69707d]">Let’s connect your local runtime, create an agent, and open your first workspace.</p>
           </div>
           {devMode && forceOnboardingTutorial && (
             <button
@@ -598,6 +726,7 @@ export function WelcomePage({
               type="button"
               onClick={() => {
                 setFreshOnboardingPreview(false)
+                setActiveOnboardingStep('daemon')
                 setForceOnboardingTutorial(false)
               }}
             >
@@ -605,16 +734,6 @@ export function WelcomePage({
             </button>
           )}
         </header>
-
-        {devMode && freshOnboardingPreview && (
-          <InlineNotification
-            kind="info"
-            title="Development first-run preview"
-            subtitle="Real onboarding data is untouched. This view locally hides existing daemon, agent, and workspace prerequisites so the initial tutorial state can be tested."
-            lowContrast
-            hideCloseButton
-          />
-        )}
 
         {completeError && (
           <InlineNotification
@@ -626,255 +745,361 @@ export function WelcomePage({
           />
         )}
 
-        <section className={panelClass} aria-label="Connect daemon">
-          <div className="grid gap-4">
-            <div className="flex items-start gap-3">
-              <StepIcon complete={daemonStepComplete} />
+        <div className="welcome-card-deck relative overflow-visible max-[900px]:grid max-[900px]:gap-0">
+          <style>{roundedFieldStyles}</style>
+          {onboardingSteps.map((step, stepIndex) => {
+            const isActive = step.id === activeOnboardingStep
+            const stepComplete = isOnboardingStepComplete(step.id)
+            const distanceFromActive = Math.abs(stepIndex - activeOnboardingStepIndex)
+            const horizontalOffset =
+              stepIndex < activeOnboardingStepIndex
+                ? `-${distanceFromActive * 0.35}rem`
+                : stepIndex > activeOnboardingStepIndex
+                  ? `${distanceFromActive * 0.35}rem`
+                  : '0'
+            const positionClass =
+              stepIndex === 0
+                ? 'left-0'
+                : stepIndex === 1
+                  ? 'left-[26%]'
+                  : 'left-[52%]'
+            const toneClass = isActive
+              ? 'border-[#e4e7ec] bg-white shadow-[0_18px_42px_rgba(15,23,42,0.14)]'
+              : distanceFromActive > 1
+                ? 'border-[#c7d0dc] bg-[#d8dee6] shadow-[0_8px_18px_rgba(15,23,42,0.08)]'
+                : 'border-[#d8dee6] bg-[#eef0f4] shadow-[0_12px_26px_rgba(15,23,42,0.1)]'
+
+            return (
+              <section
+                key={step.id}
+                aria-hidden={!isActive}
+                aria-label={step.title}
+                className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full min-h-[34rem] w-[48%] flex-col rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:h-auto max-[900px]:min-h-0 max-[900px]:w-full`}
+                style={{
+                  opacity: isActive ? 1 : distanceFromActive > 1 ? 0.82 : 0.92,
+                  transform: isActive
+                    ? 'translateX(0) translateY(0) scale(1)'
+                    : `translateX(${horizontalOffset}) translateY(${distanceFromActive * 1.15}rem) scale(${distanceFromActive > 1 ? 0.92 : 0.95})`,
+                  zIndex: isActive ? 30 : 20 - distanceFromActive,
+                }}
+              >
+                {isActive ? (
+                  <>
+          <div className="flex items-start justify-between gap-4 border-b border-[#edf0f4] pb-5 max-[671px]:grid">
+            <div className="flex min-w-0 items-start gap-3">
+              <StepIcon complete={stepComplete} />
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-[#161616]">Connect a daemon</h2>
-                <p className="text-sm text-[#69707d]">Run a local daemon so Tavro can detect Codex, Claude Code, or other runtimes.</p>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
+                  Step {stepIndex + 1} of {onboardingSteps.length}
+                </p>
+                <h2 className="text-xl font-semibold leading-7 text-[#161616]">{step.title}</h2>
+                <p className="mt-1 text-sm text-[#69707d]">{step.description}</p>
               </div>
             </div>
-            {daemonStepComplete ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <Tag type="green">Connected</Tag>
-                <button className={subtleButton} type="button" onClick={onOpenDaemon}>Manage daemon</button>
-              </div>
-            ) : (
-              <form className="grid gap-3" onSubmit={(event) => void generateDaemonCommand(event)}>
-                {daemonError && (
-                  <InlineNotification kind="error" title="Daemon command failed" subtitle={daemonError} lowContrast hideCloseButton />
-                )}
-                <div className="grid max-w-xl grid-cols-[minmax(0,1fr)_auto] items-end gap-2 max-[671px]:grid-cols-1">
-                  <TextInput
-                    id="welcome-daemon-name"
-                    labelText="Device name"
-                    value={deviceName}
-                    maxLength={80}
-                    onChange={(event) => setDeviceName(event.target.value)}
-                  />
-                  <button className={primaryButton} type="submit" disabled={daemonLoading}>
-                    {daemonLoading ? <InlineLoading description="Generating" /> : 'Generate command'}
-                  </button>
+            <Tag type={stepComplete ? 'green' : 'gray'}>
+              {stepComplete ? 'Completed' : 'Pending'}
+            </Tag>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col justify-center py-8">
+            {activeOnboardingStep === 'daemon' && (
+              daemonStepComplete ? (
+                <div className="grid max-w-2xl gap-4">
+                  <Tag type="green">Connected</Tag>
+                  <p className="text-sm text-[#69707d]">A daemon with a ready runtime is online. You can manage it from the Daemon page later.</p>
+                  <div>
+                    <button className={subtleButton} type="button" onClick={onOpenDaemon}>Manage daemon</button>
+                  </div>
                 </div>
-                {daemonCommand && (
-                  <div className="grid gap-2">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                      <pre className="min-w-0 overflow-auto rounded-xl border border-[#dde1e6] bg-[#161616] p-3 text-xs leading-relaxed text-white">
-                        {daemonCommand.command}
-                      </pre>
-                      <button className={subtleButton} type="button" onClick={() => void copyDaemonCommand()} aria-label="Copy daemon command">
-                        {commandCopied ? <CheckmarkFilled size={16} /> : <Copy size={16} />}
-                      </button>
+              ) : (
+                <form className="grid max-w-3xl gap-3" onSubmit={(event) => void generateDaemonCommand(event)}>
+                  {daemonError && (
+                    <InlineNotification kind="error" title="Daemon command failed" subtitle={daemonError} lowContrast hideCloseButton />
+                  )}
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 max-[671px]:grid-cols-1">
+                    <TextInput
+                      id="welcome-daemon-name"
+                      labelText="Device name"
+                      value={deviceName}
+                      maxLength={80}
+                      onChange={(event) => setDeviceName(event.target.value)}
+                    />
+                    <button className={primaryButton} type="submit" disabled={daemonLoading}>
+                      {daemonLoading ? <InlineLoading description="Generating" /> : 'Generate command'}
+                    </button>
+                  </div>
+                  {daemonCommand && (
+                    <div className="grid gap-2">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                        <pre className="min-w-0 overflow-auto rounded-xl border border-[#dde1e6] bg-[#161616] p-3 text-xs leading-relaxed text-white">
+                          {daemonCommand.command}
+                        </pre>
+                        <button className={subtleButton} type="button" onClick={() => void copyDaemonCommand()} aria-label="Copy daemon command">
+                          {commandCopied ? <CheckmarkFilled size={16} /> : <Copy size={16} />}
+                        </button>
+                      </div>
+                      <InlineNotification
+                        kind="warning"
+                        title="Waiting for daemon connection"
+                        subtitle="Run the command in your terminal. This page refreshes while Tavro waits for the daemon."
+                        lowContrast
+                        hideCloseButton
+                      />
                     </div>
+                  )}
+                </form>
+              )
+            )}
+
+            {activeOnboardingStep === 'agent' && (
+              agentStepComplete ? (
+                <div className="grid max-w-2xl gap-4">
+                  <Tag type="green">Ready agent available</Tag>
+                  <p className="text-sm text-[#69707d]">Your first agent is ready. You can open it from the Agents area or create more agents later.</p>
+                  <div>
+                    <button className={subtleButton} type="button" onClick={onOpenCreateAgent}>Create another agent</button>
+                  </div>
+                </div>
+              ) : (
+                <form className="grid max-w-3xl gap-3" onSubmit={(event) => void createAgent(event)}>
+                  {agentError && (
+                    <InlineNotification kind="error" title="Agent was not created" subtitle={agentError} lowContrast hideCloseButton />
+                  )}
+                  {availableDevices.length === 0 && (
                     <InlineNotification
                       kind="warning"
-                      title="Waiting for daemon connection"
-                      subtitle="Run the command in your terminal. This page refreshes while Tavro waits for the daemon."
+                      title="No ready runtime"
+                      subtitle="Connect a daemon with a ready runtime before creating an agent."
                       lowContrast
                       hideCloseButton
                     />
-                  </div>
-                )}
-              </form>
-            )}
-          </div>
-        </section>
-
-        <section className={panelClass} aria-label="Create agent">
-          <div className="grid gap-4">
-            <div className="flex items-start gap-3">
-              <StepIcon complete={agentStepComplete} />
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-[#161616]">Create an agent</h2>
-                <p className="text-sm text-[#69707d]">Pick a ready runtime and create your first local coding agent.</p>
-              </div>
-            </div>
-            {agentStepComplete ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <Tag type="green">Ready agent available</Tag>
-                <button className={subtleButton} type="button" onClick={onOpenCreateAgent}>Create another agent</button>
-              </div>
-            ) : (
-              <form className="grid gap-3" onSubmit={(event) => void createAgent(event)}>
-                {agentError && (
-                  <InlineNotification kind="error" title="Agent was not created" subtitle={agentError} lowContrast hideCloseButton />
-                )}
-                {availableDevices.length === 0 && (
-                  <InlineNotification
-                    kind="warning"
-                    title="No ready runtime"
-                    subtitle="Connect a daemon with a ready runtime before creating an agent."
-                    lowContrast
-                    hideCloseButton
-                  />
-                )}
-                <TextInput
-                  id="welcome-agent-name"
-                  labelText="Agent name"
-                  value={agentName}
-                  disabled={agentLoading}
-                  maxLength={120}
-                  onChange={(event) => setAgentName(event.target.value)}
-                />
-                <TextArea
-                  id="welcome-agent-description"
-                  labelText="Description"
-                  rows={3}
-                  value={agentDescription}
-                  disabled={agentLoading}
-                  onChange={(event) => setAgentDescription(event.target.value)}
-                />
-                <div className="grid grid-cols-2 gap-3 max-[671px]:grid-cols-1">
-                  <Select
-                    id="welcome-agent-daemon"
-                    labelText="Daemon"
-                    value={selectedAgentDeviceId}
-                    disabled={agentLoading || availableDevices.length === 0}
-                    onChange={(event) => {
-                      setAgentDaemonId(event.target.value)
-                      setAgentRuntimeKind('')
-                    }}
-                  >
-                    {availableDevices.length === 0 ? (
-                      <SelectItem value="" text="No daemon available" />
-                    ) : availableDevices.map((device) => (
-                      <SelectItem key={device.id} value={device.id} text={device.name} />
-                    ))}
-                  </Select>
-                  <Select
-                    id="welcome-agent-runtime"
-                    labelText="Runtime"
-                    value={selectedRuntimeKind}
-                    disabled={agentLoading || selectedAgentDevice === null}
-                    onChange={(event) => setAgentRuntimeKind(event.target.value as RuntimeKind)}
-                  >
-                    {selectedAgentDevice?.runtimes.map((runtime) => (
-                      <SelectItem
-                        key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
-                        value={runtime.runtimeKind}
-                        text={runtime.runtimeVersion ? `${runtime.runtimeKind} (${runtime.runtimeVersion})` : runtime.runtimeKind}
-                      />
-                    ))}
-                  </Select>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <button className={primaryButton} type="submit" disabled={agentLoading || availableDevices.length === 0}>
-                    {agentLoading ? <InlineLoading description="Creating" /> : 'Create agent'}
-                  </button>
-                  {createdAgentName && (
-                    <span className="text-sm text-[#69707d]">{createdAgentName} is provisioning. This page refreshes until it is ready.</span>
                   )}
+                  <TextInput
+                    id="welcome-agent-name"
+                    labelText="Agent name"
+                    value={agentName}
+                    disabled={agentLoading}
+                    maxLength={120}
+                    onChange={(event) => setAgentName(event.target.value)}
+                  />
+                  <TextArea
+                    id="welcome-agent-description"
+                    labelText="Description"
+                    rows={3}
+                    value={agentDescription}
+                    disabled={agentLoading}
+                    onChange={(event) => setAgentDescription(event.target.value)}
+                  />
+                  <div className="grid grid-cols-2 gap-3 max-[671px]:grid-cols-1">
+                    <Select
+                      id="welcome-agent-daemon"
+                      labelText="Daemon"
+                      value={selectedAgentDeviceId}
+                      disabled={agentLoading || availableDevices.length === 0}
+                      onChange={(event) => {
+                        setAgentDaemonId(event.target.value)
+                        setAgentRuntimeKind('')
+                      }}
+                    >
+                      {availableDevices.length === 0 ? (
+                        <SelectItem value="" text="No daemon available" />
+                      ) : availableDevices.map((device) => (
+                        <SelectItem key={device.id} value={device.id} text={device.name} />
+                      ))}
+                    </Select>
+                    <Select
+                      id="welcome-agent-runtime"
+                      labelText="Runtime"
+                      value={selectedRuntimeKind}
+                      disabled={agentLoading || selectedAgentDevice === null}
+                      onChange={(event) => setAgentRuntimeKind(event.target.value as RuntimeKind)}
+                    >
+                      {selectedAgentDevice?.runtimes.map((runtime) => (
+                        <SelectItem
+                          key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
+                          value={runtime.runtimeKind}
+                          text={runtime.runtimeVersion ? `${runtime.runtimeKind} (${runtime.runtimeVersion})` : runtime.runtimeKind}
+                        />
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button className={primaryButton} type="submit" disabled={agentLoading || availableDevices.length === 0}>
+                      {agentLoading ? <InlineLoading description="Creating" /> : 'Create agent'}
+                    </button>
+                    {createdAgentName && (
+                      <span className="text-sm text-[#69707d]">{createdAgentName} is provisioning. This page refreshes until it is ready.</span>
+                    )}
+                  </div>
+                </form>
+              )
+            )}
+
+            {activeOnboardingStep === 'workspace' && (
+              workspaceStepComplete ? (
+                <div className="grid max-w-2xl gap-4">
+                  <Tag type="green">Workspace ready</Tag>
+                  <p className="text-sm text-[#69707d]">Your first group or project is ready. You can return here for the dashboard after onboarding finishes.</p>
+                  {completeLoading && <InlineLoading description="Finishing onboarding" />}
                 </div>
-              </form>
+              ) : (
+                <form className="grid max-w-3xl gap-3" onSubmit={(event) => void createWorkspace(event)}>
+                  {workspaceError && (
+                    <InlineNotification kind="error" title="Workspace was not created" subtitle={workspaceError} lowContrast hideCloseButton />
+                  )}
+                  {readyAgents.length === 0 && (
+                    <InlineNotification
+                      kind="warning"
+                      title="No ready agents"
+                      subtitle="Wait for the agent to finish provisioning before creating a group."
+                      lowContrast
+                      hideCloseButton
+                    />
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Tag type={workspaceMode === 'group' ? 'blue' : 'gray'}>Group</Tag>
+                    <button
+                      className={inlineLink}
+                      type="button"
+                      onClick={() => setWorkspaceMode(workspaceMode === 'group' ? 'project' : 'group')}
+                    >
+                      {workspaceMode === 'group' ? 'Create project instead' : 'Create group instead'}
+                    </button>
+                  </div>
+                  {workspaceMode === 'group' ? (
+                    <>
+                      <TextInput
+                        id="welcome-group-title"
+                        labelText="Group name"
+                        value={groupTitle}
+                        disabled={workspaceLoading}
+                        maxLength={80}
+                        onChange={(event) => setGroupTitle(event.target.value)}
+                      />
+                      <TextArea
+                        id="welcome-group-description"
+                        labelText="Description"
+                        rows={3}
+                        value={groupDescription}
+                        disabled={workspaceLoading}
+                        onChange={(event) => setGroupDescription(event.target.value)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <TextInput
+                        id="welcome-project-remote"
+                        labelText="Git remote URL"
+                        value={projectRemoteUrl}
+                        disabled={workspaceLoading}
+                        placeholder="https://github.com/acme/app.git"
+                        onChange={(event) => setProjectRemoteUrl(event.target.value)}
+                      />
+                      <TextInput
+                        id="welcome-project-title"
+                        labelText="Project name"
+                        value={projectTitle}
+                        disabled={workspaceLoading}
+                        maxLength={80}
+                        placeholder="Inferred from remote if empty"
+                        onChange={(event) => setProjectTitle(event.target.value)}
+                      />
+                    </>
+                  )}
+                  <AgentMemberSelector
+                    agents={readyAgents}
+                    disabled={workspaceLoading || readyAgents.length === 0}
+                    helpText="The first ready agent is selected as orchestrator by default."
+                    idPrefix="welcome-workspace-agent"
+                    orchestratorAgentId={validOrchestratorAgentId}
+                    selectedAgentIds={effectiveSelectedAgentIds}
+                    onSelectOrchestrator={selectOrchestrator}
+                    onToggleAgent={toggleAgent}
+                  />
+                  <button
+                    className={primaryButton}
+                    type="submit"
+                    disabled={
+                      workspaceLoading ||
+                      readyAgents.length === 0 ||
+                      effectiveSelectedAgentIds.length === 0 ||
+                      (workspaceMode === 'group' ? groupTitle.trim().length === 0 : projectRemoteUrl.trim().length === 0)
+                    }
+                  >
+                    {workspaceLoading ? <InlineLoading description="Creating" /> : workspaceMode === 'group' ? 'Create group' : 'Create project'}
+                  </button>
+                </form>
+              )
             )}
           </div>
-        </section>
 
-        <section className={panelClass} aria-label="Create first group or project">
-          <div className="grid gap-4">
-            <div className="flex items-start gap-3">
-              <StepIcon complete={workspaceStepComplete} />
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-[#161616]">Create your first group</h2>
-                <p className="text-sm text-[#69707d]">Groups are shared chat rooms where agents can receive tasks and report progress.</p>
-              </div>
-            </div>
-            {workspaceStepComplete ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <Tag type="green">Workspace ready</Tag>
-                {completeLoading && <InlineLoading description="Finishing onboarding" />}
-              </div>
-            ) : (
-              <form className="grid gap-3" onSubmit={(event) => void createWorkspace(event)}>
-                {workspaceError && (
-                  <InlineNotification kind="error" title="Workspace was not created" subtitle={workspaceError} lowContrast hideCloseButton />
-                )}
-                {readyAgents.length === 0 && (
-                  <InlineNotification
-                    kind="warning"
-                    title="No ready agents"
-                    subtitle="Wait for the agent to finish provisioning before creating a group."
-                    lowContrast
-                    hideCloseButton
-                  />
-                )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <Tag type={workspaceMode === 'group' ? 'blue' : 'gray'}>Group</Tag>
-                  <button
-                    className={inlineLink}
-                    type="button"
-                    onClick={() => setWorkspaceMode(workspaceMode === 'group' ? 'project' : 'group')}
-                  >
-                    {workspaceMode === 'group' ? 'Create project instead' : 'Create group instead'}
-                  </button>
-                </div>
-                {workspaceMode === 'group' ? (
-                  <>
-                    <TextInput
-                      id="welcome-group-title"
-                      labelText="Group name"
-                      value={groupTitle}
-                      disabled={workspaceLoading}
-                      maxLength={80}
-                      onChange={(event) => setGroupTitle(event.target.value)}
-                    />
-                    <TextArea
-                      id="welcome-group-description"
-                      labelText="Description"
-                      rows={3}
-                      value={groupDescription}
-                      disabled={workspaceLoading}
-                      onChange={(event) => setGroupDescription(event.target.value)}
-                    />
+          <footer className="flex items-center justify-between gap-3 border-t border-[#edf0f4] pt-5 max-[671px]:grid">
+            <button
+              className={subtleButton}
+              type="button"
+              disabled={previousOnboardingStep === null}
+              onClick={() => {
+                if (previousOnboardingStep !== null) {
+                  setActiveOnboardingStep(previousOnboardingStep.id)
+                }
+              }}
+            >
+              Back
+            </button>
+            <span className="text-center text-sm text-[#69707d]">
+              {activeOnboardingStepComplete
+                ? 'Step complete. Continue when ready.'
+                : devMode
+                  ? 'Development mode lets you preview the next step.'
+                  : 'Complete this step to continue.'}
+            </span>
+            <button
+              className={primaryButton}
+              type="button"
+              disabled={!canAdvanceOnboarding || completeLoading}
+              onClick={goToNextOnboardingStep}
+            >
+              {nextOnboardingStep !== null
+                ? 'Next'
+                : completeLoading
+                  ? <InlineLoading description="Finishing" />
+                  : 'Finish'}
+            </button>
+          </footer>
                   </>
                 ) : (
-                  <>
-                    <TextInput
-                      id="welcome-project-remote"
-                      labelText="Git remote URL"
-                      value={projectRemoteUrl}
-                      disabled={workspaceLoading}
-                      placeholder="https://github.com/acme/app.git"
-                      onChange={(event) => setProjectRemoteUrl(event.target.value)}
-                    />
-                    <TextInput
-                      id="welcome-project-title"
-                      labelText="Project name"
-                      value={projectTitle}
-                      disabled={workspaceLoading}
-                      maxLength={80}
-                      placeholder="Inferred from remote if empty"
-                      onChange={(event) => setProjectTitle(event.target.value)}
-                    />
-                  </>
+                  <div className="flex h-full min-h-0 flex-col gap-4">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <StepIcon complete={stepComplete} />
+                        <div className="min-w-0">
+                          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
+                            Step {stepIndex + 1} of {onboardingSteps.length}
+                          </p>
+                          <h3 className="truncate text-lg font-semibold leading-7 text-[#161616]">{step.title}</h3>
+                        </div>
+                      </div>
+                      <Tag type={stepComplete ? 'green' : 'gray'}>
+                        {stepComplete ? 'Completed' : 'Pending'}
+                      </Tag>
+                    </div>
+                    <p className="line-clamp-3 text-sm leading-6 text-[#596171]">{step.description}</p>
+                    <div className="mt-auto border-t border-black/10 pt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#69707d]">
+                        {stepComplete ? 'Ready' : 'Upcoming'}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-sm leading-6 text-[#596171]">
+                        {stepComplete
+                          ? 'This step is complete and stays available for review.'
+                          : 'Select this step with Next or Back to continue setup.'}
+                      </p>
+                    </div>
+                  </div>
                 )}
-                <AgentMemberSelector
-                  agents={readyAgents}
-                  disabled={workspaceLoading || readyAgents.length === 0}
-                  helpText="The first ready agent is selected as orchestrator by default."
-                  idPrefix="welcome-workspace-agent"
-                  orchestratorAgentId={validOrchestratorAgentId}
-                  selectedAgentIds={effectiveSelectedAgentIds}
-                  onSelectOrchestrator={selectOrchestrator}
-                  onToggleAgent={toggleAgent}
-                />
-                <button
-                  className={primaryButton}
-                  type="submit"
-                  disabled={
-                    workspaceLoading ||
-                    readyAgents.length === 0 ||
-                    effectiveSelectedAgentIds.length === 0 ||
-                    (workspaceMode === 'group' ? groupTitle.trim().length === 0 : projectRemoteUrl.trim().length === 0)
-                  }
-                >
-                  {workspaceLoading ? <InlineLoading description="Creating" /> : workspaceMode === 'group' ? 'Create group' : 'Create project'}
-                </button>
-              </form>
-            )}
-          </div>
-        </section>
+              </section>
+            )
+          })}
+        </div>
       </div>
     </section>
   )

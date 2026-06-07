@@ -11,7 +11,6 @@ import {
   agentRuntimeBindings,
   agents,
   agentWorkspaces,
-  conversationDeployments,
   conversationGoalTasks,
   conversationGoals,
   conversationMessages,
@@ -21,11 +20,10 @@ import {
   type Db,
   users,
 } from "@agent-hub/db";
-import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { toConversationsWithAgentIds } from "../conversations/helpers.js";
 import {
-  toConversationDeployment,
   toConversationGoal,
   toConversationGoalTask,
   toConversationMessage,
@@ -33,9 +31,7 @@ import {
 
 const dashboardLimits = {
   conversations: 6,
-  deployments: 5,
   goals: 5,
-  messages: 8,
 } as const;
 
 export type CompleteWelcomeOnboardingResult =
@@ -163,35 +159,50 @@ async function getWelcomeDashboardSummary(
   db: Db,
   input: {
     ownerUserId: string;
-    publicApiBaseUrl?: string;
     publicWebBaseUrl?: string;
   },
 ): Promise<WelcomeDashboardSummary> {
   const recentConversationRows = await db
     .select()
     .from(conversations)
-    .where(and(eq(conversations.ownerUserId, input.ownerUserId), eq(conversations.status, "active")))
-    .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt))
+    .where(
+      and(
+        eq(conversations.ownerUserId, input.ownerUserId),
+        eq(conversations.status, "active"),
+        or(
+          eq(conversations.type, "direct"),
+          eq(conversations.type, "group"),
+          eq(conversations.type, "project"),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(sql`coalesce(${conversations.lastMessageAt}, ${conversations.updatedAt})`),
+      desc(conversations.updatedAt),
+    )
     .limit(dashboardLimits.conversations);
   const recentConversations = await toConversationsWithAgentIds(db, recentConversationRows, {
     ownerUserId: input.ownerUserId,
   });
+  const recentConversationIds = recentConversations.map((conversation) => conversation.id);
+  const latestMessageRows =
+    recentConversationIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(conversationMessages)
+          .where(inArray(conversationMessages.conversationId, recentConversationIds))
+          .orderBy(desc(conversationMessages.updatedAt), desc(conversationMessages.createdAt));
+  const latestMessageByConversationId = new Map<string, ReturnType<typeof toConversationMessage>>();
 
-  const messageRows = await db
-    .select({
-      conversation: conversations,
-      message: conversationMessages,
-    })
-    .from(conversationMessages)
-    .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
-    .where(and(eq(conversations.ownerUserId, input.ownerUserId), eq(conversations.status, "active")))
-    .orderBy(desc(conversationMessages.createdAt))
-    .limit(dashboardLimits.messages);
-  const messageConversationMap = await conversationMapForRows(
-    db,
-    messageRows.map((row) => row.conversation),
-    input.ownerUserId,
-  );
+  for (const messageRow of latestMessageRows) {
+    if (!latestMessageByConversationId.has(messageRow.conversationId)) {
+      latestMessageByConversationId.set(
+        messageRow.conversationId,
+        toConversationMessage(messageRow),
+      );
+    }
+  }
 
   const goalRows = await db
     .select({
@@ -238,30 +249,11 @@ async function getWelcomeDashboardSummary(
     input.ownerUserId,
   );
 
-  const deploymentRows = await db
-    .select({
-      conversation: conversations,
-      deployment: conversationDeployments,
-    })
-    .from(conversationDeployments)
-    .innerJoin(conversations, eq(conversations.id, conversationDeployments.conversationId))
-    .where(and(eq(conversations.ownerUserId, input.ownerUserId), eq(conversations.status, "active")))
-    .orderBy(desc(conversationDeployments.createdAt))
-    .limit(dashboardLimits.deployments);
-  const deploymentConversationMap = await conversationMapForRows(
-    db,
-    deploymentRows.map((row) => row.conversation),
-    input.ownerUserId,
-  );
-
   return {
-    conversations: recentConversations.map((conversation) => ({ conversation })),
-    messages: messageRows.flatMap((row) => {
-      const conversation = messageConversationMap.get(row.conversation.id);
-      return conversation === undefined
-        ? []
-        : [{ conversation, message: toConversationMessage(row.message) }];
-    }),
+    conversations: recentConversations.map((conversation) => ({
+      conversation,
+      latestMessage: latestMessageByConversationId.get(conversation.id),
+    })),
     goals: goalRows.flatMap((row) => {
       const conversation = goalConversationMap.get(row.conversation.id);
       const tasks = tasksByGoalId.get(row.goal.id) ?? [];
@@ -274,17 +266,6 @@ async function getWelcomeDashboardSummary(
               publicWebBaseUrl: input.publicWebBaseUrl,
             }),
             taskCounts: taskCounts(tasks),
-          }];
-    }),
-    deployments: deploymentRows.flatMap((row) => {
-      const conversation = deploymentConversationMap.get(row.conversation.id);
-      return conversation === undefined
-        ? []
-        : [{
-            conversation,
-            deployment: toConversationDeployment(row.deployment, {
-              publicApiBaseUrl: input.publicApiBaseUrl,
-            }),
           }];
     }),
   };

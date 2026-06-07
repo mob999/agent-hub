@@ -13,7 +13,6 @@ import {
   Copy,
   Devices,
   Folder,
-  Launch,
   Task,
 } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
@@ -28,6 +27,7 @@ import {
   type WelcomeSummary,
 } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
+import { getProjectIcon } from '../lib/projectIcon'
 
 interface WelcomePageProps {
   agents: AgentDetails[]
@@ -40,9 +40,7 @@ interface WelcomePageProps {
   onOpenCreateGroup: () => void
   onOpenCreateProject: () => void
   onOpenDaemon: () => void
-  onOpenDeployments: (conversationId: string) => void
   onOpenGoal: (conversationId: string, goalId: string, taskIndex?: number | null) => void
-  onOpenMessage: (conversationId: string, messageId: string) => void
   onRefreshData: () => void
   onWelcomeUpdated: (summary: WelcomeSummary) => void
 }
@@ -163,6 +161,77 @@ function conversationLabel(conversation: Conversation): string {
   }
 
   return conversation.title
+}
+
+function directConversationAgent(conversation: Conversation, agents: AgentDetails[]): AgentDetails | null {
+  return conversation.directAgentId === undefined
+    ? null
+    : agents.find((item) => item.agent.id === conversation.directAgentId) ?? null
+}
+
+function dashboardConversationTitle(conversation: Conversation, agents: AgentDetails[]): string {
+  if (conversation.type === 'direct') {
+    return directConversationAgent(conversation, agents)?.agent.name ?? conversation.title
+  }
+
+  return conversationLabel(conversation)
+}
+
+function dashboardConversationPreview(content: string | undefined): string {
+  return content === undefined ? 'No messages yet.' : compactPreview(content)
+}
+
+function ConversationAvatar({
+  agents,
+  conversation,
+}: {
+  agents: AgentDetails[]
+  conversation: Conversation
+}) {
+  if (conversation.type === 'direct') {
+    const agent = directConversationAgent(conversation, agents)
+
+    if (agent?.agent.avatar) {
+      return (
+        <img
+          src={agent.agent.avatar}
+          alt=""
+          className="h-10 w-10 rounded-xl border border-[#dde1e6] bg-white object-cover"
+        />
+      )
+    }
+
+    const initial = (agent?.agent.name ?? conversation.title).trim().charAt(0).toUpperCase() || 'A'
+
+    return (
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-white text-sm font-semibold text-[#161616]">
+        {initial}
+      </span>
+    )
+  }
+
+  if (conversation.type === 'project') {
+    const projectIcon = getProjectIcon(conversation)
+
+    return (
+      <span
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border text-sm font-semibold"
+        style={projectIcon.style}
+        aria-hidden="true"
+      >
+        {projectIcon.initial}
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold text-[#161616]"
+      aria-hidden="true"
+    >
+      #
+    </span>
+  )
 }
 
 function StepIcon({ complete }: { complete: boolean }) {
@@ -363,9 +432,7 @@ export function WelcomePage({
   onOpenCreateGroup,
   onOpenCreateProject,
   onOpenDaemon,
-  onOpenDeployments,
   onOpenGoal,
-  onOpenMessage,
   onRefreshData,
   onWelcomeUpdated,
 }: WelcomePageProps) {
@@ -581,7 +648,7 @@ export function WelcomePage({
           <header className="flex items-start justify-between gap-4 max-[671px]:grid">
             <div className="grid gap-1">
               <h1 className="text-2xl font-semibold leading-8 text-[#161616]">Welcome back</h1>
-              <p className="text-sm text-[#69707d]">Pick up recent conversations, tasks, and deployments.</p>
+              <p className="text-sm text-[#69707d]">Pick up recent conversations and goals.</p>
             </div>
             {devMode && (
               <div className="flex flex-wrap justify-end gap-2">
@@ -612,85 +679,58 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] gap-5 max-[960px]:grid-cols-1">
-            <section className={panelClass} aria-label="Continue chatting">
+          <div className="grid grid-cols-2 gap-5 max-[960px]:grid-cols-1">
+            <section className={`${panelClass} min-h-[28rem]`} aria-label="Recent conversations">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Continue chatting</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent conversations</h2>
                 <ChatBot size={20} />
               </div>
               {summary.dashboard.conversations.length === 0 ? (
-                <p className="text-sm text-[#69707d]">No recent conversations yet.</p>
+                <p className="text-sm text-[#69707d]">No recent conversations yet. Open a group, project, or agent chat to start.</p>
               ) : (
-                <div className="grid gap-2">
-                  {summary.dashboard.conversations.map(({ conversation }) => (
+                <div className="grid gap-3">
+                  {summary.dashboard.conversations.map(({ conversation, latestMessage }) => (
                     <button
                       key={conversation.id}
                       type="button"
-                      className="grid min-h-12 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 bg-[#f7f8fa] px-3 py-2 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      className="grid min-h-16 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 bg-[#f7f8fa] px-3 py-3 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                       onClick={() => onOpenConversation(conversation.id)}
                     >
+                      <ConversationAvatar agents={agents} conversation={conversation} />
                       <span className="min-w-0">
-                        <strong className="block truncate text-[#161616]">{conversationLabel(conversation)}</strong>
-                        <small className="text-[#69707d]">{formatMessageTime(conversation.lastMessageAt ?? conversation.updatedAt)}</small>
+                        <strong className="block truncate text-[#161616]">
+                          {dashboardConversationTitle(conversation, agents)}
+                        </strong>
+                        <span className="mt-1 block truncate text-sm text-[#596171]">
+                          {dashboardConversationPreview(latestMessage?.content)}
+                        </span>
                       </span>
-                      <Launch size={16} />
+                      <time
+                        className="whitespace-nowrap text-xs text-[#69707d]"
+                        dateTime={latestMessage?.updatedAt ?? conversation.lastMessageAt ?? conversation.updatedAt}
+                      >
+                        {formatMessageTime(latestMessage?.updatedAt ?? conversation.lastMessageAt ?? conversation.updatedAt)}
+                      </time>
                     </button>
                   ))}
                 </div>
               )}
             </section>
 
-            <section className={panelClass} aria-label="Quick actions">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[#69707d]">Quick actions</h2>
-              <div className="grid gap-2">
-                <button className={subtleButton} type="button" onClick={() => onOpenCreateAgent()}>Create agent</button>
-                <button className={subtleButton} type="button" onClick={onOpenCreateGroup}>Create group</button>
-                <button className={subtleButton} type="button" onClick={onOpenCreateProject}>Create project</button>
-                <button className={subtleButton} type="button" onClick={onOpenDaemon}>Manage daemon</button>
-              </div>
-            </section>
-          </div>
-
-          <section className={panelClass} aria-label="Recent messages">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent messages</h2>
-            {summary.dashboard.messages.length === 0 ? (
-              <p className="text-sm text-[#69707d]">Messages from chats and projects will appear here.</p>
-            ) : (
-              <div className="grid gap-2">
-                {summary.dashboard.messages.map(({ conversation, message }) => (
-                  <button
-                    key={message.id}
-                    type="button"
-                    className="grid cursor-pointer gap-1 rounded-xl border-0 bg-[#f7f8fa] px-3 py-2 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                    onClick={() => onOpenMessage(conversation.id, message.id)}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <strong className="truncate text-sm text-[#161616]">{conversationLabel(conversation)}</strong>
-                      <Tag size="sm" type={message.senderType === 'user' ? 'blue' : 'gray'}>{message.senderType}</Tag>
-                      <time className="text-xs text-[#69707d]" dateTime={message.updatedAt}>{formatMessageTime(message.updatedAt)}</time>
-                    </span>
-                    <span className="text-sm text-[#596171]">{compactPreview(message.content)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <div className="grid grid-cols-2 gap-5 max-[960px]:grid-cols-1">
-            <section className={panelClass} aria-label="Recent goals and tasks">
+            <section className={`${panelClass} min-h-[28rem]`} aria-label="Recent goals">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent goals / tasks</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent goals</h2>
                 <Task size={20} />
               </div>
               {summary.dashboard.goals.length === 0 ? (
                 <p className="text-sm text-[#69707d]">Use Task mode in a group or project to create goals.</p>
               ) : (
-                <div className="grid gap-2">
+                <div className="grid gap-3">
                   {summary.dashboard.goals.map(({ conversation, goal, taskCounts }) => (
                     <button
                       key={goal.id}
                       type="button"
-                      className="grid cursor-pointer gap-2 rounded-xl border-0 bg-[#f7f8fa] px-3 py-2 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      className="grid cursor-pointer gap-2 rounded-xl border-0 bg-[#f7f8fa] px-3 py-3 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                       onClick={() => onOpenGoal(conversation.id, goal.id)}
                     >
                       <span className="flex min-w-0 items-center justify-between gap-3">
@@ -705,33 +745,6 @@ export function WelcomePage({
                           <span key={status}>{status}: {count}</span>
                         ))}
                       </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className={panelClass} aria-label="Recent deployments">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#69707d]">Recent deployments</h2>
-                <Folder size={20} />
-              </div>
-              {summary.dashboard.deployments.length === 0 ? (
-                <p className="text-sm text-[#69707d]">Static site deployments will appear here.</p>
-              ) : (
-                <div className="grid gap-2">
-                  {summary.dashboard.deployments.map(({ conversation, deployment }) => (
-                    <button
-                      key={deployment.id}
-                      type="button"
-                      className="grid cursor-pointer gap-1 rounded-xl border-0 bg-[#f7f8fa] px-3 py-2 text-left hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                      onClick={() => onOpenDeployments(conversation.id)}
-                    >
-                      <span className="flex min-w-0 items-center justify-between gap-3">
-                        <strong className="truncate text-[#161616]">{deployment.title}</strong>
-                        <Tag size="sm" type={deployment.status === 'ready' ? 'green' : 'red'}>{deployment.status}</Tag>
-                      </span>
-                      <span className="truncate text-xs text-[#69707d]">{conversationLabel(conversation)} · {deployment.entrypoint}</span>
                     </button>
                   ))}
                 </div>

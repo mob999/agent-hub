@@ -2259,9 +2259,7 @@ export function WorkspacePage({
                 onOpenCreateGroup={openCreateGroup}
                 onOpenCreateProject={openCreateProject}
                 onOpenDaemon={() => navigateToView('daemon')}
-                onOpenDeployments={openDeploymentsRoute}
                 onOpenGoal={openGoalRoute}
-                onOpenMessage={openMessageRoute}
                 onRefreshData={refreshWelcomeData}
                 onWelcomeUpdated={updateWelcomeSummary}
               />

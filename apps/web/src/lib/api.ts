@@ -402,11 +402,7 @@ export interface WelcomeOnboardingState {
 
 export interface WelcomeRecentConversation {
   conversation: Conversation
-}
-
-export interface WelcomeRecentMessage {
-  conversation: Conversation
-  message: ConversationMessage
+  latestMessage?: ConversationMessage
 }
 
 export interface WelcomeRecentGoal {
@@ -415,16 +411,9 @@ export interface WelcomeRecentGoal {
   taskCounts: Partial<Record<ConversationGoalTaskStatus, number>>
 }
 
-export interface WelcomeRecentDeployment {
-  conversation: Conversation
-  deployment: ConversationDeployment
-}
-
 export interface WelcomeDashboardSummary {
   conversations: WelcomeRecentConversation[]
-  messages: WelcomeRecentMessage[]
   goals: WelcomeRecentGoal[]
-  deployments: WelcomeRecentDeployment[]
 }
 
 export interface WelcomeSummary {

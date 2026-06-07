@@ -4,6 +4,9 @@ import {
   agentRuntimeBindings,
   agents,
   agentWorkspaces,
+  conversationGoalTasks,
+  conversationGoals,
+  conversationMessages,
   conversations,
   createDb,
   daemonDevices,
@@ -191,5 +194,142 @@ describeDb("welcome repository integration", () => {
     expect(result.status).toBe("completed");
     expect(result.status === "completed" ? result.welcome.onboarding.completed : false).toBe(true);
     expect(repeated.status).toBe("completed");
+  });
+
+  it("summarizes recent conversations with latest messages and recent goals", async () => {
+    const userId = await createUser();
+    const daemonDeviceId = await createReadyDaemon(userId);
+    const agentId = await createReadyAgent(userId, daemonDeviceId);
+    const groupId = await createWorkspaceConversation(userId);
+    const projectId = randomUUID();
+    const directId = randomUUID();
+    const projectTime = new Date("2026-06-06T00:10:00.000Z");
+    const directTime = new Date("2026-06-06T00:20:00.000Z");
+    const groupMessageTime = new Date("2026-06-06T00:30:00.000Z");
+    const projectGoalId = randomUUID();
+    const groupGoalId = randomUUID();
+
+    conversationIds.push(projectId, directId);
+    await db.insert(conversations).values([
+      {
+        id: projectId,
+        ownerUserId: userId,
+        type: "project",
+        title: "Welcome project",
+        status: "active",
+        createdAt: projectTime,
+        updatedAt: projectTime,
+        lastMessageAt: projectTime,
+      },
+      {
+        id: directId,
+        ownerUserId: userId,
+        type: "direct",
+        title: "Welcome agent",
+        directAgentId: agentId,
+        status: "active",
+        createdAt: directTime,
+        updatedAt: directTime,
+        lastMessageAt: directTime,
+      },
+    ]);
+    await db
+      .update(conversations)
+      .set({
+        lastMessageAt: groupMessageTime,
+        updatedAt: groupMessageTime,
+      })
+      .where(inArray(conversations.id, [groupId]));
+    await db.insert(conversationMessages).values([
+      {
+        conversationId: projectId,
+        senderType: "user",
+        content: "project preview",
+        status: "completed",
+        createdAt: projectTime,
+        updatedAt: projectTime,
+      },
+      {
+        conversationId: directId,
+        senderType: "agent",
+        senderAgentId: agentId,
+        content: "agent preview",
+        status: "completed",
+        createdAt: directTime,
+        updatedAt: directTime,
+      },
+      {
+        conversationId: groupId,
+        senderType: "user",
+        content: "group preview",
+        status: "completed",
+        createdAt: groupMessageTime,
+        updatedAt: groupMessageTime,
+      },
+    ]);
+    await db.insert(conversationGoals).values([
+      {
+        id: projectGoalId,
+        ownerUserId: userId,
+        conversationId: projectId,
+        orchestratorAgentId: agentId,
+        initialRunId: randomUUID(),
+        title: "Project goal",
+        status: "active",
+        createdAt: projectTime,
+        updatedAt: new Date("2026-06-06T00:40:00.000Z"),
+      },
+      {
+        id: groupGoalId,
+        ownerUserId: userId,
+        conversationId: groupId,
+        orchestratorAgentId: agentId,
+        initialRunId: randomUUID(),
+        title: "Group goal",
+        status: "completed",
+        createdAt: directTime,
+        updatedAt: directTime,
+      },
+    ]);
+    await db.insert(conversationGoalTasks).values([
+      {
+        id: randomUUID(),
+        goalId: projectGoalId,
+        index: 0,
+        assigneeAgentId: agentId,
+        title: "Implement",
+        status: "running",
+        createdAt: projectTime,
+        updatedAt: projectTime,
+      },
+      {
+        id: randomUUID(),
+        goalId: projectGoalId,
+        index: 1,
+        assigneeAgentId: agentId,
+        title: "Review",
+        status: "waiting",
+        createdAt: projectTime,
+        updatedAt: projectTime,
+      },
+    ]);
+
+    const summary = await getWelcomeSummaryForUser(db, {
+      ownerUserId: userId,
+    });
+
+    expect(summary?.dashboard.conversations.map((item) => item.conversation.id).slice(0, 3))
+      .toEqual([groupId, directId, projectId]);
+    expect(summary?.dashboard.conversations.find((item) => item.conversation.id === groupId)?.latestMessage?.content)
+      .toBe("group preview");
+    expect(summary?.dashboard.conversations.find((item) => item.conversation.id === directId)?.latestMessage?.content)
+      .toBe("agent preview");
+    expect(Object.prototype.hasOwnProperty.call(summary?.dashboard ?? {}, "messages")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(summary?.dashboard ?? {}, "deployments")).toBe(false);
+    expect(summary?.dashboard.goals[0]?.goal.id).toBe(projectGoalId);
+    expect(summary?.dashboard.goals[0]?.taskCounts).toMatchObject({
+      running: 1,
+      waiting: 1,
+    });
   });
 });

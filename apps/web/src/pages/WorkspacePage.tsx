@@ -92,6 +92,7 @@ function workspaceViewFromRoute(route: WorkspaceRoutePath): WorkspaceView {
 const conversationDraftsStoragePrefix = 'agenthub.workspace.conversationDrafts'
 const realtimeToastDurationMs = 5000
 const maxRealtimeToasts = 4
+type AgentCreateAfterSubmit = 'open-direct' | 'stay'
 
 function userScopedStorageKey(prefix: string, userId: string): string {
   return `${prefix}.${userId}`
@@ -253,6 +254,7 @@ export function WorkspacePage({
   const [agentCreateError, setAgentCreateError] = useState<string | null>(null)
   const [isCreatingAgent, setIsCreatingAgent] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [agentCreateAfterSubmit, setAgentCreateAfterSubmit] = useState<AgentCreateAfterSubmit>('open-direct')
   const [agentEditError, setAgentEditError] = useState<string | null>(null)
   const [isSavingAgent, setIsSavingAgent] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
@@ -1599,8 +1601,12 @@ export function WorkspacePage({
     )
     selectConversation(conversationId)
   }
-  const openCreateAgent = (daemonDeviceId?: string) => {
+  const openCreateAgent = (
+    daemonDeviceId?: string,
+    options: { afterSubmit?: AgentCreateAfterSubmit } = {},
+  ) => {
     setDefaultAgentDaemonId(daemonDeviceId ?? null)
+    setAgentCreateAfterSubmit(options.afterSubmit ?? 'open-direct')
     setAgentCreateError(null)
     setAgentModalOpen(true)
   }
@@ -1946,7 +1952,14 @@ export function WorkspacePage({
 
       setAgents((current) => [response.agent, ...current])
       invalidateAgentCatalog()
+      void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
       setSelectedRunId(null)
+      if (agentCreateAfterSubmit === 'stay') {
+        setAgentModalOpen(false)
+        void loadAgents()
+        return
+      }
+
       const conversationResponse = await apiRequest<{ conversation: Conversation }>('/conversations/direct', {
         method: 'POST',
         body: JSON.stringify({ agentId: response.agent.agent.id }),
@@ -2243,7 +2256,7 @@ export function WorkspacePage({
                 isLoading={welcomeQuery.isPending}
                 summary={welcomeQuery.data ?? null}
                 onOpenConversation={selectConversation}
-                onOpenCreateAgent={(daemonDeviceId) => openCreateAgent(daemonDeviceId)}
+                onOpenCreateAgent={(daemonDeviceId) => openCreateAgent(daemonDeviceId, { afterSubmit: 'stay' })}
                 onOpenCreateGroup={openCreateGroup}
                 onOpenCreateProject={openCreateProject}
                 onOpenDaemon={() => navigateToView('daemon')}

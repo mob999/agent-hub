@@ -133,6 +133,11 @@ function isAgentReady(agent: AgentDetails): boolean {
     agent.workspace.status === 'ready'
 }
 
+function isAgentProvisioning(agent: AgentDetails): boolean {
+  return agent.agent.status === 'active' &&
+    (agent.runtimeBinding.status === 'pending' || agent.workspace.status === 'pending')
+}
+
 function readyRuntimeDevices(devices: DaemonDevice[]): DaemonDevice[] {
   return devices
     .filter((device) => device.status === 'online')
@@ -520,6 +525,10 @@ export function WelcomePage({
   )
   const readyAgents = useMemo(
     () => freshOnboardingPreview ? [] : agents.filter(isAgentReady),
+    [agents, freshOnboardingPreview],
+  )
+  const provisioningAgents = useMemo(
+    () => freshOnboardingPreview ? [] : agents.filter(isAgentProvisioning),
     [agents, freshOnboardingPreview],
   )
   const onboarding = summary?.onboarding ?? null
@@ -1066,14 +1075,19 @@ export function WelcomePage({
                 </div>
               ) : (
                 <div className="grid max-w-2xl gap-4">
-                  <p className="text-sm leading-6 text-[#69707d]">
-                    {t('welcome.agentStepSubtitle')}
-                  </p>
+                  {provisioningAgents.length > 0 && (
+                    <div className="grid gap-2 rounded-xl border border-[#d8dee6] bg-white p-3">
+                      <InlineLoading description={t('welcome.agentProvisioningTitle')} status="active" />
+                      <p className="text-sm leading-6 text-[#69707d]">
+                        {t('welcome.agentProvisioningSubtitle')}
+                      </p>
+                    </div>
+                  )}
                   <div className="grid max-w-xs gap-2">
                     <button
                       className={primaryButton}
                       type="button"
-                      disabled={availableDevices.length === 0}
+                      disabled={availableDevices.length === 0 || provisioningAgents.length > 0}
                       onClick={() => onOpenCreateAgent(availableDevices[0]?.id)}
                     >
                       <ChatBot size={16} />

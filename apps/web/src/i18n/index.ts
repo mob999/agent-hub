@@ -327,7 +327,8 @@ const resources = {
       },
       welcome: {
         agentReadySubtitle: 'Your first agent is ready. You can open it from the Agents area or create more agents later.',
-        agentStepSubtitle: 'Create your first agent from the shared setup dialog. Tavro will preselect the first ready daemon runtime for you.',
+        agentProvisioningSubtitle: 'Stay here while Tavro prepares the local workspace. This step will complete automatically when the agent is ready.',
+        agentProvisioningTitle: 'Creating agent',
         back: 'Back',
         backToDashboard: 'Back to dashboard',
         completeStep: 'Complete this step to continue.',
@@ -799,7 +800,8 @@ const resources = {
       },
       welcome: {
         agentReadySubtitle: '你的第一个 Agent 已就绪。之后可以从 Agents 区打开它，也可以继续创建更多 Agent。',
-        agentStepSubtitle: '通过统一设置弹窗创建第一个 Agent。Tavro 会自动预选第一个已就绪的执行器 runtime。',
+        agentProvisioningSubtitle: '留在当前页面即可，Tavro 正在准备本地工作区。Agent 就绪后这一步会自动完成。',
+        agentProvisioningTitle: '正在创建 Agent',
         back: '返回',
         backToDashboard: '返回 Dashboard',
         completeStep: '完成当前步骤后继续。',

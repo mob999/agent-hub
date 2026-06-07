@@ -34,6 +34,7 @@ export interface Agent {
   ownerUserId: UserId;
   name: string;
   description?: string;
+  tags: string[];
   avatar?: string;
   defaultRuntimeKind: RuntimeKind;
   status: AgentStatus;
@@ -111,6 +112,7 @@ export interface AgentDetails {
 export interface CreateAgentRequest {
   name: string;
   description?: string;
+  tags?: string[];
   daemonDeviceId: DaemonDeviceId;
   runtimeKind: RuntimeKind;
 }
@@ -122,6 +124,7 @@ export interface CreateAgentResponse {
 export interface UpdateAgentRequest {
   name: string;
   description?: string;
+  tags?: string[];
 }
 
 export interface UpdateAgentResponse {
@@ -134,6 +137,57 @@ export interface ArchiveAgentResponse {
 
 export interface RestoreAgentResponse {
   agent: AgentDetails;
+}
+
+export const agentTagMaxCount = 6;
+export const agentTagMaxLength = 20;
+
+export interface NormalizeAgentTagsResult {
+  error?: "too-many" | "too-long" | "invalid";
+  tags: string[];
+}
+
+export function normalizeAgentTags(input: unknown): NormalizeAgentTagsResult {
+  if (input === undefined) {
+    return { tags: [] };
+  }
+
+  if (!Array.isArray(input)) {
+    return { error: "invalid", tags: [] };
+  }
+
+  const tags: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of input) {
+    if (typeof item !== "string") {
+      return { error: "invalid", tags: [] };
+    }
+
+    const tag = item.trim().replace(/\s+/g, " ");
+
+    if (tag.length === 0) {
+      continue;
+    }
+
+    if (tag.length > agentTagMaxLength) {
+      return { error: "too-long", tags: [] };
+    }
+
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    tags.push(tag);
+
+    if (tags.length > agentTagMaxCount) {
+      return { error: "too-many", tags: [] };
+    }
+  }
+
+  return { tags };
 }
 
 export const agentWorkspaceDirectoryNames = [

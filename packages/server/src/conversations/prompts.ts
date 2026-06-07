@@ -85,11 +85,13 @@ export function buildConversationRunPrompt(input: {
 export function buildAgentIdentityInstructions(input: {
   agentDescription?: string | null;
   agentName: string;
+  agentTags?: string[];
   conversationTitle?: string;
   isOrchestrator?: boolean;
   scenario: string;
 }): string {
   const description = input.agentDescription?.trim();
+  const tags = input.agentTags?.map((tag) => tag.trim()).filter((tag) => tag.length > 0) ?? [];
 
   return [
     "<agenthub_agent_identity>",
@@ -104,6 +106,9 @@ export function buildAgentIdentityInstructions(input: {
     "Your runtime may be Codex, Claude Code, OpenCode, or another adapter, but that runtime is only the execution engine.",
     "Do not introduce yourself as Codex, Claude Code, OpenCode, or the runtime.",
     "Stay in character as this AgentHub agent and follow the role/profile below.",
+    tags.length === 0
+      ? "Tags: none"
+      : `Tags: ${tags.join(", ")}`,
     description === undefined || description.length === 0
       ? "Profile: No description provided."
       : ["Profile:", description].join("\n"),
@@ -116,6 +121,7 @@ export function buildAgentIdentityInstructions(input: {
 export function buildAssignedTaskInstructions(input: {
   agentName: string;
   agentDescription?: string;
+  agentTags?: string[];
   conversationTitle: string;
   projectProtocolPrompt?: string;
 }): string {
@@ -123,6 +129,7 @@ export function buildAssignedTaskInstructions(input: {
     buildAgentIdentityInstructions({
       agentDescription: input.agentDescription,
       agentName: input.agentName,
+      agentTags: input.agentTags,
       conversationTitle: input.conversationTitle,
       scenario: "assigned task",
     }),
@@ -137,6 +144,7 @@ export function buildAssignedTaskInstructions(input: {
 export function buildMentionedGroupChatAgentInstructions(input: {
   agentName: string;
   agentDescription?: string;
+  agentTags?: string[];
   conversationTitle: string;
   isOrchestrator?: boolean;
   projectProtocolPrompt?: string;
@@ -145,6 +153,7 @@ export function buildMentionedGroupChatAgentInstructions(input: {
     buildAgentIdentityInstructions({
       agentDescription: input.agentDescription,
       agentName: input.agentName,
+      agentTags: input.agentTags,
       conversationTitle: input.conversationTitle,
       isOrchestrator: input.isOrchestrator,
       scenario: "mentioned group chat",
@@ -187,7 +196,7 @@ export function buildProjectProtocolPrompt(input: {
 }
 
 export interface AgentGroupContext {
-  agents: Array<{ description?: string; id: string; name: string }>;
+  agents: Array<{ id: string; name: string; tags: string[] }>;
   conversationId: ConversationId;
   groupName: string;
   orchestratorAgentId?: string;
@@ -219,15 +228,15 @@ export function buildAgentGroupsPrompt(
             : [
                 "  members:",
                 ...group.agents.map((agent) => {
-                  const description = agent.description?.trim();
                   const role = agent.id === group.orchestratorAgentId
                     ? " [Orchestrator]"
                     : "";
+                  const tags = agent.tags
+                    .map((tag) => tag.trim())
+                    .filter((tag) => tag.length > 0);
 
-                  return `  - @${agent.name}${role}: ${
-                    description === undefined || description.length === 0
-                      ? "No description provided."
-                      : description
+                  return `  - @${agent.name}${role}: tags: ${
+                    tags.length === 0 ? "none" : tags.join(", ")
                   }`;
                 }),
               ];

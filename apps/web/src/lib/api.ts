@@ -73,6 +73,7 @@ export interface Agent {
   ownerUserId: string
   name: string
   description?: string
+  tags: string[]
   avatar?: string
   defaultRuntimeKind: RuntimeKind
   status: AgentStatus

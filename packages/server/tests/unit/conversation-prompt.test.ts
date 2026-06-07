@@ -145,6 +145,7 @@ describe("conversation prompt builder", () => {
     const prompt = buildAgentIdentityInstructions({
       agentDescription: "",
       agentName: "dudu",
+      agentTags: ["frontend", "review"],
       conversationTitle: "Design",
       isOrchestrator: true,
       scenario: "group chat",
@@ -154,13 +155,14 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("runtime is only the execution engine");
     expect(prompt).toContain("Do not introduce yourself as Codex");
     expect(prompt).toContain("You are the configured Orchestrator");
+    expect(prompt).toContain("Tags: frontend, review");
     expect(prompt).toContain("Profile: No description provided.");
   });
 
   it("only expands member details for the current group", () => {
     const prompt = buildAgentGroupsPrompt([
       {
-        agents: [{ description: "Coordinates research.", id: "agent-all", name: "coco" }],
+        agents: [{ id: "agent-all", name: "coco", tags: ["research"] }],
         conversationId: "00000000-0000-4000-8000-000000000020",
         groupName: "all",
         orchestratorAgentId: "agent-all",
@@ -168,8 +170,8 @@ describe("conversation prompt builder", () => {
       },
       {
         agents: [
-          { description: "Frontend implementation.", id: "agent-design-1", name: "dudu" },
-          { id: "agent-design-2", name: "jojo" },
+          { id: "agent-design-1", name: "dudu", tags: ["frontend", "implementation"] },
+          { id: "agent-design-2", name: "jojo", tags: [] },
         ],
         conversationId: "00000000-0000-4000-8000-000000000021",
         groupName: "Design",
@@ -181,8 +183,9 @@ describe("conversation prompt builder", () => {
     expect(prompt).toContain("- #all (groupName: all, conversationId:");
     expect(prompt).not.toContain("@coco");
     expect(prompt).toContain("- #Design (groupName: Design, conversationId:");
-    expect(prompt).toContain("@dudu [Orchestrator]: Frontend implementation.");
-    expect(prompt).toContain("@jojo: No description provided.");
+    expect(prompt).toContain("@dudu [Orchestrator]: tags: frontend, implementation");
+    expect(prompt).toContain("@jojo: tags: none");
+    expect(prompt).not.toContain("Frontend implementation.");
     expect(prompt).toContain("Only the current group includes member details.");
     expect(prompt).toContain("target { type: \"group\", groupName }");
     expect(prompt).toContain("include @all");
@@ -195,7 +198,7 @@ describe("conversation prompt builder", () => {
     const prompt = buildAgentGroupsPrompt([
       {
         agents: [
-          { description: "Coordinates research.", id: "agent-coco", name: "coco" },
+          { id: "agent-coco", name: "coco", tags: ["research"] },
         ],
         conversationId: "00000000-0000-4000-8000-000000000020",
         groupName: "Research",
@@ -442,4 +445,3 @@ describe("conversation prompt builder", () => {
     ).toEqual(["agent-coco", "agent-dudu"]);
   });
 });
-

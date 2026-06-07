@@ -645,6 +645,7 @@ async function createMentionedGroupChatRuns(
       agentInstructions: buildMentionedGroupChatAgentInstructions({
         agentName: runAgent.agent.name,
         agentDescription: runAgent.agent.description,
+        agentTags: runAgent.agent.tags,
         conversationTitle: input.conversation.title,
         isOrchestrator,
         projectProtocolPrompt,
@@ -697,6 +698,7 @@ async function createMentionedGroupChatRuns(
         agentInstructions: buildAssignedTaskInstructions({
           agentName: runAgent.agent.name,
           agentDescription: runAgent.agent.description,
+          agentTags: runAgent.agent.tags,
           conversationTitle: input.conversation.title,
           projectProtocolPrompt,
         }),

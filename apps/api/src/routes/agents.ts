@@ -10,6 +10,7 @@ import {
   agentHubNonOrchestratorMcpTools,
   inferArtifactFileInfo,
   isDefaultAvatarPath,
+  normalizeAgentTags,
 } from "@agent-hub/core";
 import {
   appendRunEvent,
@@ -174,6 +175,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     const body = (await c.req.json().catch(() => ({}))) as {
       name?: unknown;
       description?: unknown;
+      tags?: unknown;
       avatar?: unknown;
       daemonDeviceId?: unknown;
       runtimeKind?: unknown;
@@ -188,10 +190,13 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
       : isDefaultAvatarPath(body.avatar)
       ? body.avatar
       : null;
+    const hasTags = Object.hasOwn(body, "tags");
+    const tags = hasTags ? normalizeAgentTags(body.tags) : { tags: [] };
   
     if (
       name.length === 0 ||
       name.length > 120 ||
+      tags.error !== undefined ||
       avatar === null ||
       typeof body.daemonDeviceId !== "string" ||
       body.daemonDeviceId.length === 0 ||
@@ -202,7 +207,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
           error: {
             code: "INVALID_AGENT_REQUEST",
             message:
-              "name, avatar, daemonDeviceId, and a supported runtimeKind are required.",
+              "name, avatar, daemonDeviceId, a supported runtimeKind, and up to 6 tags of 20 characters each are required.",
           },
         },
         400,
@@ -232,6 +237,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
       ownerUserId: user.id,
       name,
       description,
+      tags: tags.tags,
       avatar: avatar ?? undefined,
       runtime,
       createdAt,
@@ -388,6 +394,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     const body = (await c.req.json().catch(() => ({}))) as {
       description?: unknown;
       name?: unknown;
+      tags?: unknown;
       avatar?: unknown;
     };
     const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -400,14 +407,16 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
       : isDefaultAvatarPath(body.avatar)
       ? body.avatar
       : null;
+    const hasTags = Object.hasOwn(body, "tags");
+    const tags = hasTags ? normalizeAgentTags(body.tags) : { tags: [] };
   
-    if (name.length === 0 || name.length > 120 || avatar === null) {
+    if (name.length === 0 || name.length > 120 || tags.error !== undefined || avatar === null) {
       return c.json(
         {
           error: {
             code: "INVALID_AGENT_REQUEST",
             message:
-              "name is required, must be 120 characters or fewer, and avatar must be a default avatar.",
+              "name is required, must be 120 characters or fewer, tags are limited to 6 items of 20 characters each, and avatar must be a default avatar.",
           },
         },
         400,
@@ -419,6 +428,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
       ownerUserId: user.id,
       name,
       description,
+      ...(hasTags ? { tags: tags.tags } : {}),
       avatar,
     });
   
@@ -433,6 +443,7 @@ export function createAgentsRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
         404,
       );
     }
+    await invalidateUserSidebarCache(redis, { logger, userId: user.id });
   
     return c.json({ agent });
   });

@@ -10,7 +10,6 @@ import {
   defaultGroupConversationKey,
   toConversationsWithAgentIds,
 } from "./helpers.js";
-import { optionalString } from "./mappers.js";
 import type { AgentGroupContext } from "./prompts.js";
 
 export async function listActiveAgentGroupContexts(
@@ -53,7 +52,7 @@ export async function listActiveAgentGroupContexts(
   const agentRows = agentIds.length === 0
     ? []
     : await db
-        .select({ description: agents.description, id: agents.id, name: agents.name })
+        .select({ id: agents.id, name: agents.name, tags: agents.tags })
         .from(agents)
         .where(
           and(
@@ -67,9 +66,11 @@ export async function listActiveAgentGroupContexts(
     agentRows.map((agent) => [
       agent.id,
       {
-        description: optionalString(agent.description),
         id: agent.id,
         name: agent.name,
+        tags: Array.isArray(agent.tags)
+          ? agent.tags.filter((tag): tag is string => typeof tag === "string")
+          : [],
       },
     ]),
   );

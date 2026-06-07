@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DaemonDevice, RuntimeKind } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
+import { AgentTagEditor } from './AgentTagEditor'
 import { AvatarPicker } from './AvatarPicker'
 
 interface AgentCreateModalProps {
@@ -22,6 +23,7 @@ interface AgentCreateModalProps {
   onCreate: (input: {
     name: string
     description?: string
+    tags: string[]
     avatar: string
     daemonDeviceId: string
     runtimeKind: RuntimeKind
@@ -55,6 +57,7 @@ export function AgentCreateModal({
     ''
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR_PATHS[0])
   const [daemonDeviceId, setDaemonDeviceId] = useState(initialDeviceId)
   const selectedDaemonDeviceId =
@@ -91,6 +94,7 @@ export function AgentCreateModal({
         onCreate({
           name: name.trim(),
           description: description.trim() || undefined,
+          tags,
           avatar,
           daemonDeviceId: selectedDaemonDeviceId,
           runtimeKind: selectedRuntimeKind,
@@ -131,6 +135,11 @@ export function AgentCreateModal({
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
+        />
+        <AgentTagEditor
+          disabled={isCreating}
+          tags={tags}
+          onChange={setTags}
         />
         <AvatarPicker
           label={t('modals.agentCreate.avatar')}

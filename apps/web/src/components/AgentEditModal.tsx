@@ -11,6 +11,7 @@ import { Document, Folder, Renew } from '@carbon/react/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
+import { AgentTagEditor } from './AgentTagEditor'
 import { AvatarPicker } from './AvatarPicker'
 
 type AgentSettingsSection = 'profile' | 'memory' | 'danger'
@@ -22,7 +23,7 @@ interface AgentEditModalProps {
   open: boolean
   onClose: () => void
   onArchive: () => void
-  onSave: (input: { name: string; description?: string; avatar: string }) => void
+  onSave: (input: { name: string; description?: string; tags: string[]; avatar: string }) => void
 }
 
 export function AgentEditModal({
@@ -59,6 +60,7 @@ function AgentEditModalContent({
 }: AgentEditModalProps) {
   const [name, setName] = useState(agent.agent.name)
   const [description, setDescription] = useState(agent.agent.description ?? '')
+  const [tags, setTags] = useState(agent.agent.tags)
   const [avatar, setAvatar] = useState(agent.agent.avatar ?? DEFAULT_AVATAR_PATHS[0])
   const [memoryFiles, setMemoryFiles] = useState<AgentMemoryFile[]>([])
   const [memoryError, setMemoryError] = useState<string | null>(null)
@@ -146,6 +148,7 @@ function AgentEditModalContent({
         onSave({
           name: name.trim(),
           description: description.trim() || undefined,
+          tags,
           avatar,
         })
       }}
@@ -190,6 +193,11 @@ function AgentEditModalContent({
                 value={description}
                 disabled={isSaving}
                 onChange={(event) => setDescription(event.target.value)}
+              />
+              <AgentTagEditor
+                disabled={isSaving}
+                tags={tags}
+                onChange={setTags}
               />
               <AvatarPicker
                 label="Avatar"

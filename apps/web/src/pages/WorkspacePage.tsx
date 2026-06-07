@@ -1930,6 +1930,7 @@ export function WorkspacePage({
   const createAgent = async (input: {
     name: string
     description?: string
+    tags: string[]
     avatar: string
     daemonDeviceId: string
     runtimeKind: RuntimeKind
@@ -1972,7 +1973,7 @@ export function WorkspacePage({
       setIsCreatingAgent(false)
     }
   }
-  const updateAgent = async (input: { name: string; description?: string; avatar: string }) => {
+  const updateAgent = async (input: { name: string; description?: string; tags: string[]; avatar: string }) => {
     if (editingAgent === null) {
       return
     }

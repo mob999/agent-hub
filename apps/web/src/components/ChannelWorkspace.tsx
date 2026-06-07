@@ -475,12 +475,13 @@ export function ChannelWorkspace({
       ? t('chat.chooseConversation')
       : t('chat.noConversation')
     : isAgentDirectMessage
-      ? selectedAgent?.agent.description?.trim() || t('chat.privateConversationDescription')
+      ? ''
       : activeConversation.type === 'project'
         ? activeConversation.description?.trim() || activeConversation.project?.remoteUrl || t('chat.projectConversationDescription')
         : activeConversation.key === 'all'
           ? t('chat.generalChannelDescription')
           : activeConversation.description?.trim() || t('chat.groupChannelDescription')
+  const chatTags = isAgentDirectMessage ? selectedAgent?.agent.tags ?? [] : []
   const emptyTitle = !hasSelectedConversation
     ? welcomeActive
       ? t('chat.welcomeTitle')
@@ -1260,7 +1261,14 @@ export function ChannelWorkspace({
                 </span>
               )}
             </div>
-            {chatDescription.length > 0 && (
+            {chatTags.length > 0 ? (
+              <p
+                className="truncate text-sm leading-5 text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal"
+                aria-label={t('agentTags.current')}
+              >
+                {chatTags.join(' · ')}
+              </p>
+            ) : chatDescription.length > 0 && (
               <p className="truncate text-sm leading-5 text-[var(--cds-text-secondary)] max-[671px]:whitespace-normal">
                 {chatDescription}
               </p>

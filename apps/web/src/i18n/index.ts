@@ -96,6 +96,17 @@ const resources = {
         skip: 'Skip to workspace',
         tutorial: 'Open onboarding tutorial',
       },
+      agentTags: {
+        add: 'Add tag',
+        confirm: 'Confirm tag',
+        current: 'Agent tags',
+        invalid: 'Tags must be text.',
+        label: 'Tags',
+        placeholder: 'Add a tag',
+        remove: 'Remove {{tag}}',
+        tooLong: 'Tags must be {{count}} characters or fewer.',
+        tooMany: 'Agents can have up to {{count}} tags.',
+      },
       status: {
         agent: {
           active: 'Active',
@@ -556,6 +567,17 @@ const resources = {
         signedInAs: '当前登录',
         skip: '跳到工作区',
         tutorial: '打开新手教程',
+      },
+      agentTags: {
+        add: '添加标签',
+        confirm: '确认标签',
+        current: 'Agent 标签',
+        invalid: '标签必须是文本。',
+        label: '标签',
+        placeholder: '添加标签',
+        remove: '移除 {{tag}}',
+        tooLong: '标签最多 {{count}} 个字符。',
+        tooMany: 'Agent 最多可以有 {{count}} 个标签。',
       },
       status: {
         agent: {

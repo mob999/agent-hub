@@ -1261,6 +1261,7 @@ async function maybeCreateCheckpointRunForTask(
       buildAgentIdentityInstructions({
         agentDescription: runAgent.agent.description,
         agentName: runAgent.agent.name,
+        agentTags: runAgent.agent.tags,
         conversationTitle: conversation.title,
         isOrchestrator: true,
         scenario: "task checkpoint",
@@ -1443,6 +1444,7 @@ async function createAssignedTaskRunJob(
     agentInstructions: buildAssignedTaskInstructions({
       agentName: runAgent.agent.name,
       agentDescription: runAgent.agent.description,
+      agentTags: runAgent.agent.tags,
       conversationTitle: input.conversation.title,
       projectProtocolPrompt,
     }),
@@ -3137,4 +3139,3 @@ export async function appendRunEventToConversationMessage(
 
   return result();
 }
-

@@ -23,6 +23,7 @@ export interface CreateAgentRecordInput {
   ownerUserId: string;
   name: string;
   description?: string;
+  tags?: string[];
   avatar?: string;
   runtime: DaemonRuntime;
   createdAt: Date;
@@ -65,6 +66,12 @@ function optionalString(value: string | null): string | undefined {
   return value ?? undefined;
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 function toAgentDetails(
   agent: AgentRow,
   binding: BindingRow,
@@ -76,6 +83,7 @@ function toAgentDetails(
       ownerUserId: agent.ownerUserId,
       name: agent.name,
       description: optionalString(agent.description),
+      tags: stringArray(agent.tags),
       avatar: optionalString(agent.avatar),
       defaultRuntimeKind: agent.defaultRuntimeKind as RuntimeKind,
       status: agent.status as AgentDetails["agent"]["status"],
@@ -239,6 +247,7 @@ export async function createAgentProvisioningRecords(
       ownerUserId: input.ownerUserId,
       name: input.name,
       description: input.description,
+      tags: input.tags ?? [],
       avatar: input.avatar,
       defaultRuntimeKind: input.runtime.runtimeKind,
       status: "active",
@@ -504,6 +513,7 @@ export async function updateAgentProfileForUser(
     ownerUserId: string;
     name: string;
     description?: string;
+    tags?: string[];
     avatar?: string;
   },
 ): Promise<AgentDetails | null> {
@@ -513,6 +523,7 @@ export async function updateAgentProfileForUser(
   const updateValues: {
     name: string;
     description: string | null;
+    tags?: string[];
     avatar?: string | null;
     updatedAt: Date;
   } = {
@@ -520,6 +531,10 @@ export async function updateAgentProfileForUser(
     description: description ?? null,
     updatedAt,
   };
+
+  if (Object.hasOwn(input, "tags")) {
+    updateValues.tags = input.tags ?? [];
+  }
 
   if (Object.hasOwn(input, "avatar")) {
     updateValues.avatar = input.avatar ?? null;

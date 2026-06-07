@@ -21,6 +21,7 @@ export const agents = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 120 }).notNull(),
     description: text("description"),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
     avatar: text("avatar"),
     defaultRuntimeKind: varchar("default_runtime_kind", { length: 40 }).notNull(),
     status: varchar("status", { length: 32 }).notNull().default("active"),

@@ -327,7 +327,7 @@ const resources = {
       },
       welcome: {
         agentReadySubtitle: 'Your first agent is ready. You can open it from the Agents area or create more agents later.',
-        agentProvisioningSubtitle: 'Stay here while Tavro prepares the local workspace. This step will complete automatically when the agent is ready.',
+        agentProvisioningSubtitle: 'Waiting for agent readiness.',
         agentProvisioningTitle: 'Creating agent',
         back: 'Back',
         backToDashboard: 'Back to dashboard',
@@ -800,7 +800,7 @@ const resources = {
       },
       welcome: {
         agentReadySubtitle: '你的第一个 Agent 已就绪。之后可以从 Agents 区打开它，也可以继续创建更多 Agent。',
-        agentProvisioningSubtitle: '留在当前页面即可，Tavro 正在准备本地工作区。Agent 就绪后这一步会自动完成。',
+        agentProvisioningSubtitle: '等待 Agent 就绪。',
         agentProvisioningTitle: '正在创建 Agent',
         back: '返回',
         backToDashboard: '返回 Dashboard',

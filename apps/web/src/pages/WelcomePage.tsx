@@ -917,7 +917,7 @@ export function WelcomePage({
             <h1 className="text-2xl font-semibold leading-8 text-[#161616]">{t('welcome.onboardingTitle')}</h1>
             <p className="text-sm text-[#69707d]">{t('welcome.onboardingSubtitle')}</p>
           </div>
-          {forceOnboardingTutorial && (
+          {devMode && forceOnboardingTutorial && (
             <button
               className={subtleButton}
               type="button"

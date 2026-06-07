@@ -286,6 +286,7 @@ export function WorkspacePage({
   const [runError, setRunError] = useState<string | null>(null)
   const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [tutorialRequestId, setTutorialRequestId] = useState(0)
   const [searchQuery, setSearchQuery] = useState(initialSearchRouteState.query)
   const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(initialSearchRouteState.channelId)
   const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(initialSearchRouteState.sender)
@@ -1136,29 +1137,6 @@ export function WorkspacePage({
     }
   }
 
-  const refreshWorkspace = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
-    invalidateAgentCatalog()
-    invalidateConversationCatalog()
-    void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
-    void loadDevices()
-    void loadAgents()
-    void loadArchivedAgents()
-    void loadConversations()
-    void loadArchivedConversations()
-    void loadRuns()
-    if (activeConversationId !== null) {
-      invalidateConversationDetail(activeConversationId)
-      void loadMessages(activeConversationId)
-      void loadTasks(activeConversationId)
-      void loadArtifacts(activeConversationId)
-    }
-    runs.forEach((localRun) => {
-      void refreshRun(localRun.run.id)
-    })
-  }
-
   const refreshWelcomeData = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
     void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
@@ -1175,6 +1153,13 @@ export function WorkspacePage({
     loadDevices,
     queryClient,
   ])
+
+  const openOnboardingTutorial = useCallback(() => {
+    setAccountExpanded(false)
+    refreshWelcomeData()
+    setTutorialRequestId((requestId) => requestId + 1)
+    navigate('/welcome')
+  }, [navigate, refreshWelcomeData])
 
   const updateWelcomeSummary = useCallback((summary: WelcomeSummary) => {
     queryClient.setQueryData(queryKeys.welcome(), summary)
@@ -2197,7 +2182,7 @@ export function WorkspacePage({
         accountExpanded={accountExpanded}
         toggleAccount={() => setAccountExpanded((expanded) => !expanded)}
         setActiveView={navigateToView}
-        refreshWorkspace={refreshWorkspace}
+        openTutorial={openOnboardingTutorial}
         logout={logout}
         openSettings={() => {
           setAccountExpanded(false)
@@ -2264,6 +2249,7 @@ export function WorkspacePage({
                 onOpenGoal={openGoalRoute}
                 onRefreshData={refreshWelcomeData}
                 onWelcomeUpdated={updateWelcomeSummary}
+                tutorialRequestId={tutorialRequestId}
               />
             ) : isSearchRoute ? (
               <SearchWorkspace

@@ -94,6 +94,7 @@ const resources = {
         sections: 'Workspace sections',
         signedInAs: 'Signed in as',
         skip: 'Skip to workspace',
+        tutorial: 'Open onboarding tutorial',
       },
       status: {
         agent: {
@@ -554,6 +555,7 @@ const resources = {
         sections: '工作区分区',
         signedInAs: '当前登录',
         skip: '跳到工作区',
+        tutorial: '打开新手教程',
       },
       status: {
         agent: {

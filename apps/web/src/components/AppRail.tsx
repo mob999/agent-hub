@@ -1,5 +1,5 @@
 import { Button, Theme } from '@carbon/react'
-import { Chat, Devices, JobRun, Logout, Renew, Settings, UserAvatar } from '@carbon/react/icons'
+import { Chat, Devices, JobRun, Logout, Settings, UserAvatar } from '@carbon/react/icons'
 import { useTranslation } from 'react-i18next'
 import type { User, WorkspaceView } from '../lib/api'
 
@@ -9,7 +9,7 @@ interface AppRailProps {
   accountExpanded: boolean
   toggleAccount: () => void
   setActiveView: (view: WorkspaceView) => void
-  refreshWorkspace: () => void
+  openTutorial: () => void
   logout: () => void
   openSettings: () => void
 }
@@ -25,7 +25,7 @@ export function AppRail({
   accountExpanded,
   toggleAccount,
   setActiveView,
-  refreshWorkspace,
+  openTutorial,
   logout,
   openSettings,
 }: AppRailProps) {
@@ -120,8 +120,8 @@ export function AppRail({
         </button>
       </nav>
       <div className="flex flex-col items-center gap-1.5">
-        <button className={railButton} type="button" aria-label={t('common.refresh')} onClick={refreshWorkspace}>
-          <Renew size={20} />
+        <button className={railButton} type="button" aria-label={t('appRail.tutorial')} onClick={openTutorial}>
+          <span className="text-lg font-semibold leading-none" aria-hidden="true">?</span>
         </button>
         <button className={railButton} type="button" aria-label={t('common.settings')} onClick={openSettings}>
           <Settings size={20} />

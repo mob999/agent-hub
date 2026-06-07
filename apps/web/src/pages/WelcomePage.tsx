@@ -44,6 +44,7 @@ interface WelcomePageProps {
   onOpenGoal: (conversationId: string, goalId: string, taskIndex?: number | null) => void
   onRefreshData: () => void
   onWelcomeUpdated: (summary: WelcomeSummary) => void
+  tutorialRequestId: number
 }
 
 const dashboardPanelClass =
@@ -487,6 +488,7 @@ export function WelcomePage({
   onOpenGoal,
   onRefreshData,
   onWelcomeUpdated,
+  tutorialRequestId,
 }: WelcomePageProps) {
   const { i18n, t } = useTranslation()
   const [deviceName, setDeviceName] = useState('My computer')
@@ -638,6 +640,22 @@ export function WelcomePage({
     onboarding?.completed,
     onboarding?.readyToComplete,
   ])
+
+  useEffect(() => {
+    if (tutorialRequestId <= 0) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setActiveOnboardingStep('daemon')
+      setFreshOnboardingPreview(false)
+      setForceOnboardingTutorial(true)
+      setCompleteError(null)
+      onRefreshData()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [onRefreshData, tutorialRequestId])
 
   useEffect(() => {
     if (!forceOnboardingTutorial && (onboarding?.completed === true || onboarding?.readyToComplete === true)) {
@@ -899,7 +917,7 @@ export function WelcomePage({
             <h1 className="text-2xl font-semibold leading-8 text-[#161616]">{t('welcome.onboardingTitle')}</h1>
             <p className="text-sm text-[#69707d]">{t('welcome.onboardingSubtitle')}</p>
           </div>
-          {devMode && forceOnboardingTutorial && (
+          {forceOnboardingTutorial && (
             <button
               className={subtleButton}
               type="button"

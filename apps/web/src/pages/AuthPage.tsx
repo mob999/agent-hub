@@ -1,21 +1,25 @@
 import {
-  Button,
-  InlineLoading,
   InlineNotification,
-  Stack,
-  Tag,
-  Theme,
 } from '@carbon/react'
-import { ChatBot } from '@carbon/react/icons'
 import { useState, type SVGProps } from 'react'
+import { BrandLockup } from '../components/BrandLockup'
+import { PublicFooter } from '../components/PublicFooter'
+import { PublicHeader } from '../components/PublicHeader'
 import { apiUrl } from '../lib/api'
 import { readPendingAuthRedirect } from '../lib/auth-redirect'
+import { useAuthenticatedRedirect } from '../lib/useAuthenticatedRedirect'
 
 export type ChatRoutePath = '/chat' | `/chat/${string}`
 export type WorkspaceRoutePath = '/welcome' | ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
+export type PublicRoutePath = '/'
 export type AuthRoutePath = '/login'
 export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
+  | PublicRoutePath
+
+interface AuthPageProps {
+  navigate: (path: RoutePath) => void
+}
 
 function readOAuthError(): string | null {
   const error = new URLSearchParams(window.location.search).get('error')
@@ -42,9 +46,10 @@ function GitHubIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-export function AuthPage() {
+export function AuthPage({ navigate }: AuthPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(() => readOAuthError())
+  useAuthenticatedRedirect(navigate)
 
   const startGitHubLogin = () => {
     setSubmitting(true)
@@ -59,78 +64,37 @@ export function AuthPage() {
 
   return (
     <main
-      className="grid min-h-screen grid-cols-[minmax(24rem,0.95fr)_minmax(28rem,1.05fr)] bg-[var(--cds-background)] max-[1055px]:grid-cols-1"
+      className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)_auto] bg-[#fafafa]"
       aria-label="Log in"
     >
-      <Theme
-        theme="g100"
-        as="section"
-        className="flex min-h-screen flex-col justify-between gap-16 p-12 text-[var(--cds-text-primary)] max-[1055px]:min-h-0 max-[1055px]:p-8 max-[671px]:p-4"
-        aria-label="Tavro preview"
-      >
-        <div className="inline-flex items-center gap-3">
-          <ChatBot size={32} />
-          <span className="font-semibold">Tavro</span>
-        </div>
-        <div className="grid max-w-[38rem] gap-4">
-          <p className="cds--type-label-01">Human + agent workspace</p>
-          <h1 className="cds--type-heading-06 max-w-[12ch] max-[671px]:max-w-full">
-            Work with agents like teammates.
-          </h1>
-          <p className="cds--type-body-02 max-w-[34rem] text-[var(--cds-text-secondary)]">
-            Keep chats, local daemon runs, task events, and runtime state in one quiet product
-            surface.
-          </p>
-        </div>
-        <div
-          className="grid max-w-[34rem] gap-4 rounded-lg border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4"
-          aria-hidden="true"
-        >
-          <div className="grid gap-3">
-            <div className="justify-self-end rounded-lg bg-[var(--cds-background-inverse)] p-3 text-sm leading-snug text-[var(--cds-text-inverse)]">
-              Review this API route and open a fix.
-            </div>
-            <div className="justify-self-start rounded-lg border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-02)] p-3 text-sm leading-snug">
-              A configured agent accepted the run. Streaming tool calls now.
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Tag type="green">Daemon online</Tag>
-            <Tag type="blue">Run active</Tag>
-          </div>
-        </div>
-      </Theme>
+      <PublicHeader navigate={navigate} />
+      <section className="grid min-h-0 place-items-center px-6 py-12 max-[671px]:px-4">
+        <div className="grid w-full max-w-[26rem] justify-items-center gap-8 text-center">
+          <BrandLockup />
+          <button
+            className="inline-flex h-12 w-4/5 cursor-pointer items-center justify-center gap-3 rounded-full border border-[#161616] bg-[#161616] px-5 text-base font-semibold text-white shadow-[0_8px_20px_rgba(15,23,42,0.16)] transition hover:bg-[#393939] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-wait disabled:border-[#525252] disabled:bg-[#525252] max-[420px]:w-full"
+            type="button"
+            disabled={submitting}
+            onClick={startGitHubLogin}
+          >
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-white">
+              <GitHubIcon className="h-4 w-4" />
+            </span>
+            {submitting ? 'Opening GitHub...' : 'Continue with GitHub'}
+          </button>
 
-      <section className="grid min-h-screen items-center bg-[var(--cds-background)] p-12 max-[1055px]:min-h-0 max-[1055px]:p-8 max-[671px]:p-4">
-        <div className="w-full max-w-[28rem]">
-          <Stack gap={7}>
-            <div>
-              <h2 className="cds--type-heading-05">Log in</h2>
-              <p className="cds--type-body-01 mt-3 text-[var(--cds-text-secondary)]">
-                Continue to your Tavro workspace with GitHub.
-              </p>
-            </div>
-
-            {serverError && (
-              <InlineNotification
-                kind="error"
-                title="Login failed"
-                subtitle={serverError}
-                lowContrast
-                aria-label="Close notification"
-              />
-            )}
-
-            {submitting ? (
-              <InlineLoading description="Opening GitHub..." status="active" />
-            ) : (
-              <Button type="button" size="lg" renderIcon={GitHubIcon} onClick={startGitHubLogin}>
-                Continue with GitHub
-              </Button>
-            )}
-          </Stack>
+          {serverError && (
+            <InlineNotification
+              kind="error"
+              title="Login failed"
+              subtitle={serverError}
+              lowContrast
+              aria-label="Close notification"
+            />
+          )}
         </div>
       </section>
+      <PublicFooter />
     </main>
   )
 }

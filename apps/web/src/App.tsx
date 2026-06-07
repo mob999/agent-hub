@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
+import { PublicHomePage } from './pages/PublicHomePage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
 interface EditorRouteState {
@@ -90,6 +91,7 @@ function getRoutePath(): RoutePath {
   }
 
   if (
+    path === '/' ||
     path === '/welcome' ||
     path === '/login' ||
     path === '/chat' ||
@@ -103,7 +105,7 @@ function getRoutePath(): RoutePath {
   if (path === '/register') {
     return '/login'
   }
-  return '/welcome'
+  return '/'
 }
 
 function isWorkspaceRoute(route: RoutePath): route is WorkspaceRoutePath {
@@ -146,8 +148,12 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState)
   }, [route])
 
+  if (route === '/') {
+    return <PublicHomePage navigate={navigate} />
+  }
+
   if (route === '/login') {
-    return <AuthPage />
+    return <AuthPage navigate={navigate} />
   }
 
   return (

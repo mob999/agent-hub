@@ -46,6 +46,7 @@ import {
   type SearchTimeFilter,
   type UpdateAgentResponse,
   type UpdateGroupConversationResponse,
+  type WelcomeSummary,
   type WorkspaceView,
 } from '../lib/api'
 import { writePendingAuthRedirect } from '../lib/auth-redirect'
@@ -61,11 +62,13 @@ import {
   fetchRun,
   fetchRunEvents,
   fetchRuns,
+  fetchWelcomeSummary,
   queryKeys,
 } from '../lib/query'
 import { getSearchRouteState, searchRoutePath } from '../lib/search-route'
 import { DaemonPage } from './DaemonPage'
 import { RunsPage } from './RunsPage'
+import { WelcomePage } from './WelcomePage'
 import type { ChatPanelRoute, GoalRouteState } from '../App'
 import type { RoutePath, WorkspaceRoutePath } from './AuthPage'
 
@@ -228,6 +231,11 @@ export function WorkspacePage({
   })
   const initialSearchRouteState = readCurrentSearchRouteState()
   const user = authQuery.data?.user ?? null
+  const welcomeQuery = useQuery({
+    enabled: user !== null,
+    queryFn: fetchWelcomeSummary,
+    queryKey: queryKeys.welcome(),
+  })
   const authLoading = authQuery.isPending
   const authError =
     authQuery.error === null ||
@@ -699,14 +707,17 @@ export function WorkspacePage({
   const invalidateAgentCatalog = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['agents'] })
     void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
   }, [queryClient])
 
   const invalidateConversationCatalog = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
   }, [queryClient])
 
   const invalidateConversationDetail = useCallback((conversationId: string) => {
     void queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
   }, [queryClient])
 
   useEffect(() => {
@@ -1125,6 +1136,7 @@ export function WorkspacePage({
 
   const refreshWorkspace = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
     invalidateAgentCatalog()
     invalidateConversationCatalog()
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs() })
@@ -1144,6 +1156,27 @@ export function WorkspacePage({
       void refreshRun(localRun.run.id)
     })
   }
+
+  const refreshWelcomeData = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.daemonDevices() })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.welcome() })
+    invalidateAgentCatalog()
+    invalidateConversationCatalog()
+    void loadDevices()
+    void loadAgents()
+    void loadConversations()
+  }, [
+    invalidateAgentCatalog,
+    invalidateConversationCatalog,
+    loadAgents,
+    loadConversations,
+    loadDevices,
+    queryClient,
+  ])
+
+  const updateWelcomeSummary = useCallback((summary: WelcomeSummary) => {
+    queryClient.setQueryData(queryKeys.welcome(), summary)
+  }, [queryClient])
 
   useEffect(() => {
     if (!user) {
@@ -2208,7 +2241,32 @@ export function WorkspacePage({
             }}
           />
           <WorkspacePanel>
-            {isSearchRoute ? (
+            {route === '/welcome' ? (
+              <WelcomePage
+                agents={agents}
+                devices={devices}
+                error={
+                  welcomeQuery.error instanceof ApiRequestError
+                    ? welcomeQuery.error.message
+                    : welcomeQuery.error
+                      ? 'Unable to load welcome.'
+                      : null
+                }
+                isLoading={welcomeQuery.isPending}
+                summary={welcomeQuery.data ?? null}
+                onCreateAgentStarted={refreshWelcomeData}
+                onOpenConversation={selectConversation}
+                onOpenCreateAgent={() => openCreateAgent()}
+                onOpenCreateGroup={openCreateGroup}
+                onOpenCreateProject={openCreateProject}
+                onOpenDaemon={() => navigateToView('daemon')}
+                onOpenDeployments={openDeploymentsRoute}
+                onOpenGoal={openGoalRoute}
+                onOpenMessage={openMessageRoute}
+                onRefreshData={refreshWelcomeData}
+                onWelcomeUpdated={updateWelcomeSummary}
+              />
+            ) : isSearchRoute ? (
               <SearchWorkspace
                 agents={agents}
                 conversations={conversations}
@@ -2260,7 +2318,7 @@ export function WorkspacePage({
                 isConversationLoading={isActiveConversationLoading}
                 taskRouteActive={route === `/chat/${activeConversation?.id}/tasks`}
                 deploymentRouteActive={chatPanelRoute === 'deployments'}
-                welcomeActive={route === '/welcome'}
+                welcomeActive={false}
                 openGoalRoute={(goalId, taskIndex) => {
                   if (activeConversation?.id) {
                     openGoalRoute(activeConversation.id, goalId, taskIndex)

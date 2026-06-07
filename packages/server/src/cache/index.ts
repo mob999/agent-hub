@@ -58,15 +58,27 @@ export function conversationDeploymentsCacheKey(conversationId: string): string 
   return `${cacheKeyPrefix}:conversation:${conversationId}:deployments`;
 }
 
+export function userWelcomeCacheKey(userId: string): string {
+  return `${cacheKeyPrefix}:user:${userId}:welcome`;
+}
+
+export function userWelcomeCachePatterns(userId: string): string[] {
+  return [userWelcomeCacheKey(userId)];
+}
+
 export function userSidebarCachePatterns(userId: string): string[] {
   return [
     `${cacheKeyPrefix}:user:${userId}:agents:*`,
     `${cacheKeyPrefix}:user:${userId}:conversations:*`,
+    ...userWelcomeCachePatterns(userId),
   ];
 }
 
 export function userConversationListCachePatterns(userId: string): string[] {
-  return [`${cacheKeyPrefix}:user:${userId}:conversations:*`];
+  return [
+    `${cacheKeyPrefix}:user:${userId}:conversations:*`,
+    ...userWelcomeCachePatterns(userId),
+  ];
 }
 
 export function conversationDetailCachePatterns(conversationId: string): string[] {
@@ -178,6 +190,13 @@ export async function invalidateUserConversationListCache(
     userConversationListCachePatterns(input.userId),
     input.logger,
   );
+}
+
+export async function invalidateUserWelcomeCache(
+  redis: AgentHubRedisClient,
+  input: { logger?: CacheLogger; userId: string },
+): Promise<void> {
+  await deleteCacheByPatterns(redis, userWelcomeCachePatterns(input.userId), input.logger);
 }
 
 export async function invalidateConversationCache(

@@ -142,6 +142,6 @@ describe("Redis cache helpers", () => {
       ],
     );
 
-    expect(redis.scanIterator).toHaveBeenCalledTimes(2);
+    expect(redis.scanIterator).toHaveBeenCalledTimes(3);
   });
 });

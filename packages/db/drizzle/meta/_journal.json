@@ -148,6 +148,13 @@
       "when": 1780085000000,
       "tag": "0020_github_oauth_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780090000000,
+      "tag": "0021_welcome_onboarding",
+      "breakpoints": true
     }
   ]
 }

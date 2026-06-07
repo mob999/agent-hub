@@ -16,6 +16,7 @@ import { createHealthRoutes } from "./routes/health.js";
 import { createRealtimeRoutes } from "./routes/realtime.js";
 import { createRunsRoutes } from "./routes/runs.js";
 import { createSearchRoutes } from "./routes/search.js";
+import { createWelcomeRoutes } from "./routes/welcome.js";
 import { createApiServices, type ApiServices } from "./services/api-services.js";
 
 export type CreatedApiApp = {
@@ -95,6 +96,7 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
   app.route("/", createConversationMessageRoutes(routeContext));
   app.route("/", createArtifactsRoutes(routeContext));
   app.route("/", createRunsRoutes(routeContext));
+  app.route("/", createWelcomeRoutes(routeContext));
   app.route("/auth", authRoutes);
   app.route("/", createDebugRoutes());
 

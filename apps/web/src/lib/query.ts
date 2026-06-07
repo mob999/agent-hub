@@ -12,6 +12,7 @@ import {
   type ConversationMessage,
   type DaemonDevice,
   type RunEvent,
+  type WelcomeSummary,
 } from './api'
 
 export type RecordStatusFilter = 'default' | 'active' | 'archived' | 'all'
@@ -39,6 +40,7 @@ export const queryKeys = {
   runs: () => ['runs'] as const,
   run: (runId: string) => ['run', runId] as const,
   runEvents: (runId: string) => ['run', runId, 'events'] as const,
+  welcome: () => ['welcome'] as const,
 }
 
 function statusQuery(status: RecordStatusFilter): string {
@@ -116,4 +118,9 @@ export async function fetchRun(runId: string): Promise<AgentRun> {
 export async function fetchRunEvents(runId: string): Promise<RunEvent[]> {
   const response = await apiRequest<{ events: RunEvent[] }>(`/runs/${runId}/events`)
   return response.events
+}
+
+export async function fetchWelcomeSummary(): Promise<WelcomeSummary> {
+  const response = await apiRequest<{ welcome: WelcomeSummary }>('/welcome')
+  return response.welcome
 }

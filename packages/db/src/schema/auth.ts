@@ -16,6 +16,9 @@ export const users = pgTable(
     name: varchar("name", { length: 120 }),
     avatar: text("avatar"),
     passwordHash: text("password_hash"),
+    welcomeOnboardingCompletedAt: timestamp("welcome_onboarding_completed_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

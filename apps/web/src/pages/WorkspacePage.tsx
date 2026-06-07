@@ -2254,9 +2254,8 @@ export function WorkspacePage({
                 }
                 isLoading={welcomeQuery.isPending}
                 summary={welcomeQuery.data ?? null}
-                onCreateAgentStarted={refreshWelcomeData}
                 onOpenConversation={selectConversation}
-                onOpenCreateAgent={() => openCreateAgent()}
+                onOpenCreateAgent={(daemonDeviceId) => openCreateAgent(daemonDeviceId)}
                 onOpenCreateGroup={openCreateGroup}
                 onOpenCreateProject={openCreateProject}
                 onOpenDaemon={() => navigateToView('daemon')}

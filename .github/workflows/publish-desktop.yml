@@ -1,0 +1,127 @@
+name: Publish Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact desktop version to publish, matching apps/desktop/package.json"
+        required: true
+        type: string
+      draft:
+        description: "Create the GitHub Release as a draft"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: publish-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      VERSION: ${{ inputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            artifact_path: apps/desktop/release/*.exe
+          - platform: macos
+            os: macos-latest
+            artifact_path: apps/desktop/release/*.dmg
+          - platform: linux
+            os: ubuntu-latest
+            artifact_path: apps/desktop/release/*.AppImage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify requested version
+        shell: bash
+        run: |
+          node -e 'const pkg = require("./apps/desktop/package.json"); if (pkg.version !== process.env.VERSION) { console.error("Input version " + process.env.VERSION + " does not match desktop package version " + pkg.version + "."); process.exit(1); }'
+
+      - name: Typecheck desktop
+        run: pnpm --filter @agent-hub/desktop typecheck
+
+      - name: Build desktop
+        run: pnpm --filter @agent-hub/desktop build
+
+      - name: Package desktop
+        run: pnpm --filter @agent-hub/desktop dist
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tavro-desktop-${{ matrix.platform }}
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      DRAFT: ${{ inputs.draft }}
+
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: desktop-artifacts
+          merge-multiple: true
+
+      - name: Create or update GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="tavro-desktop-v${VERSION}"
+          files=(desktop-artifacts/*)
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No desktop artifacts were downloaded."
+            exit 1
+          fi
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${files[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
+            exit 0
+          fi
+
+          draft_flag=()
+          if [ "${DRAFT}" = "true" ]; then
+            draft_flag=(--draft)
+          fi
+
+          gh release create "${tag}" "${files[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Tavro Desktop ${VERSION}" \
+            --notes "Tavro AI desktop client ${VERSION}." \
+            "${draft_flag[@]}"

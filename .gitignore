@@ -3,6 +3,7 @@ dist/
 build/
 .docusaurus/
 coverage/
+release/
 .turbo/
 .env
 .env.*

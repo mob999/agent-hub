@@ -33,7 +33,7 @@ agent-hub/
     api/             # Hono API 服务
     worker/          # 后台长任务执行器
     daemon/          # 用户本地轻量服务
-    desktop/         # 预留：桌面客户端
+    desktop/         # Electron 桌面客户端壳
     mobile/          # 预留：移动端客户端
 
   packages/
@@ -204,6 +204,21 @@ npx -y @tavro-ai/daemon@latest connect --gateway-url <worker-url> --device-id <d
 ```
 
 本地开发仍保留源码调试命令，方便直接在 monorepo 中运行 daemon。生产 API 和 Worker 需要配置相同的 `AGENTHUB_DAEMON_TOKEN_SECRET`，用于派生和校验每个 daemon device 的 token。
+
+启动桌面客户端：
+
+```bash
+pnpm --filter @agent-hub/web dev
+pnpm --filter @agent-hub/desktop dev
+```
+
+桌面端 V1 是远端 Web 壳，本地开发默认加载 `http://localhost:5173`，生产调试可加载线上 Web：
+
+```bash
+pnpm --filter @agent-hub/desktop dev:prod-web
+```
+
+如果需要测试其他 Web 地址，可以设置 `TAVRO_DESKTOP_WEB_URL`。桌面安装包通过手动 GitHub Actions `Publish Desktop` 发布到 GitHub Release。
 
 ## 当前状态
 

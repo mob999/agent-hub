@@ -1,0 +1,63 @@
+{
+  "name": "@agent-hub/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tavro AI desktop client",
+  "author": "Tavro AI",
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "pnpm icons && tsc -p tsconfig.json",
+    "dev": "pnpm build && node scripts/start.mjs --local",
+    "dev:prod-web": "pnpm build && node scripts/start.mjs --prod-web",
+    "dist": "pnpm build && electron-builder",
+    "icons": "node scripts/generate-icons.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "build": {
+    "appId": "ai.tavro.desktop",
+    "productName": "Tavro AI",
+    "asar": true,
+    "icon": "resources/icons/icon",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icons/256x256.png",
+        "to": "icon.png"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "Tavro-AI-${version}-${os}-${arch}.${ext}",
+    "publish": null,
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.2",
+    "electron-icon-builder": "^2.0.1",
+    "sharp": "^0.34.5",
+    "typescript": "~6.0.2"
+  }
+}

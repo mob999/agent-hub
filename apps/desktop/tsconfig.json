@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "lib": ["ES2022"],
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "rootDir": "src",
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src/**/*"]
+}

@@ -27,6 +27,8 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       CSC_IDENTITY_AUTO_DISCOVERY: false
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
       VERSION: ${{ inputs.version }}
     strategy:
       fail-fast: false

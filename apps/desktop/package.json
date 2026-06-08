@@ -10,13 +10,14 @@
     "build": "pnpm icons && tsc -p tsconfig.json",
     "dev": "pnpm build && node scripts/start.mjs --local",
     "dev:prod-web": "pnpm build && node scripts/start.mjs --prod-web",
-    "dist": "pnpm build && electron-builder",
+    "dist": "pnpm build && electron-builder --publish never",
     "icons": "node scripts/generate-icons.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "build": {
     "appId": "ai.tavro.desktop",
     "productName": "Tavro AI",
+    "executableName": "tavro-ai",
     "asar": true,
     "icon": "resources/icons/icon",
     "files": [

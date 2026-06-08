@@ -1,4 +1,3 @@
-import { Apple, ArrowRight, Laptop } from '@carbon/react/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PublicFooter } from '../components/PublicFooter'
@@ -37,11 +36,6 @@ function formatBytes(bytes: number, locale: string): string {
     unit: 'megabyte',
     unitDisplay: 'short',
   }).format(bytes / 1024 / 1024)
-}
-
-function versionFromRelease(release: LatestRelease): string {
-  const version = release.tag_name.match(/^tavro-desktop-v(.+)$/)?.[1]
-  return version === undefined ? release.name?.trim() || release.tag_name : `v${version}`
 }
 
 function findAsset(assets: ReleaseAsset[], extension: 'dmg' | 'exe'): ReleaseAsset | null {
@@ -88,20 +82,21 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
   }, [])
 
   const release = releaseState.status === 'ready' ? releaseState.release : null
-  const releaseVersion = release === null ? null : versionFromRelease(release)
   const platforms = useMemo(() => {
     const assets = release?.assets ?? []
 
     return [
       {
         asset: findAsset(assets, 'exe'),
-        icon: <Laptop size={28} />,
         key: 'windows',
+        logoAlt: 'Microsoft',
+        logoSrc: '/logos/microsoft.svg',
       },
       {
         asset: findAsset(assets, 'dmg'),
-        icon: <Apple size={28} />,
         key: 'macos',
+        logoAlt: 'Apple',
+        logoSrc: '/logos/apple.svg',
       },
     ]
   }, [release])
@@ -133,12 +128,6 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
           {platforms.map((platform) => {
             const title = t(`publicDownload.platforms.${platform.key}.title`)
             const asset = platform.asset
-            const assetMeta = asset === null
-              ? null
-              : t('publicDownload.platforms.assetMeta', {
-                name: asset.name,
-                size: formatBytes(asset.size, locale),
-              })
 
             return (
               <article
@@ -148,7 +137,11 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
                 <div className="flex items-start justify-between gap-4">
                   <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-4">
                     <span className="grid h-14 w-14 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa] text-[#161616]">
-                      {platform.icon}
+                      <img
+                        alt={platform.logoAlt}
+                        className="h-7 w-7 object-contain"
+                        src={platform.logoSrc}
+                      />
                     </span>
                     <div className="min-w-0">
                       <h2 className="text-2xl font-semibold leading-7 text-[#161616]">{title}</h2>
@@ -160,13 +153,13 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
                 </div>
 
                 <div className="grid gap-2 rounded-2xl border border-[#eef0f3] bg-[#fafafa] px-4 py-3">
-                  {asset !== null && releaseVersion !== null ? (
+                  {asset !== null ? (
                     <a
-                      className="inline-flex w-fit items-center gap-2 text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                      className="min-w-0 truncate text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                       href={asset.browser_download_url}
+                      title={asset.name}
                     >
-                      {releaseVersion}
-                      <ArrowRight size={16} />
+                      {asset.name}
                     </a>
                   ) : (
                     <span className="text-base font-semibold text-[#525252]">
@@ -175,20 +168,10 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
                         : t('publicDownload.platforms.unavailable')}
                     </span>
                   )}
-                  {assetMeta !== null && (
-                    <p className="truncate text-sm text-[#69707d]">{assetMeta}</p>
+                  {asset !== null && (
+                    <p className="text-sm text-[#69707d]">{formatBytes(asset.size, locale)}</p>
                   )}
                 </div>
-
-                {asset !== null && (
-                  <a
-                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-[#161616] bg-[#161616] px-6 text-base font-semibold text-white no-underline shadow-[0_8px_20px_rgba(15,23,42,0.16)] transition hover:bg-[#393939] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                    href={asset.browser_download_url}
-                  >
-                    {t(`publicDownload.platforms.${platform.key}.download`)}
-                    <ArrowRight size={18} />
-                  </a>
-                )}
               </article>
             )
           })}

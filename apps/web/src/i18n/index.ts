@@ -74,17 +74,14 @@ const resources = {
           subtitle: 'Get the latest Tavro AI desktop client for a local daemon-connected workspace.',
         },
         platforms: {
-          assetMeta: '{{name}} · {{size}}',
           loading: 'Checking version',
           macos: {
             description: 'For Apple desktop and notebook computers.',
-            download: 'Download for macOS',
             title: 'macOS',
           },
           unavailable: 'Installer unavailable',
           windows: {
             description: 'For Windows 10 and Windows 11 desktops.',
-            download: 'Download for Windows',
             title: 'Windows',
           },
         },
@@ -603,17 +600,14 @@ const resources = {
           subtitle: '下载最新版 Tavro AI 桌面客户端，连接本地执行器和共享工作区。',
         },
         platforms: {
-          assetMeta: '{{name}} · {{size}}',
           loading: '正在检查版本',
           macos: {
             description: '适用于 Apple 台式机和笔记本。',
-            download: '下载 macOS 版',
             title: 'macOS',
           },
           unavailable: '安装包不可用',
           windows: {
             description: '适用于 Windows 10 和 Windows 11 桌面设备。',
-            download: '下载 Windows 版',
             title: 'Windows',
           },
         },

@@ -3,6 +3,8 @@ import pkg from "../package.json";
 
 const desktopApi = Object.freeze({
   daemon: {
+    ensureAutoStart: () =>
+      ipcRenderer.invoke("tavro:daemon:ensure-auto-start") as Promise<unknown>,
     getStatus: () =>
       ipcRenderer.invoke("tavro:daemon:get-status") as Promise<unknown>,
     onStatusChange: (listener: (status: unknown) => void) => {

@@ -371,9 +371,9 @@ function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
               {t('daemon.emptyRuntime')}
             </p>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-[#dde1e6] bg-white">
+            <div className="overflow-x-auto rounded-xl border border-[#dde1e6] bg-white">
               <div
-                className="grid grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(9rem,0.7fr)] gap-3 border-b border-[#eef0f3] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#69707d] max-[760px]:hidden"
+                className="grid min-w-[34rem] grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(6rem,0.45fr)] gap-3 border-b border-[#eef0f3] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[#69707d] max-[760px]:hidden"
                 aria-hidden="true"
               >
                 <span>{t('daemon.runtimes')}</span>
@@ -382,7 +382,7 @@ function WelcomeRuntimeList({ devices }: { devices: DaemonDevice[] }) {
               </div>
               {device.runtimes.map((runtime) => (
                 <div
-                  className="grid min-h-12 grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(9rem,0.7fr)] items-center gap-3 border-b border-[#eef0f3] px-3 py-2 last:border-b-0 max-[760px]:grid-cols-1"
+                  className="grid min-h-12 min-w-[34rem] grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(6rem,0.45fr)] items-center gap-3 border-b border-[#eef0f3] px-3 py-2 last:border-b-0 max-[760px]:min-w-0 max-[760px]:grid-cols-1"
                   key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}
                 >
                   <RuntimeIdentity runtimeKind={runtime.runtimeKind} />
@@ -983,7 +983,7 @@ export function WelcomePage({
                 key={step.id}
                 aria-hidden={!isActive}
                 aria-label={stepTitle}
-                className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full min-h-[34rem] w-[48%] flex-col rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:h-auto max-[900px]:min-h-0 max-[900px]:w-full`}
+                className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full max-h-[calc(100vh-12rem)] min-h-[34rem] w-[48%] flex-col overflow-hidden rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:h-auto max-[900px]:max-h-none max-[900px]:min-h-0 max-[900px]:w-full`}
                 style={{
                   opacity: isActive ? 1 : distanceFromActive > 1 ? 0.82 : 0.92,
                   transform: isActive
@@ -994,7 +994,7 @@ export function WelcomePage({
               >
                 {isActive ? (
                   <>
-          <div className="flex items-start gap-4 border-b border-[#edf0f4] pb-5 max-[671px]:grid">
+          <div className="flex shrink-0 items-start gap-4 border-b border-[#edf0f4] pb-5 max-[671px]:grid">
             <div className="flex min-w-0 items-start gap-3">
               <StepIcon complete={stepComplete} />
               <div className="min-w-0">
@@ -1007,7 +1007,7 @@ export function WelcomePage({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col justify-start py-8">
+          <div className="flex min-h-0 flex-1 flex-col justify-start overflow-y-auto py-8 pr-2">
             {activeOnboardingStep === 'daemon' && (
               hasConnectedDaemon ? (
                 <div className="grid max-w-3xl gap-4">
@@ -1141,7 +1141,7 @@ export function WelcomePage({
             )}
           </div>
 
-          <footer className="flex items-center justify-between gap-3 border-t border-[#edf0f4] pt-5 max-[671px]:grid">
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[#edf0f4] pt-5 max-[671px]:grid">
             <button
               className={subtleButton}
               type="button"

@@ -803,6 +803,14 @@ export function WorkspacePage({
       return
     }
 
+    void window.tavroDesktop?.daemon?.ensureAutoStart?.().catch(() => undefined)
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
     const initialTimer = window.setTimeout(() => {
       void loadDevices()
     }, 0)

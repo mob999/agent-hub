@@ -24,6 +24,7 @@ declare global {
   interface Window {
     tavroDesktop?: Readonly<{
       daemon?: Readonly<{
+        ensureAutoStart: () => Promise<TavroDesktopDaemonStatus>;
         getStatus: () => Promise<TavroDesktopDaemonStatus>;
         onStatusChange: (
           listener: (status: TavroDesktopDaemonStatus) => void,

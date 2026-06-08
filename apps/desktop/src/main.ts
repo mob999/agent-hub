@@ -217,10 +217,11 @@ function registerAuthIpc(): void {
 }
 
 function registerDaemonIpc(): void {
-  ipcMain.handle("tavro:daemon:get-status", async () => {
+  ipcMain.handle("tavro:daemon:ensure-auto-start", async () => {
     await daemonManager?.startAutoStartIfEnabled();
     return daemonManager?.getStatus();
   });
+  ipcMain.handle("tavro:daemon:get-status", () => daemonManager?.getStatus());
   ipcMain.handle("tavro:daemon:start", async () => daemonManager?.start());
   ipcMain.handle("tavro:daemon:restart", async () => daemonManager?.restart());
 }

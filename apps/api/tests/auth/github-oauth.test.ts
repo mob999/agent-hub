@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDesktopOAuthCallbackUrl,
   buildGitHubAuthorizeUrl,
   buildGitHubOAuthErrorRedirect,
   getGitHubOAuthWebOrigin,
@@ -26,6 +27,15 @@ describe("GitHub OAuth helpers", () => {
     );
     expect(url.searchParams.get("scope")).toBe("read:user user:email");
     expect(url.searchParams.get("state")).toBe("state-token");
+  });
+
+  it("builds desktop callback URLs for login codes and errors", () => {
+    expect(buildDesktopOAuthCallbackUrl({ code: "desktop-code" })).toBe(
+      "tavro://auth/callback?code=desktop-code",
+    );
+    expect(buildDesktopOAuthCallbackUrl({ error: "desktop_auth_failed" })).toBe(
+      "tavro://auth/callback?error=desktop_auth_failed",
+    );
   });
 
   it("selects the verified primary GitHub email", () => {

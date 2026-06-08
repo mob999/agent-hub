@@ -5,8 +5,8 @@ declare global {
     tavroDesktop?: Readonly<{
       isDesktop: true;
       mode: string;
-      platform: NodeJS.Platform;
-      startGitHubLogin: (input: {
+      platform: string;
+      startGitHubLogin?: (input: {
         redirectPath: string;
         startUrl: string;
         webOrigin: string;

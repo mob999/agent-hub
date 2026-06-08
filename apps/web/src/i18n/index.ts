@@ -70,6 +70,9 @@ const resources = {
         opening: 'Opening GitHub...',
         errorTitle: 'Login failed',
         errors: {
+          desktop_auth_expired: 'The desktop login session expired. Try again.',
+          desktop_auth_failed: 'Desktop login could not be completed. Try again.',
+          desktop_auth_start_failed: 'GitHub could not be opened in your browser. Try again.',
           github_email_unavailable: 'GitHub did not return a verified primary email.',
           github_invalid_state: 'The GitHub login session expired. Try again.',
           github_profile_unavailable: 'GitHub profile details could not be loaded.',
@@ -549,6 +552,9 @@ const resources = {
         opening: '正在打开 GitHub...',
         errorTitle: '登录失败',
         errors: {
+          desktop_auth_expired: '桌面端登录会话已过期，请重试。',
+          desktop_auth_failed: '无法完成桌面端登录，请重试。',
+          desktop_auth_start_failed: '无法在浏览器中打开 GitHub，请重试。',
           github_email_unavailable: 'GitHub 没有返回已验证的主邮箱。',
           github_invalid_state: 'GitHub 登录会话已过期，请重试。',
           github_profile_unavailable: '无法获取 GitHub 资料。',

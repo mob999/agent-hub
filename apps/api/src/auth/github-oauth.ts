@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 export type GitHubEmail = {
   email: string;
   primary: boolean;
@@ -18,6 +20,11 @@ export type GitHubTokenResponse = {
 };
 
 export const githubOAuthStateCookie = "agent_hub_github_oauth_state";
+export const desktopOAuthProtocol = "tavro:";
+
+export function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
 
 export function buildGitHubAuthorizeUrl(input: {
   clientId: string;
@@ -38,6 +45,25 @@ export function buildGitHubOAuthErrorRedirect(
 ): string {
   const url = new URL("/login", webUrl);
   url.searchParams.set("error", error);
+  return url.toString();
+}
+
+export function buildDesktopOAuthCallbackUrl(input:
+  | {
+      code: string;
+      error?: never;
+    }
+  | {
+      code?: never;
+      error: string;
+    }
+): string {
+  const url = new URL(`${desktopOAuthProtocol}//auth/callback`);
+  if (input.code !== undefined) {
+    url.searchParams.set("code", input.code);
+  } else {
+    url.searchParams.set("error", input.error);
+  }
   return url.toString();
 }
 

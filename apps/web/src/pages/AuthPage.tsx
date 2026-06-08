@@ -40,11 +40,27 @@ export function AuthPage({ navigate }: AuthPageProps) {
   const [serverErrorCode, setServerErrorCode] = useState<string | null>(() => readOAuthErrorCode())
   useAuthenticatedRedirect(navigate)
 
-  const startGitHubLogin = () => {
+  const startGitHubLogin = async () => {
     setSubmitting(true)
     setServerErrorCode(null)
 
     const redirect = readPendingAuthRedirect() ?? '/welcome'
+    const desktopStartGitHubLogin = window.tavroDesktop?.startGitHubLogin
+    if (desktopStartGitHubLogin) {
+      try {
+        await desktopStartGitHubLogin({
+          redirectPath: redirect,
+          startUrl: apiUrl('/auth/desktop/github/start'),
+          webOrigin: window.location.origin,
+        })
+      } catch {
+        setServerErrorCode('desktop_auth_start_failed')
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
     const url = new URL(apiUrl('/auth/github/start'))
     url.searchParams.set('redirect', redirect)
     url.searchParams.set('web_origin', window.location.origin)

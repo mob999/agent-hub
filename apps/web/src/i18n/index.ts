@@ -39,6 +39,7 @@ const resources = {
         wait: 'Wait',
       },
       publicHeader: {
+        download: 'Download',
         docs: 'Docs',
         signIn: 'Sign In',
         switchLanguage: 'Switch language',
@@ -62,6 +63,30 @@ const resources = {
           title: 'Agent-Hub for Human and Agent Collabrate.',
           subtitle: 'Tavro AI keeps chats, local daemon runs, tasks, files, and agent outputs in one shared workspace.',
           getStarted: 'Get started',
+        },
+      },
+      publicDownload: {
+        ariaLabel: 'Download Tavro AI',
+        hero: {
+          eyebrow: 'Desktop app',
+          latestOnly: 'Choose a platform to download the matching installer.',
+          title: 'Tavro AI Desktop',
+          subtitle: 'Get the latest Tavro AI desktop client for a local daemon-connected workspace.',
+        },
+        platforms: {
+          assetMeta: '{{name}} · {{size}}',
+          loading: 'Checking version',
+          macos: {
+            description: 'For Apple desktop and notebook computers.',
+            download: 'Download for macOS',
+            title: 'macOS',
+          },
+          unavailable: 'Installer unavailable',
+          windows: {
+            description: 'For Windows 10 and Windows 11 desktops.',
+            download: 'Download for Windows',
+            title: 'Windows',
+          },
         },
       },
       auth: {
@@ -543,6 +568,7 @@ const resources = {
         wait: '稍等',
       },
       publicHeader: {
+        download: '下载',
         docs: '文档',
         signIn: '登录',
         switchLanguage: '切换语言',
@@ -566,6 +592,30 @@ const resources = {
           title: 'Agent-Hub for Human and Agent Collabrate.',
           subtitle: 'Tavro AI 把聊天、本地执行器运行、任务、文件和 Agent 产物放进同一个共享工作区。',
           getStarted: '开始使用',
+        },
+      },
+      publicDownload: {
+        ariaLabel: '下载 Tavro AI',
+        hero: {
+          eyebrow: '桌面应用',
+          latestOnly: '选择平台后下载对应安装包。',
+          title: 'Tavro AI Desktop',
+          subtitle: '下载最新版 Tavro AI 桌面客户端，连接本地执行器和共享工作区。',
+        },
+        platforms: {
+          assetMeta: '{{name}} · {{size}}',
+          loading: '正在检查版本',
+          macos: {
+            description: '适用于 Apple 台式机和笔记本。',
+            download: '下载 macOS 版',
+            title: 'macOS',
+          },
+          unavailable: '安装包不可用',
+          windows: {
+            description: '适用于 Windows 10 和 Windows 11 桌面设备。',
+            download: '下载 Windows 版',
+            title: 'Windows',
+          },
         },
       },
       auth: {

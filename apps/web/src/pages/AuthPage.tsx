@@ -13,7 +13,7 @@ import { useAuthenticatedRedirect } from '../lib/useAuthenticatedRedirect'
 export type ChatRoutePath = '/chat' | `/chat/${string}`
 export type WorkspaceRoutePath = '/welcome' | ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
-export type PublicRoutePath = '/'
+export type PublicRoutePath = '/' | '/download'
 export type AuthRoutePath = '/login'
 export type RoutePath = WorkspaceRoutePath | EditorRoutePath | AuthRoutePath
   | PublicRoutePath

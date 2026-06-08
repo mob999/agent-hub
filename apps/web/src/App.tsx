@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
+import { DownloadPage } from './pages/DownloadPage'
 import { PublicHomePage } from './pages/PublicHomePage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
@@ -92,6 +93,7 @@ function getRoutePath(): RoutePath {
 
   if (
     path === '/' ||
+    path === '/download' ||
     path === '/welcome' ||
     path === '/login' ||
     path === '/chat' ||
@@ -150,6 +152,10 @@ function App() {
 
   if (route === '/') {
     return <PublicHomePage navigate={navigate} />
+  }
+
+  if (route === '/download') {
+    return <DownloadPage navigate={navigate} />
   }
 
   if (route === '/login') {

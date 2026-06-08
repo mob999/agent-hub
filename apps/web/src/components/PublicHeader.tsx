@@ -32,6 +32,10 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
     event.preventDefault()
     navigate('/login')
   }
+  const openDownload = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    navigate('/download')
+  }
 
   return (
     <header className="flex h-[4.5rem] w-full items-center justify-between gap-4 border-b border-[#dde1e6] bg-[#fafafa] px-6 max-[671px]:h-[3.6rem] max-[671px]:px-4">
@@ -45,9 +49,9 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
       >
         <BrandLockup compact />
       </a>
-      <div className="flex shrink-0 items-center gap-5">
+      <div className="flex shrink-0 items-center gap-5 max-[671px]:gap-3">
         <button
-          className="cursor-pointer border-0 bg-transparent p-0 text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          className="cursor-pointer border-0 bg-transparent p-0 text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
           type="button"
           aria-label={t('publicHeader.switchLanguage')}
           onClick={() => {
@@ -57,13 +61,20 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
           {currentLocale === 'zh-CN' ? 'EN' : '中'}
         </button>
         <a
-          className="text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          className="text-base font-semibold text-[#161616] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
+          href="/download"
+          onClick={openDownload}
+        >
+          {t('publicHeader.download')}
+        </a>
+        <a
+          className="text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
           href={docsUrl}
         >
           {t('publicHeader.docs')}
         </a>
         <a
-          className="text-base font-semibold text-[#161616] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+          className="text-base font-semibold text-[#161616] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
           href="/login"
           onClick={openLogin}
         >

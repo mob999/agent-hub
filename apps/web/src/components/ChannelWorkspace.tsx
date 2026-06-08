@@ -1264,9 +1264,9 @@ export function ChannelWorkspace({
   )
 
   const renderDeploymentListView = () => (
-    <div className="grid w-full content-start gap-3">
+    <div className={`grid w-full gap-3 ${deployments.length === 0 ? 'h-full min-h-0' : 'content-start'}`}>
       {deployments.length === 0 ? (
-        <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
+        <div className="grid h-full min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
           <Launch size={32} />
           <h2 className="cds--type-heading-compact-02">{t('chat.noDeployments')}</h2>
         </div>
@@ -1527,6 +1527,8 @@ export function ChannelWorkspace({
             className={`grid min-w-0 w-full gap-4 ${
               taskAggregationMode === 'status'
                 ? 'h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]'
+                : goals.length === 0
+                  ? 'min-h-full grid-rows-[auto_minmax(0,1fr)]'
                 : 'content-start'
             }`}
           >
@@ -1559,6 +1561,8 @@ export function ChannelWorkspace({
               className={
                 taskAggregationMode === 'status'
                   ? 'h-full min-h-0 min-w-0 overflow-hidden'
+                  : goals.length === 0
+                    ? 'min-h-0 min-w-0'
                   : 'min-w-0'
               }
             >
@@ -1583,7 +1587,7 @@ export function ChannelWorkspace({
             />
           </div>
         ) : showWorkspacePage && showDeployments ? (
-          <div className="grid w-full content-start gap-4">
+          <div className={`grid w-full gap-4 ${deployments.length === 0 ? 'h-full min-h-0' : 'content-start'}`}>
             {renderDeploymentListView()}
           </div>
         ) : showWorkspacePage && showProjectWorkspace && activeConversation?.type === 'project' ? (

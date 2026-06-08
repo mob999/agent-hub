@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Close, Code, Document, FileDiff, Folder, Fol
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type {
   ConversationArtifact,
   ConversationArtifactFile,
@@ -351,6 +352,7 @@ export function ArtifactWorkspace({
   onRefreshArtifacts,
   onRefreshDeployments,
 }: ArtifactWorkspaceProps) {
+  const { t } = useTranslation()
   const selectedArtifactId = activeArtifactId ?? artifacts[0]?.id ?? null
   const selectedArtifact = useMemo(
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? artifacts[0] ?? null,
@@ -766,9 +768,9 @@ export function ArtifactWorkspace({
     return (
       <div className="grid min-h-80 place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
         <Launch size={32} />
-        <h2 className="cds--type-heading-compact-02">No files yet</h2>
+        <h2 className="cds--type-heading-compact-02">{t('artifacts.noFiles')}</h2>
         <p className="max-w-[28rem] text-[var(--cds-text-secondary)]">
-          Agent reports, diffs, previews, and deployment records will appear here.
+          {t('artifacts.noFilesDescription')}
         </p>
       </div>
     )

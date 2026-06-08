@@ -40,6 +40,7 @@ const resources = {
       },
       publicHeader: {
         signIn: 'Sign In',
+        switchLanguage: 'Switch language',
       },
       publicFooter: {
         copyright: '@ 2026 Tavro AI.',
@@ -513,6 +514,7 @@ const resources = {
       },
       publicHeader: {
         signIn: '登录',
+        switchLanguage: '切换语言',
       },
       publicFooter: {
         copyright: '@ 2026 Tavro AI.',

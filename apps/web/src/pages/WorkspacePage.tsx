@@ -342,7 +342,6 @@ export function WorkspacePage({
   const [prompt, setPrompt] = useState('')
   const [isCreatingRun, setIsCreatingRun] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
-  const [accountExpanded, setAccountExpanded] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [tutorialRequestId, setTutorialRequestId] = useState(0)
   const [searchQuery, setSearchQuery] = useState(initialSearchRouteState.query)
@@ -1276,7 +1275,6 @@ export function WorkspacePage({
   ])
 
   const openOnboardingTutorial = useCallback(() => {
-    setAccountExpanded(false)
     refreshWelcomeData()
     setTutorialRequestId((requestId) => requestId + 1)
     navigate('/welcome')
@@ -2339,15 +2337,11 @@ export function WorkspacePage({
       aria-label="AgentHub workspace"
     >
       <AppRail
-        user={user}
         activeView={activeView}
-        accountExpanded={accountExpanded}
-        toggleAccount={() => setAccountExpanded((expanded) => !expanded)}
+        openHome={() => navigate('/')}
         setActiveView={navigateToView}
         openTutorial={openOnboardingTutorial}
-        logout={logout}
         openSettings={() => {
-          setAccountExpanded(false)
           setSettingsError(null)
           setSettingsOpen(true)
         }}
@@ -2622,6 +2616,7 @@ export function WorkspacePage({
           error={settingsError}
           isSaving={isSavingSettings}
           onClose={() => setSettingsOpen(false)}
+          onLogout={logout}
           onSave={(input) => {
             void updateUserSettings(input)
           }}

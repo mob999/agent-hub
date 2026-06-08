@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, session, shell } from "electron";
 import path from "node:path";
 import pkg from "../package.json";
 import { DesktopDaemonManager } from "./daemon-manager";
+import { DesktopUpdateManager } from "./update-manager";
 
 const desktopProtocol = "tavro";
 const productionWebUrl = "https://tavro-ai.vercel.app";
@@ -14,6 +15,7 @@ const githubOrigin = "https://github.com";
 let mainWindow: BrowserWindow | null = null;
 let pendingDesktopAuthApiOrigin: string | null = null;
 let daemonManager: DesktopDaemonManager | null = null;
+let updateManager: DesktopUpdateManager | null = null;
 
 function normalizeUrl(value: string): string {
   return new URL(value).toString();
@@ -226,6 +228,11 @@ function registerDaemonIpc(): void {
   ipcMain.handle("tavro:daemon:restart", async () => daemonManager?.restart());
 }
 
+function registerUpdateIpc(): void {
+  ipcMain.handle("tavro:updates:check", async () =>
+    updateManager?.checkForUpdates("manual"));
+}
+
 function createMainWindow(): BrowserWindow {
   const webUrl = resolveWebUrl();
   const origins = allowedNavigationOrigins(webUrl);
@@ -274,6 +281,7 @@ Menu.setApplicationMenu(null);
 registerDesktopProtocol();
 registerAuthIpc();
 registerDaemonIpc();
+registerUpdateIpc();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -298,6 +306,10 @@ if (!gotSingleInstanceLock) {
       getMainWindow: () => mainWindow,
       getSession: () => session.defaultSession,
     });
+    updateManager = new DesktopUpdateManager({
+      currentVersion: pkg.version,
+    });
+    updateManager.startAutoChecks();
     createMainWindow();
     const callbackUrl = findDesktopCallbackUrl(process.argv);
     if (callbackUrl) {
@@ -328,6 +340,8 @@ if (!gotSingleInstanceLock) {
     event.preventDefault();
     const manager = daemonManager;
     daemonManager = null;
+    updateManager?.stopAutoChecks();
+    updateManager = null;
     void manager.stopForQuit().finally(() => {
       app.quit();
     });

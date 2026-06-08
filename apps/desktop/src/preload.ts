@@ -30,6 +30,10 @@ const desktopApi = Object.freeze({
     startUrl: string;
     webOrigin: string;
   }) => ipcRenderer.invoke("tavro:auth:github:start", input) as Promise<void>,
+  updates: {
+    check: () =>
+      ipcRenderer.invoke("tavro:updates:check") as Promise<unknown>,
+  },
   version: process.env.TAVRO_DESKTOP_VERSION ?? pkg.version,
 });
 

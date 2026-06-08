@@ -1,16 +1,13 @@
-import { Button, Theme } from '@carbon/react'
-import { Chat, Devices, JobRun, Logout, Settings, UserAvatar } from '@carbon/react/icons'
+import { Theme } from '@carbon/react'
+import { Chat, Devices, JobRun, Settings } from '@carbon/react/icons'
 import { useTranslation } from 'react-i18next'
-import type { User, WorkspaceView } from '../lib/api'
+import type { WorkspaceView } from '../lib/api'
 
 interface AppRailProps {
-  user: User | null
   activeView: WorkspaceView
-  accountExpanded: boolean
-  toggleAccount: () => void
+  openHome: () => void
   setActiveView: (view: WorkspaceView) => void
   openTutorial: () => void
-  logout: () => void
   openSettings: () => void
 }
 
@@ -20,18 +17,13 @@ const activeRailButton =
   'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-01)] shadow-[inset_3px_0_0_var(--cds-text-primary)] hover:bg-[var(--cds-layer-01)]'
 
 export function AppRail({
-  user,
   activeView,
-  accountExpanded,
-  toggleAccount,
+  openHome,
   setActiveView,
   openTutorial,
-  logout,
   openSettings,
 }: AppRailProps) {
   const { t } = useTranslation()
-  const displayName = user?.name?.trim() || user?.email || 'A'
-  const avatar = user?.avatar ?? null
 
   return (
     <Theme
@@ -47,49 +39,13 @@ export function AppRail({
         {t('appRail.skip')}
       </a>
       <button
-        className={`mb-2 grid h-10 w-10 cursor-pointer place-items-center border bg-[var(--cds-layer-01)] text-sm font-semibold text-[var(--cds-text-primary)] hover:border-[var(--cds-border-strong-01)] hover:bg-[var(--cds-layer-selected-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
-          accountExpanded
-            ? 'border-[var(--cds-border-strong-01)] bg-[var(--cds-layer-selected-01)]'
-            : 'border-[var(--cds-border-subtle-01)]'
-        }`}
+        className="mb-2 grid h-10 w-10 cursor-pointer place-items-center border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] hover:border-[var(--cds-border-strong-01)] hover:bg-[var(--cds-layer-selected-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
         type="button"
-        aria-label={t('appRail.account')}
-        aria-expanded={accountExpanded}
-        onClick={toggleAccount}
+        aria-label={t('appRail.home')}
+        onClick={openHome}
       >
-        <UserAvatar size={20} />
+        <img src="/favicon.svg" alt="" className="h-7 w-7" />
       </button>
-      {accountExpanded && (
-        <div
-          className="absolute left-12 top-2 z-10 grid w-64 gap-2 border border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] p-4 shadow-2xl"
-          role="dialog"
-          aria-label={t('appRail.account')}
-        >
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[#d8dee6] bg-[var(--cds-layer-02)] shadow-[0_1px_3px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.12)_inset]">
-              {avatar ? (
-                <img src={avatar} alt="" className="h-9 w-9 rounded-[3px] object-cover" />
-              ) : (
-                <UserAvatar size={22} />
-              )}
-            </span>
-            <div className="min-w-0">
-              <p className="cds--type-label-01">{t('appRail.signedInAs')}</p>
-              <strong className="block truncate">{displayName}</strong>
-            </div>
-          </div>
-          <span className="truncate text-[var(--cds-text-secondary)]">{user?.email}</span>
-          <Button
-            className="justify-self-start !pl-0 text-left"
-            kind="danger--ghost"
-            size="sm"
-            renderIcon={Logout}
-            onClick={logout}
-          >
-            {t('appRail.logOut')}
-          </Button>
-        </div>
-      )}
       <nav className="flex flex-col items-center gap-1.5" aria-label={t('appRail.sections')}>
         <button
           className={`${railButton} ${activeView === 'chat' ? activeRailButton : ''}`}

@@ -21,6 +21,15 @@ declare global {
     workspaceRoot: string;
   }
 
+  interface TavroDesktopUpdateInfo {
+    checkedAt: string;
+    currentVersion: string;
+    latestVersion?: string;
+    releaseName?: string;
+    releaseUrl?: string;
+    updateAvailable: boolean;
+  }
+
   interface Window {
     tavroDesktop?: Readonly<{
       daemon?: Readonly<{
@@ -40,6 +49,9 @@ declare global {
         startUrl: string;
         webOrigin: string;
       }) => Promise<void>;
+      updates?: Readonly<{
+        check: () => Promise<TavroDesktopUpdateInfo>;
+      }>;
       version: string;
     }>;
   }

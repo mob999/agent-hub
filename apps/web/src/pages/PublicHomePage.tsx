@@ -2,7 +2,6 @@ import { ArrowRight, CheckmarkFilled, Terminal } from '@carbon/react/icons'
 import { useTranslation } from 'react-i18next'
 import { PublicFooter } from '../components/PublicFooter'
 import { PublicHeader } from '../components/PublicHeader'
-import { useAuthenticatedRedirect } from '../lib/useAuthenticatedRedirect'
 import type { RoutePath } from './AuthPage'
 
 interface PublicHomePageProps {
@@ -97,7 +96,6 @@ function ChatPreview() {
 
 export function PublicHomePage({ navigate }: PublicHomePageProps) {
   const { t } = useTranslation()
-  useAuthenticatedRedirect(navigate)
 
   const openLogin = () => navigate('/login')
 

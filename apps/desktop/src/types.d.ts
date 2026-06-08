@@ -11,6 +11,16 @@ declare global {
         startUrl: string;
         webOrigin: string;
       }) => Promise<void>;
+      updates?: Readonly<{
+        check: () => Promise<{
+          checkedAt: string;
+          currentVersion: string;
+          latestVersion?: string;
+          releaseName?: string;
+          releaseUrl?: string;
+          updateAvailable: boolean;
+        }>;
+      }>;
       version: string;
     }>;
   }

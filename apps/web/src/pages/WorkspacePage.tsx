@@ -1163,9 +1163,9 @@ export function WorkspacePage({
         ],
       )
       setMessageSendStates((current) => {
-        const { [pendingMessageId]: _pending, ...next } = current
-
-        return next
+        return Object.fromEntries(
+          Object.entries(current).filter(([messageId]) => messageId !== pendingMessageId),
+        )
       })
       responseRuns.forEach((run) => {
         queryClient.setQueryData(queryKeys.run(run.id), run)

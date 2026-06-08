@@ -1,4 +1,4 @@
-import { Form, IconButton, InlineLoading, InlineNotification, Loading, Tag } from '@carbon/react'
+import { Form, IconButton, InlineNotification, Loading, Tag } from '@carbon/react'
 import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, UserAdmin, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
@@ -31,9 +31,23 @@ type TaskAggregationMode = 'goal' | 'status'
 type GoalTask = ConversationGoal['tasks'][number]
 type StatusIconState = ConversationGoal['status'] | ConversationGoalTaskStatus
 
+export type MessageSendState =
+  | {
+      status: 'queued'
+      conversationId: string
+      attachmentCount: number
+    }
+  | {
+      status: 'failed'
+      conversationId: string
+      attachmentCount: number
+      error: string
+    }
+
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
+  messageSendStates: Record<string, MessageSendState>
   goals: ConversationGoal[]
   artifacts: ConversationArtifact[]
   deployments: ConversationDeployment[]
@@ -292,6 +306,7 @@ function formatFileSize(bytes: number): string {
 export function ChannelWorkspace({
   activeConversation,
   messages,
+  messageSendStates,
   goals,
   artifacts,
   deployments,
@@ -1611,6 +1626,7 @@ export function ChannelWorkspace({
                 (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderType === 'agent' &&
                 senderAgent !== null
+              const sendState = messageSendStates[message.id] ?? null
 
               return (
                 <article
@@ -1651,35 +1667,72 @@ export function ChannelWorkspace({
                     )}
                   </span>
                   <span className="grid min-w-0 gap-1">
-                    <span className="grid min-w-0 gap-0.5">
-                      <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      {canMentionSender ? (
-                        <button
-                          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left font-semibold leading-5 text-[var(--cds-text-primary)] hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                          type="button"
-                          onClick={() => appendMention(senderAgent)}
-                        >
-                          {senderName}
-                        </button>
-                      ) : (
-                        <strong
-                          className={`leading-5 ${
-                            message.senderType === 'user'
-                              ? 'text-[#0f62fe]'
-                              : message.senderType === 'system'
-                                ? 'text-[#697386]'
-                                : ''
-                          }`}
-                        >
-                          {senderName}
-                        </strong>
-                      )}
-                        {senderIsOrchestrator && <span className="sr-only">{t('modals.agentMembers.orchestrator')}</span>}
+                    <span className="flex min-w-0 items-start justify-between gap-3">
+                      <span className="grid min-w-0 gap-0.5">
+                        <span className="flex min-w-0 flex-wrap items-center gap-2">
+                        {canMentionSender ? (
+                          <button
+                            className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left font-semibold leading-5 text-[var(--cds-text-primary)] hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                            type="button"
+                            onClick={() => appendMention(senderAgent)}
+                          >
+                            {senderName}
+                          </button>
+                        ) : (
+                          <strong
+                            className={`leading-5 ${
+                              message.senderType === 'user'
+                                ? 'text-[#0f62fe]'
+                                : message.senderType === 'system'
+                                  ? 'text-[#697386]'
+                                  : ''
+                            }`}
+                          >
+                            {senderName}
+                          </strong>
+                        )}
+                          {senderIsOrchestrator && <span className="sr-only">{t('modals.agentMembers.orchestrator')}</span>}
+                        </span>
+                        <time className="text-xs leading-4 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
+                          {formatMessageTime(message.updatedAt)}
+                        </time>
                       </span>
-                      <time className="text-xs leading-4 text-[var(--cds-text-secondary)]" dateTime={message.updatedAt}>
-                        {formatMessageTime(message.updatedAt)}
-                      </time>
+                      {sendState !== null && (
+                        <span
+                          className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${
+                            sendState.status === 'failed'
+                              ? 'text-[var(--cds-support-error)]'
+                              : 'text-[#697386]'
+                          }`}
+                          title={
+                            sendState.status === 'failed'
+                              ? sendState.error
+                              : t('chat.queueingRun')
+                          }
+                        >
+                          {sendState.status === 'failed' ? (
+                            <IncompleteError size={16} />
+                          ) : (
+                            <Loading
+                              small
+                              withOverlay={false}
+                              description={t('chat.queueingRun')}
+                            />
+                          )}
+                        </span>
+                      )}
                     </span>
+                    {sendState?.attachmentCount ? (
+                      <span className="mt-1 flex w-fit items-center gap-2 rounded-lg border border-[#dde3ea] bg-[#f7f8fa] px-2.5 py-1 text-xs font-medium text-[#5f6875]">
+                        <Attachment size={14} />
+                        {t('chat.pendingAttachments', { count: sendState.attachmentCount })}
+                      </span>
+                    ) : null}
+                    {sendState?.status === 'failed' && (
+                      <span className="text-xs text-[var(--cds-text-error)]">
+                        {sendState.error}
+                      </span>
+                    )}
                     {message.cards && message.cards.length > 0 && renderMessageCards(message.cards)}
                     {(!message.cards || message.cards.length === 0) && message.content && (
                       <MessageContent className={messageBodyClass} content={message.content} />
@@ -1973,25 +2026,29 @@ export function ChannelWorkspace({
               </div>
             )}
             <div className="ml-auto flex items-center">
-          {isCreatingRun ? (
-            <InlineLoading description={t('chat.queueingRun')} status="active" />
-          ) : (
-            <button
-              type="submit"
-              aria-label={t('chat.send')}
-              className={`inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
-                canSendMessage
-                  ? 'cursor-pointer border-[#c7d0dc] bg-white text-[#161616] shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-[#b9c3cf] hover:bg-[#eef0f4]'
-                  : 'cursor-not-allowed border-[#eef0f4] bg-[#f7f8fa] text-[#c1c7d0]'
-              }`}
-              disabled={!canSendMessage}
-            >
-              <span className="hidden text-xs font-semibold text-current sm:inline">
-                Ctrl + Enter
-              </span>
-              <Return size={16} />
-            </button>
-          )}
+              <button
+                type="submit"
+                aria-label={isCreatingRun ? t('chat.queueingRun') : t('chat.send')}
+                className={`inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                  canSendMessage
+                    ? 'cursor-pointer border-[#c7d0dc] bg-white text-[#161616] shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-[#b9c3cf] hover:bg-[#eef0f4]'
+                    : 'cursor-not-allowed border-[#eef0f4] bg-[#f7f8fa] text-[#c1c7d0]'
+                }`}
+                disabled={!canSendMessage || isCreatingRun}
+              >
+                <span className="hidden text-xs font-semibold text-current sm:inline">
+                  Ctrl + Enter
+                </span>
+                {isCreatingRun ? (
+                  <Loading
+                    small
+                    withOverlay={false}
+                    description={t('chat.queueingRun')}
+                  />
+                ) : (
+                  <Return size={16} />
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -51,6 +51,10 @@ declare global {
       }) => Promise<void>;
       updates?: Readonly<{
         check: () => Promise<TavroDesktopUpdateInfo>;
+        onUpdateAvailable: (
+          listener: (info: TavroDesktopUpdateInfo) => void,
+        ) => () => void;
+        openRelease: (releaseUrl: string) => Promise<void>;
       }>;
       version: string;
     }>;

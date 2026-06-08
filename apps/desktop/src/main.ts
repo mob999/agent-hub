@@ -231,6 +231,13 @@ function registerDaemonIpc(): void {
 function registerUpdateIpc(): void {
   ipcMain.handle("tavro:updates:check", async () =>
     updateManager?.checkForUpdates("manual"));
+  ipcMain.handle("tavro:updates:open-release", async (_event, releaseUrl: unknown) => {
+    if (typeof releaseUrl !== "string" || !/^https:\/\/github\.com\//i.test(releaseUrl)) {
+      throw new Error("Invalid desktop update release URL.");
+    }
+
+    await openExternal(releaseUrl);
+  });
 }
 
 function createMainWindow(): BrowserWindow {
@@ -308,6 +315,9 @@ if (!gotSingleInstanceLock) {
     });
     updateManager = new DesktopUpdateManager({
       currentVersion: pkg.version,
+      onUpdateAvailable: (info) => {
+        mainWindow?.webContents.send("tavro:updates:available", info);
+      },
     });
     updateManager.startAutoChecks();
     createMainWindow();

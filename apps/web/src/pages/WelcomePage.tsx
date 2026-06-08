@@ -515,6 +515,7 @@ export function WelcomePage({
   const [activeDashboardCard, setActiveDashboardCard] = useState<'conversations' | 'goals'>('conversations')
 
   const devMode = import.meta.env.DEV
+
   const onboardingDevices = useMemo(
     () =>
       freshOnboardingPreview

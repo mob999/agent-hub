@@ -33,6 +33,18 @@ const desktopApi = Object.freeze({
   updates: {
     check: () =>
       ipcRenderer.invoke("tavro:updates:check") as Promise<unknown>,
+    onUpdateAvailable: (listener: (info: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, info: unknown) => {
+        listener(info);
+      };
+      ipcRenderer.on("tavro:updates:available", handler);
+
+      return () => {
+        ipcRenderer.off("tavro:updates:available", handler);
+      };
+    },
+    openRelease: (releaseUrl: string) =>
+      ipcRenderer.invoke("tavro:updates:open-release", releaseUrl) as Promise<void>,
   },
   version: process.env.TAVRO_DESKTOP_VERSION ?? pkg.version,
 });

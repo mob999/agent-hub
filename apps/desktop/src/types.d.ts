@@ -20,6 +20,17 @@ declare global {
           releaseUrl?: string;
           updateAvailable: boolean;
         }>;
+        onUpdateAvailable: (
+          listener: (info: {
+            checkedAt: string;
+            currentVersion: string;
+            latestVersion?: string;
+            releaseName?: string;
+            releaseUrl?: string;
+            updateAvailable: boolean;
+          }) => void,
+        ) => () => void;
+        openRelease: (releaseUrl: string) => Promise<void>;
       }>;
       version: string;
     }>;

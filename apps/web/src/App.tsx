@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { DesktopUpdateToast } from './components/DesktopUpdateToast'
 import { AuthPage, type EditorRoutePath, type RoutePath, type WorkspaceRoutePath } from './pages/AuthPage'
 import { DownloadPage } from './pages/DownloadPage'
 import { PublicHomePage } from './pages/PublicHomePage'
@@ -129,6 +130,7 @@ function editorStateFromPath(path: string): EditorRouteState | null {
 
 function App() {
   const [route, setRoute] = useState<RoutePath>(() => getRoutePath())
+  const [desktopUpdateInfo, setDesktopUpdateInfo] = useState<TavroDesktopUpdateInfo | null>(null)
   const chatState = route.startsWith('/chat/')
     ? chatStateFromPath(route)
     : { conversationId: null, goalRoute: null, messageId: null, panelRoute: null }
@@ -150,28 +152,66 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState)
   }, [route])
 
+  useEffect(() => {
+    const unsubscribe = window.tavroDesktop?.updates?.onUpdateAvailable((info) => {
+      setDesktopUpdateInfo(info)
+    })
+
+    return () => unsubscribe?.()
+  }, [])
+
+  const downloadDesktopUpdate = useCallback((releaseUrl: string) => {
+    void window.tavroDesktop?.updates?.openRelease(releaseUrl)
+  }, [])
+
+  const desktopUpdateToast = (
+    <DesktopUpdateToast
+      info={desktopUpdateInfo}
+      onDismiss={() => setDesktopUpdateInfo(null)}
+      onDownload={downloadDesktopUpdate}
+    />
+  )
+
   if (route === '/') {
-    return <PublicHomePage navigate={navigate} />
+    return (
+      <>
+        <PublicHomePage navigate={navigate} />
+        {desktopUpdateToast}
+      </>
+    )
   }
 
   if (route === '/download') {
-    return <DownloadPage navigate={navigate} />
+    return (
+      <>
+        <DownloadPage navigate={navigate} />
+        {desktopUpdateToast}
+      </>
+    )
   }
 
   if (route === '/login') {
-    return <AuthPage navigate={navigate} />
+    return (
+      <>
+        <AuthPage navigate={navigate} />
+        {desktopUpdateToast}
+      </>
+    )
   }
 
   return (
-    <WorkspacePage
-      route={isWorkspaceRoute(route) ? route : '/chat'}
-      chatConversationId={chatState.conversationId}
-      goalRoute={chatState.goalRoute}
-      focusedMessageId={chatState.messageId}
-      chatPanelRoute={chatState.panelRoute}
-      editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
-      navigate={navigate}
-    />
+    <>
+      <WorkspacePage
+        route={isWorkspaceRoute(route) ? route : '/chat'}
+        chatConversationId={chatState.conversationId}
+        goalRoute={chatState.goalRoute}
+        focusedMessageId={chatState.messageId}
+        chatPanelRoute={chatState.panelRoute}
+        editorRoute={route.startsWith('/editor/') ? editorStateFromPath(route) : null}
+        navigate={navigate}
+      />
+      {desktopUpdateToast}
+    </>
   )
 }
 

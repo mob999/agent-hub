@@ -1,5 +1,3 @@
-import { dialog, shell } from "electron";
-
 export type DesktopUpdateCheckSource = "auto" | "manual";
 
 export interface DesktopUpdateInfo {
@@ -21,6 +19,10 @@ interface GitHubRelease {
 
 interface DesktopUpdateManagerOptions {
   currentVersion: string;
+  onUpdateAvailable?: (
+    info: DesktopUpdateInfo,
+    source: DesktopUpdateCheckSource,
+  ) => Promise<void> | void;
   releaseApiUrl?: string;
 }
 
@@ -31,6 +33,12 @@ const updateCheckIntervalMs = 60 * 60 * 1000;
 
 export class DesktopUpdateManager {
   private readonly currentVersion: string;
+  private readonly onUpdateAvailable:
+    | ((
+      info: DesktopUpdateInfo,
+      source: DesktopUpdateCheckSource,
+    ) => Promise<void> | void)
+    | undefined;
   private readonly releaseApiUrl: string;
   private checkTimer: NodeJS.Timeout | null = null;
   private checkPromise: Promise<DesktopUpdateInfo> | null = null;
@@ -38,6 +46,7 @@ export class DesktopUpdateManager {
 
   constructor(options: DesktopUpdateManagerOptions) {
     this.currentVersion = normalizeVersion(options.currentVersion);
+    this.onUpdateAvailable = options.onUpdateAvailable;
     this.releaseApiUrl =
       options.releaseApiUrl ??
       process.env.TAVRO_DESKTOP_RELEASE_API_URL ??
@@ -96,14 +105,7 @@ export class DesktopUpdateManager {
         };
 
         if (info.updateAvailable && info.latestVersion && info.releaseUrl) {
-          await this.promptForUpdate(info, source);
-        } else if (source === "manual") {
-          await dialog.showMessageBox({
-            buttons: ["OK"],
-            message: "Tavro AI is up to date.",
-            detail: `Current version: ${this.currentVersion}`,
-            type: "info",
-          });
+          await this.notifyUpdateAvailable(info, source);
         }
 
         return info;
@@ -144,7 +146,7 @@ export class DesktopUpdateManager {
     }) ?? null;
   }
 
-  private async promptForUpdate(
+  private async notifyUpdateAvailable(
     info: DesktopUpdateInfo,
     source: DesktopUpdateCheckSource,
   ): Promise<void> {
@@ -157,18 +159,7 @@ export class DesktopUpdateManager {
     }
 
     this.lastPromptedVersion = info.latestVersion ?? null;
-    const result = await dialog.showMessageBox({
-      buttons: ["Download", "Later"],
-      cancelId: 1,
-      defaultId: 0,
-      detail: `Current version: ${info.currentVersion}\nLatest version: ${info.latestVersion}`,
-      message: "A new Tavro AI desktop version is available.",
-      type: "info",
-    });
-
-    if (result.response === 0 && info.releaseUrl) {
-      await shell.openExternal(info.releaseUrl);
-    }
+    await this.onUpdateAvailable?.(info, source);
   }
 }
 

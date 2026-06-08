@@ -13,6 +13,7 @@ import type { AgentRun, RunEvent, RunId } from "./run.js";
 export type RealtimeEventType =
   | "conversation.updated"
   | "conversation.message.created"
+  | "conversation.message.updated"
   | "run.updated"
   | "run.event.created"
   | "task.updated"
@@ -37,6 +38,13 @@ export interface ConversationMessageCreatedRealtimeEvent
   conversationId: ConversationId;
   message: ConversationMessage;
   type: "conversation.message.created";
+}
+
+export interface ConversationMessageUpdatedRealtimeEvent
+  extends RealtimeEventBase {
+  conversationId: ConversationId;
+  message: ConversationMessage;
+  type: "conversation.message.updated";
 }
 
 export interface RunUpdatedRealtimeEvent extends RealtimeEventBase {
@@ -76,6 +84,7 @@ export interface ArtifactActionUpdatedRealtimeEvent extends RealtimeEventBase {
 export type RealtimeEvent =
   | ConversationUpdatedRealtimeEvent
   | ConversationMessageCreatedRealtimeEvent
+  | ConversationMessageUpdatedRealtimeEvent
   | RunUpdatedRealtimeEvent
   | RunEventCreatedRealtimeEvent
   | TaskUpdatedRealtimeEvent

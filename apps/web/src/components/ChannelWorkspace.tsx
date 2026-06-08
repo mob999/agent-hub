@@ -4,7 +4,7 @@ import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, User } from '../lib/api'
+import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, ConversationMessageCard, User } from '../lib/api'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
 import { getProjectIcon } from '../lib/projectIcon'
@@ -365,6 +365,20 @@ export function ChannelWorkspace({
   const flattenedGoalTasks = useMemo(
     () => goals.flatMap((goal) => goal.tasks.map((task) => ({ goal, task }))),
     [goals],
+  )
+  const goalById = useMemo(
+    () => new Map(goals.map((goal) => [goal.id, goal])),
+    [goals],
+  )
+  const taskByGoalAndIndex = useMemo(
+    () =>
+      new Map(
+        flattenedGoalTasks.map(({ goal, task }) => [
+          `${goal.id}:${task.index}`,
+          { goal, task },
+        ]),
+      ),
+    [flattenedGoalTasks],
   )
   const goalTasksByStatus = useMemo(() => {
     const grouped = new Map<ConversationGoalTaskStatus, Array<{ goal: ConversationGoal; task: GoalTask }>>(
@@ -866,6 +880,85 @@ export function ChannelWorkspace({
     showTasks,
     taskAggregationMode,
   ])
+
+  const renderMessageCards = (cards: ConversationMessageCard[]) => (
+    <div className="mt-2 grid max-w-[42rem] gap-2">
+      {cards.map((card, index) => {
+        if (card.type === 'goal.created') {
+          const goal = goalById.get(card.goalId)
+          const title = goal?.title ?? card.title
+          const preview = goal?.description ?? card.preview
+          const status = goal?.status ?? 'active'
+
+          return (
+            <button
+              className="grid cursor-pointer gap-2 rounded-lg border border-[#dde1e6] border-l-4 border-l-[#24a148] bg-white px-4 py-3 text-left shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:border-[#c7d0dc] hover:border-l-[#24a148] hover:bg-[#fbfcfe] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+              key={`${card.type}:${card.goalId}:${index}`}
+              type="button"
+              onClick={() => openGoalDetailRoute(card.goalId, null)}
+            >
+              <span className="flex min-w-0 items-center justify-between gap-3">
+                <span className="min-w-0 text-xs font-semibold uppercase tracking-[0.08em] text-[#69707d]">
+                  {t('chat.cardGoalCreated')}
+                </span>
+                <StatusIcon status={status} />
+              </span>
+              <span className="min-w-0 truncate text-sm font-semibold leading-5 text-[#161616]">
+                {title}
+              </span>
+              {preview && (
+                <span className="overflow-hidden text-sm leading-5 text-[#596171] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                  {preview}
+                </span>
+              )}
+            </button>
+          )
+        }
+
+        const taskEntry = taskByGoalAndIndex.get(`${card.goalId}:${card.taskIndex}`)
+        const assignee = agents.find((agent) => agent.agent.id === card.assigneeAgentId)
+        const title = taskEntry?.task.title ?? card.title
+        const preview = taskEntry?.task.description ?? card.preview
+        const status = taskEntry?.task.status ?? 'assigned'
+        const runId = taskEntry?.task.assigneeRunId ?? card.runId
+
+        return (
+          <button
+            className="grid cursor-pointer gap-2 rounded-lg border border-[#dde1e6] border-l-4 border-l-[#0f62fe] bg-white px-4 py-3 text-left shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:border-[#c7d0dc] hover:border-l-[#0f62fe] hover:bg-[#fbfcfe] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+            key={`${card.type}:${card.goalId}:${card.taskIndex}:${index}`}
+            type="button"
+            onClick={() => openGoalDetailRoute(card.goalId, card.taskIndex)}
+          >
+            <span className="flex min-w-0 items-center justify-between gap-3">
+              <span className="min-w-0 text-xs font-semibold uppercase tracking-[0.08em] text-[#69707d]">
+                {t('chat.cardTaskAssigned')}
+              </span>
+              <StatusIcon status={status} />
+            </span>
+            <span className="min-w-0 truncate text-sm font-semibold leading-5 text-[#161616]">
+              #{card.taskIndex} {title}
+            </span>
+            {preview && (
+              <span className="overflow-hidden text-sm leading-5 text-[#596171] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                {preview}
+              </span>
+            )}
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-[#69707d]">
+              <span className="font-semibold text-[#344054]">{t('chat.assignee')}</span>
+              <span>{assignee?.agent.name ?? card.assigneeAgentId}</span>
+              {runId && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-semibold text-[#344054]">{t('chat.run')}</span>
+                  <span>{runId.slice(0, 8)}</span>
+                </>
+              )}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 
   const renderGoalTaskCard = (
     goal: ConversationGoal,
@@ -1577,7 +1670,8 @@ export function ChannelWorkspace({
                         {formatMessageTime(message.updatedAt)}
                       </time>
                     </span>
-                    {message.content && (
+                    {message.cards && message.cards.length > 0 && renderMessageCards(message.cards)}
+                    {(!message.cards || message.cards.length === 0) && message.content && (
                       <MessageContent className={messageBodyClass} content={message.content} />
                     )}
                     {message.attachments && message.attachments.length > 0 && (

@@ -158,6 +158,7 @@ export const conversationMessages = pgTable(
     content: text("content").notNull(),
     status: varchar("status", { length: 32 }).notNull(),
     error: text("error"),
+    cards: jsonb("cards").$type<unknown[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -185,6 +186,10 @@ export const conversationGoals = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     initialRunId: uuid("initial_run_id").notNull(),
+    cardMessageId: uuid("card_message_id").references(
+      () => conversationMessages.id,
+      { onDelete: "set null" },
+    ),
     title: varchar("title", { length: 160 }).notNull(),
     description: text("description"),
     status: varchar("status", { length: 32 }).notNull(),

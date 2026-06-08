@@ -11,6 +11,7 @@ import type {
   ConversationId,
   ConversationMessage,
   ConversationMessageAttachment,
+  ConversationMessageCard,
   ConversationProject,
   ConversationProjectChange,
 } from "@agent-hub/core";
@@ -59,6 +60,43 @@ export type ConversationProjectChangeRow =
 
 export function optionalString(value: string | null): string | undefined {
   return value ?? undefined;
+}
+
+function isMessageCard(value: unknown): value is ConversationMessageCard {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return false;
+  }
+
+  const card = value as Record<string, unknown>;
+  if (
+    card.type === "goal.created" &&
+    typeof card.goalId === "string" &&
+    typeof card.title === "string"
+  ) {
+    return card.preview === undefined || typeof card.preview === "string";
+  }
+
+  if (
+    card.type === "task.assigned" &&
+    typeof card.assigneeAgentId === "string" &&
+    typeof card.goalId === "string" &&
+    typeof card.taskIndex === "number" &&
+    typeof card.title === "string"
+  ) {
+    return (card.preview === undefined || typeof card.preview === "string") &&
+      (card.runId === undefined || typeof card.runId === "string");
+  }
+
+  return false;
+}
+
+function optionalMessageCards(value: unknown[] | null): ConversationMessageCard[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+
+  const cards = value.filter(isMessageCard);
+  return cards.length > 0 ? cards : undefined;
 }
 
 export function toConversation(
@@ -139,6 +177,7 @@ export function toConversationMessage(
     content: row.content,
     status: row.status as ConversationMessage["status"],
     error: optionalString(row.error),
+    cards: optionalMessageCards(row.cards),
     attachments: attachments.length > 0 ? attachments : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -319,6 +358,7 @@ export function toConversationGoal(
     conversationId: row.conversationId,
     orchestratorAgentId: row.orchestratorAgentId,
     initialRunId: row.initialRunId,
+    cardMessageId: optionalString(row.cardMessageId),
     title: row.title,
     description: optionalString(row.description),
     status: row.status as ConversationGoal["status"],

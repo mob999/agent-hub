@@ -272,6 +272,7 @@ export interface ConversationGoal {
   conversationId: string
   orchestratorAgentId: string
   initialRunId: string
+  cardMessageId?: string
   title: string
   description?: string
   status: ConversationGoalStatus
@@ -467,10 +468,28 @@ export interface ConversationMessage {
   content: string
   status: ConversationMessageStatus
   error?: string
+  cards?: ConversationMessageCard[]
   attachments?: ConversationMessageAttachment[]
   createdAt: string
   updatedAt: string
 }
+
+export type ConversationMessageCard =
+  | {
+      type: 'goal.created'
+      goalId: string
+      title: string
+      preview?: string
+    }
+  | {
+      type: 'task.assigned'
+      assigneeAgentId: string
+      goalId: string
+      preview?: string
+      runId?: string
+      taskIndex: number
+      title: string
+    }
 
 export interface ConversationMessageAttachment {
   id: string
@@ -673,6 +692,14 @@ export type RealtimeEvent =
     }
   | {
       type: 'conversation.message.created'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      message: ConversationMessage
+    }
+  | {
+      type: 'conversation.message.updated'
       eventId: string
       ownerUserId: string
       createdAt: string

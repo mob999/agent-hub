@@ -11,6 +11,7 @@ import type {
   ConversationId,
   ConversationMessage,
   ConversationMessageAttachment,
+  ConversationMessageCard,
   ConversationProject,
   ConversationProjectChange,
   ConversationArtifactDetails,
@@ -311,6 +312,188 @@ function buildTaskDispatchContent(input: {
     `Goal: [${input.goalTitle}](${input.goalHref})`,
     `[Task #${input.taskIndex} ${input.taskTitle}](${input.taskHref})`,
   ].join("\n");
+}
+
+function compactCardPreview(value: string | null | undefined): string | undefined {
+  const compacted = value?.replace(/\s+/g, " ").trim();
+  if (!compacted) {
+    return undefined;
+  }
+
+  return compacted.length > 180 ? `${compacted.slice(0, 177)}...` : compacted;
+}
+
+function goalCreatedCard(goal: Pick<ConversationGoalRow, "description" | "id" | "title">): ConversationMessageCard {
+  return {
+    type: "goal.created",
+    goalId: goal.id,
+    title: goal.title,
+    preview: compactCardPreview(goal.description),
+  };
+}
+
+function taskAssignedCard(input: {
+  assigneeAgentId: string;
+  description?: string | null;
+  goalId: string;
+  runId?: string | null;
+  taskIndex: number;
+  title: string;
+}): ConversationMessageCard {
+  return {
+    type: "task.assigned",
+    assigneeAgentId: input.assigneeAgentId,
+    goalId: input.goalId,
+    preview: compactCardPreview(input.description) ??
+      `Assigned to ${input.assigneeAgentId}.`,
+    runId: optionalString(input.runId ?? null),
+    taskIndex: input.taskIndex,
+    title: input.title,
+  };
+}
+
+function cardFallbackLine(card: ConversationMessageCard): string {
+  if (card.type === "goal.created") {
+    return [
+      `Goal created: ${card.title}`,
+      `Goal ID: ${card.goalId}`,
+      card.preview === undefined ? undefined : `Preview: ${card.preview}`,
+    ].filter((line): line is string => line !== undefined).join("\n");
+  }
+
+  return [
+    `Task assigned: #${card.taskIndex} ${card.title}`,
+    `Goal ID: ${card.goalId}`,
+    `Assignee: ${card.assigneeAgentId}`,
+    card.runId === undefined ? undefined : `Run ID: ${card.runId}`,
+    card.preview === undefined ? undefined : `Preview: ${card.preview}`,
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function cardFallbackContent(cards: ConversationMessageCard[]): string {
+  return cards.map(cardFallbackLine).join("\n\n");
+}
+
+function appendOrReplaceTaskCard(
+  cards: ConversationMessageCard[],
+  card: Extract<ConversationMessageCard, { type: "task.assigned" }>,
+): ConversationMessageCard[] {
+  return [
+    ...cards.filter((item) =>
+      item.type !== "task.assigned" ||
+      item.goalId !== card.goalId ||
+      item.taskIndex !== card.taskIndex
+    ),
+    card,
+  ];
+}
+
+function messageCardsFromRow(row: ConversationMessageRow): ConversationMessageCard[] {
+  return toConversationMessage(row).cards ?? [];
+}
+
+async function createGoalCardMessage(
+  db: Db,
+  input: {
+    conversationId: string;
+    createdAt: Date;
+    goal: Pick<
+      ConversationGoalRow,
+      "description" | "id" | "initialRunId" | "orchestratorAgentId" | "title"
+    >;
+  },
+): Promise<ConversationMessageRow> {
+  const cards = [goalCreatedCard(input.goal)];
+  const [message] = await db
+    .insert(conversationMessages)
+    .values({
+      cards,
+      content: cardFallbackContent(cards),
+      conversationId: input.conversationId,
+      createdAt: input.createdAt,
+      runId: input.goal.initialRunId,
+      senderAgentId: input.goal.orchestratorAgentId,
+      senderType: "agent",
+      status: "completed",
+      updatedAt: input.createdAt,
+    })
+    .returning();
+
+  if (message === undefined) {
+    throw new Error("Goal card message was not created.");
+  }
+
+  return message;
+}
+
+async function appendTaskAssignedCardToGoalMessage(
+  db: Db,
+  input: {
+    conversationId: string;
+    createdAt: Date;
+    goal: ConversationGoalRow;
+    taskCard: Extract<ConversationMessageCard, { type: "task.assigned" }>;
+  },
+): Promise<{ created: boolean; message: ConversationMessageRow }> {
+  const existingMessage = input.goal.cardMessageId === null
+    ? undefined
+    : (await db
+        .select()
+        .from(conversationMessages)
+        .where(eq(conversationMessages.id, input.goal.cardMessageId))
+        .limit(1))[0];
+
+  if (existingMessage === undefined) {
+    const cards = appendOrReplaceTaskCard([goalCreatedCard(input.goal)], input.taskCard);
+    const [message] = await db
+      .insert(conversationMessages)
+      .values({
+        cards,
+        content: cardFallbackContent(cards),
+        conversationId: input.conversationId,
+        createdAt: input.createdAt,
+        runId: input.goal.initialRunId,
+        senderAgentId: input.goal.orchestratorAgentId,
+        senderType: "agent",
+        status: "completed",
+        updatedAt: input.createdAt,
+      })
+      .returning();
+
+    if (message === undefined) {
+      throw new Error("Task card message was not created.");
+    }
+
+    await db
+      .update(conversationGoals)
+      .set({ cardMessageId: message.id, updatedAt: input.createdAt })
+      .where(eq(conversationGoals.id, input.goal.id));
+
+    return { created: true, message };
+  }
+
+  const existingCards = messageCardsFromRow(existingMessage);
+  const baseCards = existingCards.some((card) =>
+    card.type === "goal.created" && card.goalId === input.goal.id
+  )
+    ? existingCards
+    : [goalCreatedCard(input.goal), ...existingCards];
+  const cards = appendOrReplaceTaskCard(baseCards, input.taskCard);
+  const [message] = await db
+    .update(conversationMessages)
+    .set({
+      cards,
+      content: cardFallbackContent(cards),
+      updatedAt: input.createdAt,
+    })
+    .where(eq(conversationMessages.id, existingMessage.id))
+    .returning();
+
+  if (message === undefined) {
+    throw new Error("Task card message was not updated.");
+  }
+
+  return { created: false, message };
 }
 
 function getAssistantMessageContent(event: RunEvent): string | undefined {
@@ -2023,29 +2206,68 @@ export async function appendRunEventToConversationMessage(
         return result();
       }
 
-      const [goal] = await db
-        .insert(conversationGoals)
-        .values({
-          id: randomUUID(),
-          ownerUserId: context.run.ownerUserId,
+      const goalId = randomUUID();
+      let goalMessage: ConversationMessageRow | undefined;
+      const [goal] = await db.transaction(async (tx) => {
+        const message = await createGoalCardMessage(tx as unknown as Db, {
           conversationId: context.conversation.id,
-          orchestratorAgentId: context.run.agentId,
-          initialRunId: event.runId,
-          title: input.title,
-          description: input.description,
-          status: "active",
           createdAt,
-          updatedAt: createdAt,
-        })
-        .returning();
+          goal: {
+            description: input.description ?? null,
+            id: goalId,
+            initialRunId: event.runId,
+            orchestratorAgentId: context.run.agentId,
+            title: input.title,
+          },
+        });
+        goalMessage = message;
 
-      if (goal === undefined) {
+        const insertedGoals = await tx
+          .insert(conversationGoals)
+          .values({
+            id: goalId,
+            cardMessageId: message.id,
+            ownerUserId: context.run.ownerUserId,
+            conversationId: context.conversation.id,
+            orchestratorAgentId: context.run.agentId,
+            initialRunId: event.runId,
+            title: input.title,
+            description: input.description,
+            status: "active",
+            createdAt,
+            updatedAt: createdAt,
+          })
+          .returning();
+
+        await tx
+          .update(conversations)
+          .set({ lastMessageAt: createdAt, updatedAt: createdAt })
+          .where(eq(conversations.id, context.conversation.id));
+
+        return insertedGoals;
+      });
+
+      if (goal === undefined || goalMessage === undefined) {
         return result();
       }
 
       realtimeEvents.push(
         createRealtimeEvent({
           conversationId: context.conversation.id,
+          message: toConversationMessage(goalMessage),
+          ownerUserId: context.run.ownerUserId,
+          type: "conversation.message.created" as const,
+        }),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          ownerUserId: context.run.ownerUserId,
+          type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: context.conversation.id,
+          goal: toConversationGoal(goal, [], {
+            publicWebBaseUrl: options.publicWebBaseUrl,
+          }),
           ownerUserId: context.run.ownerUserId,
           taskId: goal.id,
           type: "task.updated",
@@ -2233,6 +2455,14 @@ export async function appendRunEventToConversationMessage(
       const assigneeRunId = isSelfAssigned
         ? event.runId
         : job?.run.id;
+      const taskCard = taskAssignedCard({
+        assigneeAgentId,
+        description: input.description,
+        goalId: goal.id,
+        runId: assigneeRunId,
+        taskIndex,
+        title: input.title,
+      }) as Extract<ConversationMessageCard, { type: "task.assigned" }>;
       const queuedEvent: RunEvent | null = job === null
         ? null
         : {
@@ -2268,20 +2498,20 @@ export async function appendRunEventToConversationMessage(
         }),
       };
 
-      await db.transaction(async (tx) => {
-        const [message] = shouldDispatch
-          ? await tx.insert(conversationMessages).values({
-              conversationId: conversation.id,
-              senderType: "agent",
-              senderAgentId: run.agentId,
-              runId: event.runId,
-              content: dispatchContent,
-              status: "completed",
-              createdAt,
-              updatedAt: createdAt,
-            }).returning()
-          : [undefined];
+      let cardMessageResult: {
+        created: boolean;
+        message: ConversationMessageRow;
+      } | undefined;
 
+      await db.transaction(async (tx) => {
+        cardMessageResult = shouldDispatch
+          ? await appendTaskAssignedCardToGoalMessage(tx as unknown as Db, {
+              conversationId: conversation.id,
+              createdAt,
+              goal,
+              taskCard,
+            })
+          : undefined;
         const [createdTask] = await tx
           .insert(conversationGoalTasks)
           .values({
@@ -2290,7 +2520,7 @@ export async function appendRunEventToConversationMessage(
             index: taskIndex,
             assigneeAgentId,
             assigneeRunId,
-            dispatchMessageId: message?.id,
+            dispatchMessageId: cardMessageResult?.message.id,
             dependsOnTaskIndexes: input.dependsOnTaskIndexes ?? [],
             title: input.title,
             description: input.description,
@@ -2337,20 +2567,22 @@ export async function appendRunEventToConversationMessage(
         await tx
           .update(conversations)
           .set({
-            ...(message === undefined ? {} : { lastMessageAt: createdAt }),
+            ...(cardMessageResult === undefined ? {} : { lastMessageAt: createdAt }),
             updatedAt: createdAt,
           })
           .where(eq(conversations.id, conversation.id));
 
         realtimeEvents.push(
-          ...(message === undefined
+          ...(cardMessageResult === undefined
             ? []
             : [
                 createRealtimeEvent({
                   conversationId: conversation.id,
-                  message: toConversationMessage(message),
+                  message: toConversationMessage(cardMessageResult.message),
                   ownerUserId: run.ownerUserId,
-                  type: "conversation.message.created" as const,
+                  type: cardMessageResult.created
+                    ? "conversation.message.created" as const
+                    : "conversation.message.updated" as const,
                 }),
               ]),
           createRealtimeEvent({
@@ -2546,20 +2778,26 @@ export async function appendRunEventToConversationMessage(
         daemonDeviceId: job.daemonDeviceId,
         createdAt: event.createdAt,
       };
-      let createdMessage: ConversationMessage | undefined;
+      const taskCard = taskAssignedCard({
+        assigneeAgentId: task.assigneeAgentId,
+        description: task.description,
+        goalId: goal.id,
+        runId: job.run.id,
+        taskIndex: task.index,
+        title: task.title,
+      }) as Extract<ConversationMessageCard, { type: "task.assigned" }>;
+      let cardMessageResult: {
+        created: boolean;
+        message: ConversationMessageRow;
+      } | undefined;
 
       await db.transaction(async (tx) => {
-        const [message] = await tx.insert(conversationMessages).values({
+        cardMessageResult = await appendTaskAssignedCardToGoalMessage(tx as unknown as Db, {
           conversationId: context.conversation.id,
-          senderType: "agent",
-          senderAgentId: context.run.agentId,
-          runId: event.runId,
-          content: dispatchContent,
-          status: "completed",
           createdAt: updatedAt,
-          updatedAt,
-        }).returning();
-        createdMessage = toConversationMessage(message);
+          goal,
+          taskCard,
+        });
 
         await tx.insert(runs).values({
           id: job.run.id,
@@ -2591,7 +2829,7 @@ export async function appendRunEventToConversationMessage(
           .update(conversationGoalTasks)
           .set({
             assigneeRunId: job.run.id,
-            dispatchMessageId: message.id,
+            dispatchMessageId: cardMessageResult.message.id,
             status: "assigned",
             blockedReason: null,
             updatedAt,
@@ -2606,14 +2844,16 @@ export async function appendRunEventToConversationMessage(
 
       dispatchJobs.push(job);
       realtimeEvents.push(
-        ...(createdMessage === undefined
+        ...(cardMessageResult === undefined
           ? []
           : [
               createRealtimeEvent({
                 conversationId: context.conversation.id,
-                message: createdMessage,
+                message: toConversationMessage(cardMessageResult.message),
                 ownerUserId: context.run.ownerUserId,
-                type: "conversation.message.created" as const,
+                type: cardMessageResult.created
+                  ? "conversation.message.created" as const
+                  : "conversation.message.updated" as const,
               }),
             ]),
         createRealtimeEvent({

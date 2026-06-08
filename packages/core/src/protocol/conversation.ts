@@ -112,10 +112,28 @@ export interface ConversationMessage {
   content: string;
   status: ConversationMessageStatus;
   error?: string;
+  cards?: ConversationMessageCard[];
   attachments?: ConversationMessageAttachment[];
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
+
+export type ConversationMessageCard =
+  | {
+      type: "goal.created";
+      goalId: ConversationGoalId;
+      title: string;
+      preview?: string;
+    }
+  | {
+      type: "task.assigned";
+      assigneeAgentId: AgentId;
+      goalId: ConversationGoalId;
+      preview?: string;
+      runId?: RunId;
+      taskIndex: number;
+      title: string;
+    };
 
 export interface ConversationArtifact {
   id: ConversationArtifactId;
@@ -265,6 +283,7 @@ export interface ConversationGoal {
   conversationId: ConversationId;
   orchestratorAgentId: AgentId;
   initialRunId: RunId;
+  cardMessageId?: ConversationMessageId;
   title: string;
   description?: string;
   status: ConversationGoalStatus;

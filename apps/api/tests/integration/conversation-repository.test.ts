@@ -766,9 +766,29 @@ describeDb("conversation repository integration", () => {
       status: "assigned",
     });
     expect(task?.assigneeRunId).toBe(result.dispatchJobs[0]?.run.id);
-    expect(messages?.map((message) => message.content)).toContain(
-      `@dudu 已创建任务：\nGoal: [Agent report](/chat/${group.conversation.id}/goals/${goalId})\n[Task #0 Write the report](/chat/${group.conversation.id}/goals/${goalId}/tasks/0)`,
+    expect(goals?.[0]?.cardMessageId).toBeDefined();
+    const cardMessage = messages?.find(
+      (message) => message.id === goals?.[0]?.cardMessageId,
     );
+    expect(cardMessage?.cards).toEqual([
+      {
+        type: "goal.created",
+        goalId,
+        title: "Agent report",
+        preview: "make a report",
+      },
+      {
+        type: "task.assigned",
+        assigneeAgentId,
+        goalId,
+        preview: "Summarize the result.",
+        runId: result.dispatchJobs[0]?.run.id,
+        taskIndex: 0,
+        title: "Write the report",
+      },
+    ]);
+    expect(cardMessage?.content).toContain("Goal created: Agent report");
+    expect(cardMessage?.content).toContain("Task assigned: #0 Write the report");
   });
 
   it("preempts an active assigned task run without interrupting the handed off task", async () => {

@@ -1394,6 +1394,9 @@ export function WorkspacePage({
           upsertMessage(event.message)
           notifyRealtimeMessage(event.message)
           break
+        case 'conversation.message.updated':
+          upsertMessage(event.message)
+          break
         case 'run.updated':
           upsertRun(event)
           break
@@ -1421,6 +1424,7 @@ export function WorkspacePage({
     const eventTypes: RealtimeEvent['type'][] = [
       'conversation.updated',
       'conversation.message.created',
+      'conversation.message.updated',
       'run.updated',
       'run.event.created',
       'task.updated',

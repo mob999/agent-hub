@@ -22,6 +22,7 @@ const testEnv: ApiEnv = {
   GITHUB_CLIENT_SECRET: "github-client-secret",
   GITHUB_OAUTH_CALLBACK_URL: "http://localhost:3000/auth/github/callback",
   AGENTHUB_DEFAULT_WORKSPACE_PATH: "/tmp/agent-hub",
+  AGENTHUB_STORAGE_DRIVER: "local",
   AGENTHUB_STORAGE_ROOT: "/tmp/agent-hub/storage",
   AGENTHUB_PUBLIC_API_URL: "http://localhost:3000",
   AGENTHUB_PUBLIC_WEB_URL: "http://localhost:5173",

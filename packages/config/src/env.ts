@@ -19,6 +19,45 @@ const databasePoolMaxSchema = z.coerce.number().int().min(1).max(20).default(3);
 
 const sessionTtlDaysSchema = z.coerce.number().int().positive().default(30);
 
+const storageDriverSchema = z.enum(["local", "s3"]).default("local");
+
+const optionalNonEmptyStringSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .optional();
+
+type S3Env = {
+  AGENTHUB_S3_ACCESS_KEY_ID?: string;
+  AGENTHUB_S3_BUCKET?: string;
+  AGENTHUB_S3_ENDPOINT?: string;
+  AGENTHUB_S3_REGION?: string;
+  AGENTHUB_S3_SECRET_ACCESS_KEY?: string;
+  AGENTHUB_STORAGE_DRIVER: "local" | "s3";
+};
+
+function requireS3ConfigWhenEnabled(value: S3Env, ctx: z.RefinementCtx): void {
+  if (value.AGENTHUB_STORAGE_DRIVER !== "s3") {
+    return;
+  }
+
+  for (const key of [
+    "AGENTHUB_S3_ENDPOINT",
+    "AGENTHUB_S3_REGION",
+    "AGENTHUB_S3_ACCESS_KEY_ID",
+    "AGENTHUB_S3_SECRET_ACCESS_KEY",
+    "AGENTHUB_S3_BUCKET",
+  ] as const) {
+    if (value[key] === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${key} is required when AGENTHUB_STORAGE_DRIVER=s3.`,
+        path: [key],
+      });
+    }
+  }
+}
+
 function normalizeWorkspaceRoot(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     return defaultAgentHubWorkspaceRoot;
@@ -97,7 +136,14 @@ export const apiEnvSchema = z.object({
     .url()
     .default("http://localhost:3000/auth/github/callback"),
   AGENTHUB_DEFAULT_WORKSPACE_PATH: workspaceRootSchema,
+  AGENTHUB_STORAGE_DRIVER: storageDriverSchema,
   AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
+  AGENTHUB_S3_ENDPOINT: z.string().url().optional(),
+  AGENTHUB_S3_REGION: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_ACCESS_KEY_ID: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_BUCKET: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_PUBLIC_BASE_URL: z.string().url().optional(),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
   AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD: z.coerce
@@ -105,7 +151,7 @@ export const apiEnvSchema = z.object({
     .int()
     .positive()
     .default(60000),
-});
+}).superRefine(requireS3ConfigWhenEnabled);
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 
@@ -122,10 +168,17 @@ export const workerEnvSchema = z.object({
   AGENTHUB_DAEMON_TOKEN: z.string().min(1),
   AGENTHUB_DAEMON_TOKEN_SECRET: z.string().min(1).optional(),
   AGENTHUB_WORKER_CONSUMER_NAME: z.string().min(1).default("worker-local"),
+  AGENTHUB_STORAGE_DRIVER: storageDriverSchema,
   AGENTHUB_STORAGE_ROOT: z.preprocess(normalizeStorageRoot, z.string().min(1)),
+  AGENTHUB_S3_ENDPOINT: z.string().url().optional(),
+  AGENTHUB_S3_REGION: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_ACCESS_KEY_ID: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_BUCKET: optionalNonEmptyStringSchema,
+  AGENTHUB_S3_PUBLIC_BASE_URL: z.string().url().optional(),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
-});
+}).superRefine(requireS3ConfigWhenEnabled);
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 

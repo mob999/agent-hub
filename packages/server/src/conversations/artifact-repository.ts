@@ -1252,14 +1252,55 @@ export async function getConversationDeploymentFileForUser(
     }
   | null
 > {
+  return getConversationDeploymentFile(db, input);
+}
+
+export async function getPublicConversationDeploymentFile(
+  db: Db,
+  input: {
+    deploymentId: string;
+    requestedPath?: string;
+    storageRoot: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<
+  | {
+      content: Buffer;
+      deployment: ConversationDeployment;
+      filename: string;
+    }
+  | null
+> {
+  return getConversationDeploymentFile(db, input);
+}
+
+async function getConversationDeploymentFile(
+  db: Db,
+  input: {
+    deploymentId: string;
+    ownerUserId?: string;
+    requestedPath?: string;
+    storageRoot: string;
+    publicApiBaseUrl?: string;
+  },
+): Promise<
+  | {
+      content: Buffer;
+      deployment: ConversationDeployment;
+      filename: string;
+    }
+  | null
+> {
   const [row] = await db
     .select()
     .from(conversationDeployments)
     .where(
-      and(
-        eq(conversationDeployments.id, input.deploymentId),
-        eq(conversationDeployments.ownerUserId, input.ownerUserId),
-      ),
+      input.ownerUserId === undefined
+        ? eq(conversationDeployments.id, input.deploymentId)
+        : and(
+            eq(conversationDeployments.id, input.deploymentId),
+            eq(conversationDeployments.ownerUserId, input.ownerUserId),
+          ),
     )
     .limit(1);
 
@@ -1268,10 +1309,16 @@ export async function getConversationDeploymentFileForUser(
   }
 
   const requestedPath = input.requestedPath?.trim();
-  const filePath =
-    requestedPath === undefined || requestedPath.length === 0
-      ? row.entrypoint
-      : normalizeDeploymentFilePath(requestedPath);
+  let filePath: string;
+  try {
+    filePath =
+      requestedPath === undefined || requestedPath.length === 0
+        ? row.entrypoint
+        : normalizeDeploymentFilePath(requestedPath);
+  } catch {
+    return null;
+  }
+
   const content = await readArtifactContent({
     storageKey: conversationDeploymentFileStorageKey({
       storagePrefix: row.storagePrefix,

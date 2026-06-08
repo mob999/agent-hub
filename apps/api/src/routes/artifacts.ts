@@ -295,20 +295,7 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
   });
   
   openApiRoute(app, "get", "/deployments/:deploymentId", async (c) => {
-    const user = c.get("user");
     const deploymentId = c.req.param("deploymentId");
-  
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: "UNAUTHORIZED",
-            message: "Authentication required.",
-          },
-        },
-        401,
-      );
-    }
   
     const redirectUrl = new URL(c.req.url);
     redirectUrl.pathname = `/deployments/${deploymentId}/`;
@@ -316,24 +303,10 @@ export function createArtifactsRoutes(context: ApiRouteContext): OpenAPIHono<App
   });
   
   openApiRoute(app, "get", "/deployments/:deploymentId/*", async (c) => {
-    const user = c.get("user");
     const deploymentId = c.req.param("deploymentId");
-  
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: "UNAUTHORIZED",
-            message: "Authentication required.",
-          },
-        },
-        401,
-      );
-    }
   
     return deploymentResponse({
       deploymentId,
-      ownerUserId: user.id,
       requestedPath: getDeploymentRequestedPath({
         deploymentId,
         requestUrl: c.req.url,

@@ -25,7 +25,7 @@ import {
   buildConversationRunPrompt,
   conversationArtifactStorageKey,
   createRealtimeEvent,
-  getConversationDeploymentFileForUser,
+  getPublicConversationDeploymentFile,
   listActiveAgentGroupContexts,
   listConversationMessagesForUser,
   prepareProjectRunJobForConversation,
@@ -1262,12 +1262,10 @@ export function createApiServices(context: ApiContext) {
   
   async function deploymentResponse(input: {
     deploymentId: string;
-    ownerUserId: string;
     requestedPath?: string;
   }) {
-    const record = await getConversationDeploymentFileForUser(db, {
+    const record = await getPublicConversationDeploymentFile(db, {
       deploymentId: input.deploymentId,
-      ownerUserId: input.ownerUserId,
       publicApiBaseUrl: env.AGENTHUB_PUBLIC_API_URL,
       requestedPath: input.requestedPath,
       storageRoot: env.AGENTHUB_STORAGE_ROOT,

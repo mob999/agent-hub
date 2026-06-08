@@ -1,0 +1,12 @@
+{
+  "extends": "@docusaurus/tsconfig",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "docusaurus.config.ts",
+    "sidebars.ts",
+    "src/**/*"
+  ]
+}

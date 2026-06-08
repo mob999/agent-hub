@@ -39,6 +39,7 @@ const resources = {
         wait: 'Wait',
       },
       publicHeader: {
+        docs: 'Docs',
         signIn: 'Sign In',
         switchLanguage: 'Switch language',
       },
@@ -517,6 +518,7 @@ const resources = {
         wait: '稍等',
       },
       publicHeader: {
+        docs: '文档',
         signIn: '登录',
         switchLanguage: '切换语言',
       },

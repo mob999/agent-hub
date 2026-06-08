@@ -53,6 +53,18 @@ textarea {
   }
 }
 
+@keyframes agenthub-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .centered-modal-actions .cds--modal-footer .cds--btn {
   align-items: center;
   justify-content: center;

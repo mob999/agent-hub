@@ -1509,7 +1509,11 @@ export function ChannelWorkspace({
           </div>
         ) : showWorkspacePage && showTasks ? (
           <div
-            className="grid h-full min-h-0 min-w-0 w-full grid-rows-[auto_minmax(0,1fr)] gap-4"
+            className={`grid min-w-0 w-full gap-4 ${
+              taskAggregationMode === 'status'
+                ? 'h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]'
+                : 'content-start'
+            }`}
           >
             <div
               className="inline-flex h-8 w-fit items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
@@ -1536,7 +1540,13 @@ export function ChannelWorkspace({
                 )
               })}
             </div>
-            <div className="h-full min-h-0 min-w-0 overflow-hidden">
+            <div
+              className={
+                taskAggregationMode === 'status'
+                  ? 'h-full min-h-0 min-w-0 overflow-hidden'
+                  : 'min-w-0'
+              }
+            >
               {goals.length === 0 ? (
                 <div className="grid h-full min-h-[22rem] place-items-center content-center gap-2 text-center text-[var(--cds-text-primary)]">
                   <Task size={32} />

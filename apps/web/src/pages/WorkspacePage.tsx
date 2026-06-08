@@ -191,6 +191,44 @@ function getMessageSenderName(message: ConversationMessage, agents: AgentDetails
   return message.senderType === 'system' ? 'AgentHub' : 'Agent'
 }
 
+function getMessageSenderAvatar(
+  message: ConversationMessage,
+  agents: AgentDetails[],
+  userAvatar: string | null | undefined,
+): string | null {
+  if (message.senderType === 'user') {
+    return userAvatar ?? null
+  }
+
+  if (message.senderAgentId !== undefined) {
+    const agent = agents.find((item) => item.agent.id === message.senderAgentId)
+
+    return agent?.agent.avatar ?? null
+  }
+
+  return null
+}
+
+function getRealtimeToastSenderInitials(senderName: string): string {
+  const trimmedName = senderName.trim()
+
+  if (trimmedName.length === 0) {
+    return 'A'
+  }
+
+  const words = trimmedName.split(/\s+/).filter((word) => word.length > 0)
+
+  if (words.length >= 2) {
+    return words
+      .slice(0, 2)
+      .map((word) => Array.from(word)[0])
+      .join('')
+      .toUpperCase()
+  }
+
+  return Array.from(trimmedName).slice(0, 2).join('').toUpperCase()
+}
+
 function readCurrentSearchRouteState() {
   return getSearchRouteState(`${window.location.pathname}${window.location.search}`)
 }
@@ -1235,11 +1273,15 @@ export function WorkspacePage({
       const conversation = conversationsRef.current.find(
         (item) => item.id === message.conversationId,
       )
+      const senderName = getMessageSenderName(message, agentsSnapshot)
       const toast: RealtimeToast = {
         id: message.id,
         conversationId: message.conversationId,
         title: getConversationToastTitle(conversation, agentsSnapshot),
-        senderName: getMessageSenderName(message, agentsSnapshot),
+        senderName,
+        senderAvatar: getMessageSenderAvatar(message, agentsSnapshot, user?.avatar),
+        senderInitials: getRealtimeToastSenderInitials(senderName),
+        senderKind: message.senderType,
         preview: compactMessagePreview(message.content),
         expiresAt: Date.now() + realtimeToastDurationMs,
       }

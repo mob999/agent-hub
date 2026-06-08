@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tavro CI Troubleshooting"
+  short_description: "Diagnose Tavro CI failures"
+  default_prompt: "Use $tavro-ci-troubleshooting to inspect and fix a Tavro GitHub Actions failure."

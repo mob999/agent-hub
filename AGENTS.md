@@ -229,6 +229,18 @@ pnpm infra:up
 pnpm dev
 ```
 
+## 项目内 Skills
+
+仓库内的 `skills/` 目录沉淀 Tavro 项目专用工作流，用于帮助后续 Agent 更快进入正确开发和部署模式。当前包含：
+
+- `tavro-development-workflow`：普通功能开发、重构、API/Repository/测试工作。
+- `tavro-frontend-experience`：Web UI、消息流、加载态、toast、任务页等体验打磨。
+- `tavro-production-deployment`：Vercel、Railway、Supabase、GitHub OAuth 和生产推广流程。
+- `tavro-ci-troubleshooting`：GitHub Actions、lint、typecheck、test 和 workflow 失败排障。
+- `tavro-daemon-release`：daemon npm 发版、`npx` 命令、MCP relay 和 daemon 连接排障。
+
+这些 skill 是 `AGENTS.md` 的补充，不替代本文件中的架构边界和代码约定。
+
 ## 测试约定
 
 项目统一使用 Vitest。根目录提供以下测试命令：

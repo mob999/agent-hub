@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tavro Frontend Experience"
+  short_description: "Polish Tavro web product UX"
+  default_prompt: "Use $tavro-frontend-experience to refine Tavro web UI and interaction states."

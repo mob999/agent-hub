@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tavro Production Deployment"
+  short_description: "Deploy Tavro production stack"
+  default_prompt: "Use $tavro-production-deployment to plan or troubleshoot Tavro production deployment."

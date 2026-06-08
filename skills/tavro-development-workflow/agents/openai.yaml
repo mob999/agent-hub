@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tavro Development Workflow"
+  short_description: "Develop Tavro features safely"
+  default_prompt: "Use $tavro-development-workflow to implement a Tavro feature with the project workflow."

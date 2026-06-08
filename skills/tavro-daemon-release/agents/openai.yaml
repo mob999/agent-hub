@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tavro Daemon Release"
+  short_description: "Publish and debug Tavro daemon"
+  default_prompt: "Use $tavro-daemon-release to publish or debug the Tavro daemon package."

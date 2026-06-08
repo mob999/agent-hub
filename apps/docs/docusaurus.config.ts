@@ -5,6 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic'
 const config: Config = {
   title: 'Tavro Docs',
   tagline: 'Build with a local-first multi-agent workspace.',
+  favicon: 'favicon.svg',
   url: 'https://tavro-docs.vercel.app',
   baseUrl: '/',
   organizationName: 'mob999',

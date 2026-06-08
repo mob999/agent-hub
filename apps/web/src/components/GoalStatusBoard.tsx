@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import type { ConversationGoal, ConversationGoalTaskStatus } from '../lib/api'
 import type { ReactNode } from 'react'
 
-export const taskStatusOrder = [
+const taskStatusOrder = [
   'waiting',
   'ready',
   'assigned',
@@ -20,7 +20,7 @@ export interface GoalTaskEntry {
   task: GoalTask
 }
 
-export function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
+function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
   column: string
   dot: string
   count: string

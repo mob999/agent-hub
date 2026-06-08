@@ -7,6 +7,7 @@ import {
 } from '@carbon/react'
 import {
   ArrowLeft,
+  ArrowRight,
   ChatBot,
   CheckmarkFilled,
   CircleDash,
@@ -22,11 +23,13 @@ import {
   apiRequest,
   type AgentDetails,
   type Conversation,
+  type ConversationGoal,
   type DaemonDevice,
   type DaemonRegistrationCommandResponse,
   type RuntimeKind,
   type WelcomeSummary,
 } from '../lib/api'
+import { GoalStatusBoard, type GoalTask } from '../components/GoalStatusBoard'
 import { formatMessageTime } from '../lib/format'
 import { getProjectIcon } from '../lib/projectIcon'
 
@@ -48,7 +51,7 @@ interface WelcomePageProps {
 }
 
 const dashboardPanelClass =
-  'grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#dde3ea] bg-white/[0.94] shadow-[0_24px_70px_rgba(15,23,42,0.11),0_8px_24px_rgba(15,23,42,0.06),0_1px_0_rgba(255,255,255,0.92)_inset] backdrop-blur transition-[box-shadow,border-color,background-color] duration-200 ease-out hover:border-[#c8d2de] hover:bg-white hover:shadow-[0_28px_82px_rgba(15,23,42,0.14),0_10px_28px_rgba(15,23,42,0.075),0_1px_0_rgba(255,255,255,0.96)_inset]'
+  'grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-[#dde3ea] bg-white/[0.94] shadow-[0_24px_70px_rgba(15,23,42,0.11),0_8px_24px_rgba(15,23,42,0.06),0_1px_0_rgba(255,255,255,0.92)_inset] backdrop-blur transition-[box-shadow,border-color,background-color] duration-200 ease-out hover:border-[#c8d2de] hover:bg-white hover:shadow-[0_28px_82px_rgba(15,23,42,0.14),0_10px_28px_rgba(15,23,42,0.075),0_1px_0_rgba(255,255,255,0.96)_inset]'
 const dashboardRowClass =
   'grid w-full cursor-pointer border-0 border-b border-[#eef1f5] bg-transparent text-left transition-[background-color,transform] duration-150 last:border-b-0 hover:-translate-y-px hover:bg-[#f5f7fb] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]'
 const subtleButton =
@@ -95,8 +98,22 @@ const roundedFieldStyles = `
     will-change: left, transform, opacity;
   }
 
+  .welcome-dashboard-deck {
+    height: clamp(31rem, calc(100vh - 13rem), 43rem);
+    min-height: 31rem;
+  }
+
+  .welcome-dashboard-card {
+    transition:
+      opacity 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform, opacity;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .welcome-onboarding-card {
+    .welcome-onboarding-card,
+    .welcome-dashboard-card {
       transition: none;
     }
   }
@@ -105,6 +122,11 @@ const roundedFieldStyles = `
     .welcome-card-deck {
       height: auto;
       min-height: 0;
+    }
+
+    .welcome-dashboard-deck {
+      height: clamp(30rem, calc(100vh - 12rem), 40rem);
+      min-height: 30rem;
     }
 
     .welcome-onboarding-card {
@@ -216,22 +238,6 @@ function formatDashboardDate(locale: string): string {
     month: 'long',
     weekday: 'long',
   }).format(date)
-}
-
-function goalStatusTagType(status: string): 'blue' | 'green' | 'red' | 'warm-gray' {
-  if (status === 'completed') {
-    return 'green'
-  }
-
-  if (status === 'failed') {
-    return 'red'
-  }
-
-  if (status === 'cancelled') {
-    return 'warm-gray'
-  }
-
-  return 'blue'
 }
 
 function ConversationAvatar({
@@ -506,6 +512,7 @@ export function WelcomePage({
   const [forceOnboardingTutorial, setForceOnboardingTutorial] = useState(false)
   const [freshOnboardingPreview, setFreshOnboardingPreview] = useState(false)
   const [activeOnboardingStep, setActiveOnboardingStep] = useState<OnboardingStepId>('daemon')
+  const [activeDashboardCard, setActiveDashboardCard] = useState<'conversations' | 'goals'>('conversations')
 
   const devMode = import.meta.env.DEV
   const onboardingDevices = useMemo(
@@ -569,24 +576,25 @@ export function WelcomePage({
   const dashboardDate = formatDashboardDate(i18n.resolvedLanguage ?? i18n.language)
   const dashboardConversations = summary?.dashboard.conversations ?? []
   const dashboardGoals = summary?.dashboard.goals ?? []
-  const dashboardGoalTaskSummary = (taskCounts: WelcomeSummary['dashboard']['goals'][number]['taskCounts']): string => {
-    const entries = Object.entries(taskCounts)
-      .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
-    const total = entries.reduce((sum, [, count]) => sum + count, 0)
-
-    if (total === 0) {
-      return t('welcome.noGoalTasks')
-    }
-
-    const statusSummary = entries
-      .slice(0, 3)
-      .map(([status, count]) => `${t(`status.task.${status}`, { defaultValue: status })} ${count}`)
-
-    return [
-      t('welcome.goalTaskSummary', { count: total }),
-      ...statusSummary,
-    ].join(' · ')
-  }
+  const dashboardRecentGoals = dashboardGoals.map(({ goal }) => goal)
+  const renderDashboardTaskCard = (goal: ConversationGoal, task: GoalTask) => (
+    <button
+      key={`${goal.id}:${task.id}`}
+      className="grid cursor-pointer gap-2 rounded-lg border border-[#e0e0e0] bg-white p-3 text-left text-sm text-[var(--cds-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-[box-shadow,transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-[#c6c6c6] hover:shadow-[0_6px_16px_rgba(0,0,0,0.10)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+      type="button"
+      onClick={() => onOpenGoal(goal.conversationId, goal.id, task.index)}
+    >
+      <span className="w-fit rounded-md border border-[#e5e5e5] bg-[#fafafa] px-2 py-1 text-xs font-semibold text-[var(--cds-text-secondary)]">
+        Goal: {goal.id.slice(0, 8)} #{task.index}
+      </span>
+      <h4 className="min-w-0 overflow-hidden text-sm font-semibold leading-5 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+        {task.title}
+      </h4>
+      <p className="truncate text-xs leading-4 text-[var(--cds-text-secondary)]">
+        {goal.title}
+      </p>
+    </button>
+  )
 
   const completeOnboarding = useCallback(async (conversationId: string | null) => {
     setCompleteLoading(true)
@@ -744,6 +752,13 @@ export function WelcomePage({
   }
 
   if (showDashboard) {
+    const conversationsActive = activeDashboardCard === 'conversations'
+    const goalsActive = activeDashboardCard === 'goals'
+    const dashboardCardBase =
+      `${dashboardPanelClass} welcome-dashboard-card absolute top-0 h-full w-[88%] max-[671px]:w-[92%]`
+    const dashboardArrowButton =
+      'grid h-11 max-h-11 min-h-11 w-11 min-w-11 max-w-11 shrink-0 cursor-pointer place-items-center rounded-xl border-0 bg-transparent p-0 text-[#344054] transition hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] [&>svg]:block [&>svg]:h-5 [&>svg]:w-5'
+
     return (
       <section
         className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-y-auto max-[671px]:p-4"
@@ -803,8 +818,21 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="grid min-h-0 grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 max-[960px]:grid-cols-1 max-[960px]:overflow-visible">
-            <section className={dashboardPanelClass} aria-label={t('welcome.recentConversations')}>
+          <div className="welcome-dashboard-deck relative min-h-0 overflow-hidden">
+            <style>{roundedFieldStyles}</style>
+            <section
+              className={`${dashboardCardBase} left-0 ${conversationsActive ? 'pointer-events-auto' : 'pointer-events-none'}`}
+              aria-label={t('welcome.recentConversations')}
+              aria-hidden={!conversationsActive}
+              inert={!conversationsActive}
+              style={{
+                opacity: conversationsActive ? 1 : 0.88,
+                transform: conversationsActive
+                  ? 'translateX(0) translateY(0) scale(1)'
+                  : 'translateX(-82%) translateY(1.15rem) scale(0.94)',
+                zIndex: conversationsActive ? 30 : 20,
+              }}
+            >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestMessage')}</p>
@@ -858,9 +886,31 @@ export function WelcomePage({
                   ))}
                 </div>
               )}
+              <footer className="flex min-h-16 shrink-0 items-center justify-end border-t border-[#e8edf3] px-4 py-3">
+                <button
+                  className={dashboardArrowButton}
+                  type="button"
+                  aria-label={t('welcome.next')}
+                  onClick={() => setActiveDashboardCard('goals')}
+                >
+                  <ArrowRight size={20} />
+                </button>
+              </footer>
             </section>
 
-            <section className={dashboardPanelClass} aria-label={t('welcome.recentGoals')}>
+            <section
+              className={`${dashboardCardBase} right-0 ${goalsActive ? 'pointer-events-auto' : 'pointer-events-none'}`}
+              aria-label={t('welcome.recentGoals')}
+              aria-hidden={!goalsActive}
+              inert={!goalsActive}
+              style={{
+                opacity: goalsActive ? 1 : 0.88,
+                transform: goalsActive
+                  ? 'translateX(0) translateY(0) scale(1)'
+                  : 'translateX(82%) translateY(1.15rem) scale(0.94)',
+                zIndex: goalsActive ? 30 : 20,
+              }}
+            >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestGoal')}</p>
@@ -882,36 +932,25 @@ export function WelcomePage({
                   </div>
                 </div>
               ) : (
-                <div className="min-h-0 overflow-y-auto">
-                  {dashboardGoals.map(({ conversation, goal, taskCounts }, index) => (
-                    <button
-                      key={goal.id}
-                      type="button"
-                      className={`${dashboardRowClass} gap-2 px-4 py-3.5 ${index === 0 ? 'bg-[#f8fbff]' : ''}`}
-                      onClick={() => onOpenGoal(conversation.id, goal.id)}
-                    >
-                      <span className="flex min-w-0 items-start justify-between gap-3">
-                        <span className="grid min-w-0 gap-1">
-                          {index === 0 && (
-                            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#69707d]">
-                              {t('welcome.latestGoal')}
-                            </span>
-                          )}
-                          <strong className="line-clamp-2 text-base leading-6 text-[#161616]">{goal.title}</strong>
-                        </span>
-                        <Tag className="shrink-0" size="sm" type={goalStatusTagType(goal.status)}>
-                          {t(`status.task.${goal.status}`, { defaultValue: goal.status })}
-                        </Tag>
-                      </span>
-                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-[#69707d]">
-                        <span className="font-semibold text-[#596171]">{conversationLabel(conversation)}</span>
-                        <span className="h-1 w-1 rounded-full bg-[#c7d0dc]" aria-hidden="true" />
-                        <span>{dashboardGoalTaskSummary(taskCounts)}</span>
-                      </span>
-                    </button>
-                  ))}
+                <div className="min-h-0 overflow-hidden px-4 py-4">
+                  <GoalStatusBoard
+                    emptyLabel={t('chat.noTasks')}
+                    goals={dashboardRecentGoals}
+                    renderTask={({ goal, task }) => renderDashboardTaskCard(goal, task)}
+                    statusLabel={(status) => t(`status.task.${status}`, { defaultValue: status })}
+                  />
                 </div>
               )}
+              <footer className="flex min-h-16 shrink-0 items-center justify-start border-t border-[#e8edf3] px-4 py-3">
+                <button
+                  className={dashboardArrowButton}
+                  type="button"
+                  aria-label={t('welcome.back')}
+                  onClick={() => setActiveDashboardCard('conversations')}
+                >
+                  <ArrowLeft size={20} />
+                </button>
+              </footer>
             </section>
           </div>
         </div>

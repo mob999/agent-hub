@@ -9,26 +9,14 @@ import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
 import { getProjectIcon } from '../lib/projectIcon'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
+import { GoalStatusBoard, type GoalTask } from './GoalStatusBoard'
 import { MessageContent } from './MessageContent'
 import { ProjectWorkspace } from './ProjectWorkspace'
 
 const inlineLink =
   'cursor-pointer border-0 bg-transparent p-0 font-semibold text-[var(--cds-link-primary)] underline-offset-2 hover:text-[var(--cds-link-primary-hover)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
 const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leading-5'
-const taskStatusOrder = [
-  'waiting',
-  'ready',
-  'assigned',
-  'running',
-  'succeeded',
-  'failed',
-  'cancelled',
-  'interrupted',
-  'blocked',
-] as const satisfies readonly ConversationGoalTaskStatus[]
-
 type TaskAggregationMode = 'goal' | 'status'
-type GoalTask = ConversationGoal['tasks'][number]
 type StatusIconState = ConversationGoal['status'] | ConversationGoalTaskStatus
 
 export type MessageSendState =
@@ -94,54 +82,6 @@ function isAgentReady(agent: AgentDetails): boolean {
 
 function displayNameInitial(name: string): string {
   return Array.from(name.trim())[0]?.toUpperCase() ?? '?'
-}
-
-function taskStatusBoardStyle(status: ConversationGoalTaskStatus): {
-  column: string
-  dot: string
-  count: string
-} {
-  switch (status) {
-    case 'ready':
-      return {
-        column: 'border-[#d8e6ff] bg-[#f3f7ff]',
-        dot: 'border-[#0f62fe] bg-[#0f62fe]',
-        count: 'bg-[#d8e6ff] text-[#0f3f9c]',
-      }
-    case 'running':
-      return {
-        column: 'border-[#f0dfb4] bg-[#fffaf0]',
-        dot: 'border-[#d89400] bg-[#d89400]',
-        count: 'bg-[#f9e8b8] text-[#6f5200]',
-      }
-    case 'succeeded':
-      return {
-        column: 'border-[#d7eadc] bg-[#f2faf5]',
-        dot: 'border-[#24a148] bg-[#24a148]',
-        count: 'bg-[#d7eadc] text-[#0e6027]',
-      }
-    case 'failed':
-      return {
-        column: 'border-[#f4d4d4] bg-[#fff5f5]',
-        dot: 'border-[#da1e28] bg-[#da1e28]',
-        count: 'bg-[#f4d4d4] text-[#8a1118]',
-      }
-    case 'blocked':
-      return {
-        column: 'border-[#efd6e4] bg-[#fff6fb]',
-        dot: 'border-[#d02670] bg-[#d02670]',
-        count: 'bg-[#efd6e4] text-[#7f1743]',
-      }
-    case 'waiting':
-    case 'assigned':
-    case 'cancelled':
-    case 'interrupted':
-      return {
-        column: 'border-[#e5e5e5] bg-[#f8f8f8]',
-        dot: 'border-[#8d8d8d] bg-white',
-        count: 'bg-[#e8e8e8] text-[#525252]',
-      }
-  }
 }
 
 function goalStatusPanelStyle(status: ConversationGoal['status']): {
@@ -395,17 +335,6 @@ export function ChannelWorkspace({
       ),
     [flattenedGoalTasks],
   )
-  const goalTasksByStatus = useMemo(() => {
-    const grouped = new Map<ConversationGoalTaskStatus, Array<{ goal: ConversationGoal; task: GoalTask }>>(
-      taskStatusOrder.map((status) => [status, []]),
-    )
-
-    flattenedGoalTasks.forEach((item) => {
-      grouped.get(item.task.status)?.push(item)
-    })
-
-    return grouped
-  }, [flattenedGoalTasks])
   const focusedTaskKey =
     focusedGoalRoute?.taskIndex === null || focusedGoalRoute === null
       ? null
@@ -1225,42 +1154,12 @@ export function ChannelWorkspace({
   )
 
   const renderStatusBoardView = () => (
-    <div className="h-full min-h-0 min-w-0 overflow-x-scroll overflow-y-hidden pb-3">
-      <div className="flex h-full min-h-0 w-max min-w-full gap-4 pr-2">
-        {taskStatusOrder.map((status) => {
-          const statusTasks = goalTasksByStatus.get(status) ?? []
-          const style = taskStatusBoardStyle(status)
-
-          return (
-            <section
-              key={status}
-              className={`grid min-h-0 w-[15.3rem] shrink-0 grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-2xl border p-4 ${style.column}`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--cds-text-primary)]">
-                  <span className={`h-3 w-3 shrink-0 rounded-full border-2 ${style.dot}`} aria-hidden="true" />
-                  <span className="truncate capitalize">{status}</span>
-                </h3>
-                <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${style.count}`}>
-                  {statusTasks.length}
-                </span>
-              </div>
-              {statusTasks.length === 0 ? (
-                <div className="grid min-h-0 place-items-center rounded-xl text-sm text-[var(--cds-text-placeholder)]">
-                  {t('chat.noTasks')}
-                </div>
-              ) : (
-                <div className="grid min-h-0 content-start gap-3 overflow-y-auto overscroll-contain pr-1">
-                  {statusTasks.map(({ goal, task }) =>
-                    renderGoalTaskCard(goal, task, { compact: true, showGoal: true }),
-                  )}
-                </div>
-              )}
-            </section>
-          )
-        })}
-      </div>
-    </div>
+    <GoalStatusBoard
+      emptyLabel={t('chat.noTasks')}
+      goals={goals}
+      renderTask={({ goal, task }) => renderGoalTaskCard(goal, task, { compact: true, showGoal: true })}
+      statusLabel={(status) => t(`status.task.${status}`, { defaultValue: status })}
+    />
   )
 
   const renderDeploymentListView = () => (

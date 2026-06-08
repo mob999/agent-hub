@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, session, shell } from "electron";
 import path from "node:path";
 import pkg from "../package.json";
+import { DesktopDaemonManager } from "./daemon-manager";
 
 const desktopProtocol = "tavro";
 const productionWebUrl = "https://tavro-ai.vercel.app";
@@ -12,6 +13,7 @@ const githubOrigin = "https://github.com";
 
 let mainWindow: BrowserWindow | null = null;
 let pendingDesktopAuthApiOrigin: string | null = null;
+let daemonManager: DesktopDaemonManager | null = null;
 
 function normalizeUrl(value: string): string {
   return new URL(value).toString();
@@ -33,6 +35,9 @@ function allowedNavigationOrigins(webUrl: string): Set<string> {
     new URL(productionApiOrigin).origin,
     localApiOrigin,
     localApiOriginByIp,
+    ...(process.env.TAVRO_DESKTOP_API_ORIGIN
+      ? [new URL(process.env.TAVRO_DESKTOP_API_ORIGIN).origin]
+      : []),
     githubOrigin,
   ]);
 }
@@ -42,6 +47,9 @@ function allowedApiOrigins(): Set<string> {
     new URL(productionApiOrigin).origin,
     new URL(localApiOrigin).origin,
     new URL(localApiOriginByIp).origin,
+    ...(process.env.TAVRO_DESKTOP_API_ORIGIN
+      ? [new URL(process.env.TAVRO_DESKTOP_API_ORIGIN).origin]
+      : []),
   ]);
 }
 
@@ -63,6 +71,10 @@ function resolveAppIconPath(): string {
 }
 
 function resolveFallbackApiOrigin(): string {
+  if (process.env.TAVRO_DESKTOP_API_ORIGIN) {
+    return new URL(process.env.TAVRO_DESKTOP_API_ORIGIN).origin;
+  }
+
   return app.isPackaged ? productionApiOrigin : localApiOrigin;
 }
 
@@ -204,6 +216,15 @@ function registerAuthIpc(): void {
   });
 }
 
+function registerDaemonIpc(): void {
+  ipcMain.handle("tavro:daemon:get-status", async () => {
+    await daemonManager?.startAutoStartIfEnabled();
+    return daemonManager?.getStatus();
+  });
+  ipcMain.handle("tavro:daemon:start", async () => daemonManager?.start());
+  ipcMain.handle("tavro:daemon:restart", async () => daemonManager?.restart());
+}
+
 function createMainWindow(): BrowserWindow {
   const webUrl = resolveWebUrl();
   const origins = allowedNavigationOrigins(webUrl);
@@ -251,6 +272,7 @@ app.setName("Tavro AI");
 Menu.setApplicationMenu(null);
 registerDesktopProtocol();
 registerAuthIpc();
+registerDaemonIpc();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -270,6 +292,11 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    daemonManager = new DesktopDaemonManager({
+      getApiOrigin: resolveFallbackApiOrigin,
+      getMainWindow: () => mainWindow,
+      getSession: () => session.defaultSession,
+    });
     createMainWindow();
     const callbackUrl = findDesktopCallbackUrl(process.argv);
     if (callbackUrl) {
@@ -290,5 +317,18 @@ if (!gotSingleInstanceLock) {
     if (process.platform !== "darwin") {
       app.quit();
     }
+  });
+
+  app.on("before-quit", (event) => {
+    if (!daemonManager) {
+      return;
+    }
+
+    event.preventDefault();
+    const manager = daemonManager;
+    daemonManager = null;
+    void manager.stopForQuit().finally(() => {
+      app.quit();
+    });
   });
 }

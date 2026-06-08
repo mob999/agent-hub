@@ -1,6 +1,6 @@
 import { InlineNotification, Modal, TextInput } from '@carbon/react'
 import { Add, Checkmark, Copy, Devices, Renew, TrashCan } from '@carbon/react/icons'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -16,6 +16,7 @@ interface DaemonPageProps {
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
+const desktopDaemonSelectionId = '__desktop_daemon__'
 
 function detectDaemonCommandPlatform(): 'windows' | 'posix' {
   if (typeof navigator === 'undefined') {
@@ -27,6 +28,7 @@ function detectDaemonCommandPlatform(): 'windows' | 'posix' {
 
 export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPageProps) {
   const { t } = useTranslation()
+  const desktopDaemon = window.tavroDesktop?.daemon
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
   const [registrationMode, setRegistrationMode] = useState<'create' | 'reconnect'>('create')
@@ -44,8 +46,12 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [desktopDaemonStatus, setDesktopDaemonStatus] =
+    useState<TavroDesktopDaemonStatus | null>(null)
+  const [desktopDaemonBusy, setDesktopDaemonBusy] = useState(false)
+  const selectedDesktopDaemon = desktopDaemon !== undefined && selectedDeviceId === desktopDaemonSelectionId
   const selectedDevice =
-    devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
+    selectedDesktopDaemon ? null : devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
   const registeredDevice = registrationCommand
     ? devices.find((device) => device.id === registrationCommand.deviceId)
     : null
@@ -54,6 +60,30 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     selectedDevice && deviceNameDraft.deviceId === selectedDevice.id
       ? deviceNameDraft.value
       : selectedDevice?.name ?? ''
+
+  useEffect(() => {
+    if (!desktopDaemon) {
+      return undefined
+    }
+
+    let mounted = true
+    void desktopDaemon.getStatus().then((status) => {
+      if (mounted) {
+        setDesktopDaemonStatus(status)
+      }
+    })
+    const unsubscribe = desktopDaemon.onStatusChange((status) => {
+      setDesktopDaemonStatus(status)
+      if (devices.length === 0) {
+        setSelectedDeviceId((current) => current ?? desktopDaemonSelectionId)
+      }
+    })
+
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [desktopDaemon, devices.length])
 
   const loadRegistrationCommand = async (input: {
     deviceId?: string
@@ -99,6 +129,42 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     setRegistrationCommand(null)
     setRegistrationError(null)
     setCommandCopied(false)
+  }
+
+  const startDesktopDaemon = async () => {
+    if (!desktopDaemon || desktopDaemonBusy) {
+      return
+    }
+
+    setDesktopDaemonBusy(true)
+    try {
+      const status = await desktopDaemon.start()
+      setDesktopDaemonStatus(status)
+      if (status.deviceId) {
+        setSelectedDeviceId(status.deviceId)
+      }
+      onDevicesChanged()
+    } finally {
+      setDesktopDaemonBusy(false)
+    }
+  }
+
+  const restartDesktopDaemon = async () => {
+    if (!desktopDaemon || desktopDaemonBusy) {
+      return
+    }
+
+    setDesktopDaemonBusy(true)
+    try {
+      const status = await desktopDaemon.restart()
+      setDesktopDaemonStatus(status)
+      if (status.deviceId) {
+        setSelectedDeviceId(status.deviceId)
+      }
+      onDevicesChanged()
+    } finally {
+      setDesktopDaemonBusy(false)
+    }
   }
 
   const openReconnectModal = () => {
@@ -211,16 +277,55 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label={t('daemon.add')}
-            onClick={openRegistrationModal}
+            onClick={() => {
+              if (desktopDaemon) {
+                void startDesktopDaemon()
+                return
+              }
+
+              openRegistrationModal()
+            }}
           >
             <Add size={16} />
           </button>
         </header>
 
-        {devices.length === 0 ? (
-          <p className="p-4 text-[#69707d]">{t('daemon.empty')}</p>
-        ) : (
+        {desktopDaemon || devices.length > 0 ? (
           <div className="grid gap-1 p-3">
+            {desktopDaemon && (
+              <button
+                className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                  selectedDesktopDaemon
+                    ? 'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+                    : 'bg-transparent text-[#596171] hover:bg-[#eef0f4] hover:text-[#161616]'
+                }`}
+                type="button"
+                onClick={() => {
+                  setSelectedDeviceId(desktopDaemonSelectionId)
+                  setDeviceSaveError(null)
+                  setDeleteError(null)
+                  setDeleteConfirming(false)
+                  setDeleteLoading(false)
+                }}
+              >
+                <span
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
+                  aria-hidden="true"
+                >
+                  <Devices size={18} />
+                </span>
+                <span className="grid min-w-0 gap-0.5">
+                  <strong className="truncate">{t('daemon.desktopManagedShort')}</strong>
+                  <small className="truncate font-normal text-[#69707d]">
+                    {desktopDaemonStatusMeta(desktopDaemonStatus?.state ?? 'idle', t).label}
+                  </small>
+                </span>
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${desktopDaemonStatusMeta(desktopDaemonStatus?.state ?? 'idle', t).dot}`}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
             {devices.map((device) => (
               <button
                 className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
@@ -254,6 +359,8 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
               </button>
             ))}
           </div>
+        ) : (
+          <p className="p-4 text-[#69707d]">{t('daemon.empty')}</p>
         )}
       </aside>
 
@@ -267,7 +374,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
               >
                 <Devices size={18} />
               </span>
-              <strong className="truncate">{selectedDevice?.name ?? t('daemon.noSelected')}</strong>
+              <strong className="truncate">{selectedDesktopDaemon ? t('daemon.desktopManaged') : selectedDevice?.name ?? t('daemon.noSelected')}</strong>
             </div>
           </header>
 
@@ -282,7 +389,20 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             />
           )}
 
-          {selectedDevice ? (
+          {selectedDesktopDaemon && desktopDaemon && (
+            <DesktopDaemonCard
+              busy={desktopDaemonBusy}
+              status={desktopDaemonStatus}
+              onRestart={() => {
+                void restartDesktopDaemon()
+              }}
+              onStart={() => {
+                void startDesktopDaemon()
+              }}
+            />
+          )}
+
+          {selectedDesktopDaemon ? null : selectedDevice ? (
             <>
               <section
                 className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 p-6 max-[671px]:p-4"
@@ -551,6 +671,116 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
   )
 }
 
+interface DesktopDaemonCardProps {
+  busy: boolean
+  onRestart: () => void
+  onStart: () => void
+  status: TavroDesktopDaemonStatus | null
+}
+
+function DesktopDaemonCard({
+  busy,
+  onRestart,
+  onStart,
+  status,
+}: DesktopDaemonCardProps) {
+  const { t } = useTranslation()
+  const meta = desktopDaemonStatusMeta(status?.state ?? 'idle', t)
+  const isRunning = status?.state === 'running'
+  const isMissingRuntime = status?.state === 'missing_runtime'
+  const logs = status?.logs.slice(-5) ?? []
+
+  return (
+    <section className="border-t border-[#eef0f3] bg-[#fbfcfd] p-6 max-[671px]:p-4" aria-label={t('daemon.desktopManaged')}>
+      <div className="grid gap-4 rounded-2xl border border-[#dde1e6] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="grid min-w-0 gap-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} aria-hidden="true" />
+              <h2 className="truncate text-base font-semibold text-[#161616]">{t('daemon.desktopManaged')}</h2>
+            </div>
+            <p className="text-sm leading-5 text-[#596171]">{t('daemon.desktopManagedSubtitle')}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-[#d8dee6] bg-white px-3 text-sm font-semibold text-[#394150] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] disabled:cursor-wait disabled:opacity-60"
+              disabled={busy || isRunning}
+              onClick={onStart}
+            >
+              {busy && !isRunning ? t('common.wait') : t('daemon.startManaged')}
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#d8dee6] bg-white text-[#596171] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] hover:text-[#161616] disabled:cursor-wait disabled:opacity-60"
+              title={t('daemon.restartManaged')}
+              aria-label={t('daemon.restartManaged')}
+              disabled={busy}
+              onClick={onRestart}
+            >
+              <Renew size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-2 text-sm text-[#596171]">
+          <p>
+            <strong className="text-[#161616]">{t('daemon.status')}:</strong> {meta.label}
+          </p>
+          <p>
+            <strong className="text-[#161616]">{t('daemon.package')}:</strong>{' '}
+            {status?.packageName ?? '@tavro-ai/daemon@latest'}
+          </p>
+          <p className="break-all">
+            <strong className="text-[#161616]">{t('daemon.workspaceRoot')}:</strong>{' '}
+            {status?.workspaceRoot ?? t('common.loading')}
+          </p>
+          {status?.deviceId && (
+            <p className="break-all">
+              <strong className="text-[#161616]">{t('daemon.deviceId')}:</strong> {status.deviceId}
+            </p>
+          )}
+        </div>
+
+        {isMissingRuntime && (
+          <div className="grid gap-2">
+            <InlineNotification
+              kind="warning"
+              title={t('daemon.nodeMissingTitle')}
+              subtitle={t('daemon.nodeMissingSubtitle')}
+              lowContrast
+              hideCloseButton
+            />
+            <a className="text-sm font-semibold text-[#0f62fe] underline underline-offset-4" href={status?.nodeInstallUrl ?? 'https://nodejs.org/'} rel="noreferrer" target="_blank">
+              https://nodejs.org/
+            </a>
+          </div>
+        )}
+
+        {status?.error && !isMissingRuntime && (
+          <InlineNotification
+            kind="error"
+            title={t('daemon.desktopManagedError')}
+            subtitle={status.error}
+            lowContrast
+            hideCloseButton
+          />
+        )}
+
+        {logs.length > 0 && (
+          <details className="rounded-xl border border-[#eef0f3] bg-[#f7f8fa] p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-[#394150]">{t('daemon.recentLogs')}</summary>
+            <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-xs leading-5 text-[#596171]">
+              {logs.join('\n')}
+            </pre>
+          </details>
+        )}
+
+      </div>
+    </section>
+  )
+}
+
 const openAiIconPath =
   'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z'
 
@@ -641,6 +871,44 @@ function runtimeDisplayName(runtimeKind: RuntimeKind): string {
   }
 
   return 'Custom runtime'
+}
+
+function desktopDaemonStatusMeta(status: TavroDesktopDaemonState, t: Translate): {
+  dot: string
+  label: string
+} {
+  if (status === 'running') {
+    return {
+      dot: 'bg-[var(--cds-support-success)]',
+      label: t('daemon.managedRunning'),
+    }
+  }
+
+  if (status === 'starting' || status === 'checking') {
+    return {
+      dot: 'bg-[#f1c21b]',
+      label: t('daemon.managedStarting'),
+    }
+  }
+
+  if (status === 'missing_runtime') {
+    return {
+      dot: 'bg-[#ff832b]',
+      label: t('daemon.managedMissingRuntime'),
+    }
+  }
+
+  if (status === 'error') {
+    return {
+      dot: 'bg-[var(--cds-support-error)]',
+      label: t('daemon.managedError'),
+    }
+  }
+
+  return {
+    dot: 'bg-[#8d8d8d]',
+    label: t('daemon.managedStopped'),
+  }
 }
 
 function runtimeStatusMeta(status: DaemonRuntime['status'], t: Translate): {

@@ -100,6 +100,7 @@ export function createDaemonRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
     parseDaemonCommandPlatform,
     normalizeDaemonDeviceName,
     daemonDeviceCommandResponse,
+    daemonDeviceConnectResponse,
     buildDaemonCommand,
     daemonDeviceIdPattern,
   } = context.services;
@@ -405,6 +406,77 @@ export function createDaemonRoutes(context: ApiRouteContext): OpenAPIHono<AppBin
       gatewayUrl,
       shell,
     });
+  });
+
+  app.use("/daemon/desktop/bootstrap", requireAuth);
+  openApiRoute(app, "post", "/daemon/desktop/bootstrap", async (c) => {
+    const user = c.get("user");
+
+    if (!user) {
+      return c.json(
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Authentication required.",
+          },
+        },
+        401,
+      );
+    }
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      deviceId?: unknown;
+      name?: unknown;
+      platform?: unknown;
+    };
+    const requestedDeviceId =
+      typeof body.deviceId === "string" ? body.deviceId.trim() : undefined;
+
+    if (
+      requestedDeviceId !== undefined &&
+      !daemonDeviceIdPattern.test(requestedDeviceId)
+    ) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_DAEMON_DEVICE_ID",
+            message: "Device id contains unsupported characters.",
+          },
+        },
+        400,
+      );
+    }
+
+    const name = normalizeDaemonDeviceName(body.name ?? "Tavro Desktop");
+
+    if (name === null) {
+      return c.json(
+        {
+          error: {
+            code: "INVALID_DAEMON_DEVICE_NAME",
+            message: "Device name must be 1-80 characters.",
+          },
+        },
+        400,
+      );
+    }
+
+    const platform = parseDaemonCommandPlatform(
+      typeof body.platform === "string" ? body.platform : undefined,
+    );
+    const shell = platform === "windows" ? "powershell" : "sh";
+    const deviceId = requestedDeviceId ?? `desktop-${randomUUID().slice(0, 8)}`;
+    const device = await getDaemonDeviceForUser(c.get("db"), {
+      deviceId,
+      ownerUserId: user.id,
+    }) ?? await createDaemonDeviceForUser(c.get("db"), {
+      id: deviceId,
+      name,
+      ownerUserId: user.id,
+      registrationShell: shell,
+    });
+
+    return c.json(daemonDeviceConnectResponse({ device }));
   });
 
   return app;

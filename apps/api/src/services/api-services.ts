@@ -215,6 +215,37 @@ export function createApiServices(context: ApiContext) {
       shell: input.platform === "windows" ? "powershell" : "sh",
     };
   }
+
+  function daemonDeviceConnectResponse(input: {
+    device: {
+      id: string;
+      name: string;
+      ownerUserId: string | null;
+      registrationShell: string | null;
+      status: string;
+      lastSeenAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+    };
+  }) {
+    return {
+      device: {
+        id: input.device.id,
+        ownerUserId: input.device.ownerUserId ?? undefined,
+        name: input.device.name,
+        status: input.device.status,
+        registrationShell: input.device.registrationShell ?? undefined,
+        lastSeenAt: input.device.lastSeenAt?.toISOString() ?? null,
+        createdAt: input.device.createdAt.toISOString(),
+        updatedAt: input.device.updatedAt.toISOString(),
+        deletedAt: input.device.deletedAt?.toISOString(),
+      },
+      deviceId: input.device.id,
+      gatewayUrl: env.AGENTHUB_DAEMON_GATEWAY_URL,
+      token: daemonTokenForDevice(input.device.id),
+    };
+  }
   
   function isMissingFileError(error: unknown): boolean {
     return typeof error === "object" &&
@@ -1296,6 +1327,7 @@ export function createApiServices(context: ApiContext) {
     parseDaemonCommandPlatform,
     normalizeDaemonDeviceName,
     daemonDeviceCommandResponse,
+    daemonDeviceConnectResponse,
     isMissingFileError,
     deliverRealtimeEvent,
     publishRealtimeEvents,

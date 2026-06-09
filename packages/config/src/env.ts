@@ -21,11 +21,20 @@ const sessionTtlDaysSchema = z.coerce.number().int().positive().default(30);
 
 const storageDriverSchema = z.enum(["local", "s3"]).default("local");
 
-const optionalNonEmptyStringSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .optional();
+const optionalNonEmptyStringSchema = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim().length === 0
+      ? undefined
+      : value,
+  z.string().trim().min(1).optional(),
+);
+
+type GitHubOAuthEnv = {
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_OAUTH_CALLBACK_URL: string;
+  NODE_ENV: "development" | "test" | "production";
+};
 
 type S3Env = {
   AGENTHUB_S3_ACCESS_KEY_ID?: string;
@@ -52,6 +61,28 @@ function requireS3ConfigWhenEnabled(value: S3Env, ctx: z.RefinementCtx): void {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `${key} is required when AGENTHUB_STORAGE_DRIVER=s3.`,
+        path: [key],
+      });
+    }
+  }
+}
+
+function requireGitHubOAuthConfigInProduction(
+  value: GitHubOAuthEnv,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.NODE_ENV !== "production") {
+    return;
+  }
+
+  for (const key of [
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+  ] as const) {
+    if (value[key] === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${key} is required in production.`,
         path: [key],
       });
     }
@@ -129,8 +160,8 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DAEMON_GATEWAY_URL: z.string().url().default("http://localhost:3001"),
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
-  GITHUB_CLIENT_ID: z.string().min(1),
-  GITHUB_CLIENT_SECRET: z.string().min(1),
+  GITHUB_CLIENT_ID: optionalNonEmptyStringSchema,
+  GITHUB_CLIENT_SECRET: optionalNonEmptyStringSchema,
   GITHUB_OAUTH_CALLBACK_URL: z
     .string()
     .url()
@@ -151,7 +182,9 @@ export const apiEnvSchema = z.object({
     .int()
     .positive()
     .default(60000),
-}).superRefine(requireS3ConfigWhenEnabled);
+})
+  .superRefine(requireS3ConfigWhenEnabled)
+  .superRefine(requireGitHubOAuthConfigInProduction);
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 

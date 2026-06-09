@@ -1,6 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import { loadDaemonEnv } from "../../src/env";
+import { loadApiEnv, loadDaemonEnv } from "../../src/env";
+
+const baseApiEnv = {
+  DATABASE_URL: "postgres://agent_hub:agent_hub@localhost:5432/agent_hub",
+  REDIS_URL: "redis://localhost:6379",
+  AGENTHUB_DAEMON_TOKEN: "daemon-token",
+  AGENTHUB_DEFAULT_WORKSPACE_PATH: "/tmp/agent-hub",
+  AGENTHUB_STORAGE_ROOT: "/tmp/agent-hub/storage",
+};
+
+describe("loadApiEnv", () => {
+  it("allows GitHub OAuth config to be omitted outside production", () => {
+    const env = loadApiEnv({
+      ...baseApiEnv,
+      NODE_ENV: "development",
+      GITHUB_CLIENT_ID: "",
+      GITHUB_CLIENT_SECRET: "",
+    });
+
+    expect(env.GITHUB_CLIENT_ID).toBeUndefined();
+    expect(env.GITHUB_CLIENT_SECRET).toBeUndefined();
+    expect(env.GITHUB_OAUTH_CALLBACK_URL).toBe(
+      "http://localhost:3000/auth/github/callback",
+    );
+  });
+
+  it("requires GitHub OAuth config in production", () => {
+    expect(() =>
+      loadApiEnv({
+        ...baseApiEnv,
+        NODE_ENV: "production",
+      }),
+    ).toThrow(/GITHUB_CLIENT_ID is required in production/);
+  });
+});
 
 describe("loadDaemonEnv", () => {
   it("accepts CLAUDE_CODE_EXECUTABLE_PATH", () => {

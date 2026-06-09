@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useIsMobile } from '../lib/useIsMobile'
 import { AgentCreateModal } from '../components/AgentCreateModal'
 import { AgentEditModal } from '../components/AgentEditModal'
 import { AppRail } from '../components/AppRail'
@@ -281,6 +282,7 @@ export function WorkspacePage({
   navigate,
 }: WorkspacePageProps) {
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
   const queryClient = useQueryClient()
   const authQuery = useQuery({
     queryFn: fetchAuthMe,
@@ -323,6 +325,7 @@ export function WorkspacePage({
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null)
   const [isCreatingProject, setIsCreatingProject] = useState(false)
   const [projectModalOpen, setProjectModalOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [defaultAgentDaemonId, setDefaultAgentDaemonId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
@@ -343,7 +346,10 @@ export function WorkspacePage({
   const [isCreatingRun, setIsCreatingRun] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [savedOpen, setSavedOpen] = useState(false)
-  const [tutorialRequestId, setTutorialRequestId] = useState(0)
+  // Track whether the tutorial was explicitly requested via the "?" button.
+  // Reset by WelcomePage once consumed so that switching views doesn't
+  // re-trigger the tutorial on remount.
+  const [forceTutorial, setForceTutorial] = useState(false)
   const [searchQuery, setSearchQuery] = useState(initialSearchRouteState.query)
   const [searchSelectedChannelId, setSearchSelectedChannelId] = useState<string | undefined>(initialSearchRouteState.channelId)
   const [searchSelectedSender, setSearchSelectedSender] = useState<string | undefined>(initialSearchRouteState.sender)
@@ -1276,7 +1282,7 @@ export function WorkspacePage({
 
   const openOnboardingTutorial = useCallback(() => {
     refreshWelcomeData()
-    setTutorialRequestId((requestId) => requestId + 1)
+    setForceTutorial(true)
     navigate('/welcome')
   }, [navigate, refreshWelcomeData])
 
@@ -2365,41 +2371,91 @@ export function WorkspacePage({
       />
       {activeView === 'chat' ? (
         <>
-          <ChatSidebar
-            conversations={conversations}
-            archivedAgents={archivedAgents}
-            archivedConversations={archivedConversations}
-            activeRunCount={activeRunCount}
-            agents={agents}
-            activeConversationId={activeConversationId}
-            isCatalogLoading={!agentsLoaded || !conversationsLoaded}
-            unreadCounts={unreadByConversationId}
-            savedOpen={savedOpen}
-            onOpenSearch={openSearch}
-            onCreateAgent={() => openCreateAgent()}
-            onCreateGroup={openCreateGroup}
-            onCreateProject={openCreateProject}
-            onOpenActivity={() => navigateToView('runs')}
-            onDeleteAgent={(agentId) => {
-              void deleteArchivedAgent(agentId)
-            }}
-            onDeleteGroup={(conversationId) => {
-              void deleteArchivedGroup(conversationId)
-            }}
-            onRestoreAgent={(agentId) => {
-              void restoreAgent(agentId)
-            }}
-            onRestoreGroup={(conversationId) => {
-              void restoreGroup(conversationId)
-            }}
-            onToggleSaved={() => setSavedOpen((open) => !open)}
-            onPrefetchConversation={prefetchConversationMessages}
-            selectGroup={selectConversation}
-            selectProject={selectConversation}
-            selectAgent={(input) => {
-              void openAgentConversation(input)
-            }}
-          />
+          {isMobile ? (
+            sidebarOpen && (
+              <div className="fixed inset-0 z-40 flex" aria-modal="true" role="dialog">
+                <div
+                  className="absolute inset-0 bg-black/30"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-hidden="true"
+                />
+                <div className="agenthub-slide-in relative w-[80vw] max-w-xs h-full overflow-y-auto border-r border-[var(--cds-border-subtle-01)] bg-[var(--cds-layer-01)] shadow-[4px_0_24px_rgba(15,23,42,0.14)]">
+                  <ChatSidebar
+                    conversations={conversations}
+                    archivedAgents={archivedAgents}
+                    archivedConversations={archivedConversations}
+                    activeRunCount={activeRunCount}
+                    agents={agents}
+                    activeConversationId={activeConversationId}
+                    isCatalogLoading={!agentsLoaded || !conversationsLoaded}
+                    unreadCounts={unreadByConversationId}
+                    savedOpen={savedOpen}
+                    onOpenSearch={openSearch}
+                    onCreateAgent={() => { setSidebarOpen(false); openCreateAgent() }}
+                    onCreateGroup={() => { setSidebarOpen(false); openCreateGroup() }}
+                    onCreateProject={() => { setSidebarOpen(false); openCreateProject() }}
+                    onOpenActivity={() => { setSidebarOpen(false); navigateToView('runs') }}
+                    onDeleteAgent={(agentId) => {
+                      void deleteArchivedAgent(agentId)
+                    }}
+                    onDeleteGroup={(conversationId) => {
+                      void deleteArchivedGroup(conversationId)
+                    }}
+                    onRestoreAgent={(agentId) => {
+                      void restoreAgent(agentId)
+                    }}
+                    onRestoreGroup={(conversationId) => {
+                      void restoreGroup(conversationId)
+                    }}
+                    onToggleSaved={() => setSavedOpen((open) => !open)}
+                    onPrefetchConversation={prefetchConversationMessages}
+                    selectGroup={(id) => { setSidebarOpen(false); selectConversation(id) }}
+                    selectProject={(id) => { setSidebarOpen(false); selectConversation(id) }}
+                    selectAgent={(input) => {
+                      setSidebarOpen(false)
+                      void openAgentConversation(input)
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          ) : (
+            <ChatSidebar
+              conversations={conversations}
+              archivedAgents={archivedAgents}
+              archivedConversations={archivedConversations}
+              activeRunCount={activeRunCount}
+              agents={agents}
+              activeConversationId={activeConversationId}
+              isCatalogLoading={!agentsLoaded || !conversationsLoaded}
+              unreadCounts={unreadByConversationId}
+              savedOpen={savedOpen}
+              onOpenSearch={openSearch}
+              onCreateAgent={() => openCreateAgent()}
+              onCreateGroup={openCreateGroup}
+              onCreateProject={openCreateProject}
+              onOpenActivity={() => navigateToView('runs')}
+              onDeleteAgent={(agentId) => {
+                void deleteArchivedAgent(agentId)
+              }}
+              onDeleteGroup={(conversationId) => {
+                void deleteArchivedGroup(conversationId)
+              }}
+              onRestoreAgent={(agentId) => {
+                void restoreAgent(agentId)
+              }}
+              onRestoreGroup={(conversationId) => {
+                void restoreGroup(conversationId)
+              }}
+              onToggleSaved={() => setSavedOpen((open) => !open)}
+              onPrefetchConversation={prefetchConversationMessages}
+              selectGroup={selectConversation}
+              selectProject={selectConversation}
+              selectAgent={(input) => {
+                void openAgentConversation(input)
+              }}
+            />
+          )}
           <WorkspacePanel>
             {route === '/welcome' ? (
               <WelcomePage
@@ -2420,9 +2476,11 @@ export function WorkspacePage({
                 onOpenCreateProject={openCreateProject}
                 onOpenDaemon={() => navigateToView('daemon')}
                 onOpenGoal={openGoalRoute}
+                onOpenSidebar={() => setSidebarOpen(true)}
                 onRefreshData={refreshWelcomeData}
                 onWelcomeUpdated={updateWelcomeSummary}
-                tutorialRequestId={tutorialRequestId}
+                forceTutorial={forceTutorial}
+                onTutorialStarted={() => setForceTutorial(false)}
               />
             ) : isSearchRoute ? (
               <SearchWorkspace
@@ -2515,6 +2573,7 @@ export function WorkspacePage({
                     void loadDeployments(activeConversation.id)
                   }
                 }}
+                onOpenSidebar={() => setSidebarOpen(true)}
               />
             )}
           </WorkspacePanel>

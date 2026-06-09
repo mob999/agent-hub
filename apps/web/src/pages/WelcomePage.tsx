@@ -14,11 +14,13 @@ import {
   Copy,
   Devices,
   Folder,
+  Menu,
   Task,
 } from '@carbon/react/icons'
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useIsMobile } from '../lib/useIsMobile'
 import {
   apiRequest,
   type AgentDetails,
@@ -45,9 +47,11 @@ interface WelcomePageProps {
   onOpenCreateProject: () => void
   onOpenDaemon: () => void
   onOpenGoal: (conversationId: string, goalId: string, taskIndex?: number | null) => void
+  onOpenSidebar?: () => void
   onRefreshData: () => void
   onWelcomeUpdated: (summary: WelcomeSummary) => void
-  tutorialRequestId: number
+  forceTutorial: boolean
+  onTutorialStarted: () => void
 }
 
 const dashboardPanelClass =
@@ -497,11 +501,14 @@ export function WelcomePage({
   onOpenCreateProject,
   onOpenDaemon,
   onOpenGoal,
+  onOpenSidebar,
   onRefreshData,
   onWelcomeUpdated,
-  tutorialRequestId,
+  forceTutorial,
+  onTutorialStarted,
 }: WelcomePageProps) {
   const { i18n, t } = useTranslation()
+  const isMobileCheck = useIsMobile()
   const [deviceName, setDeviceName] = useState('My computer')
   const [daemonCommand, setDaemonCommand] = useState<DaemonRegistrationCommandResponse | null>(null)
   const [daemonError, setDaemonError] = useState<string | null>(null)
@@ -515,6 +522,7 @@ export function WelcomePage({
   const [activeDashboardCard, setActiveDashboardCard] = useState<'conversations' | 'goals'>('conversations')
 
   const devMode = import.meta.env.DEV
+  const isCapacitor = !!window.Capacitor?.isNativePlatform
 
   const onboardingDevices = useMemo(
     () =>
@@ -565,7 +573,7 @@ export function WelcomePage({
         ? agentStepComplete
         : workspaceStepComplete
   const activeOnboardingStepComplete = isOnboardingStepComplete(activeOnboardingStep)
-  const canAdvanceOnboarding = devMode || activeOnboardingStepComplete
+  const canAdvanceOnboarding = devMode || isCapacitor || activeOnboardingStepComplete
   const previousOnboardingStep =
     activeOnboardingStepIndex > 0
       ? onboardingSteps[activeOnboardingStepIndex - 1]!
@@ -632,7 +640,7 @@ export function WelcomePage({
       return
     }
 
-    if (devMode) {
+    if (devMode || isCapacitor) {
       setActiveOnboardingStep('daemon')
     }
   }
@@ -661,11 +669,14 @@ export function WelcomePage({
   ])
 
   useEffect(() => {
-    if (tutorialRequestId <= 0) {
+    if (!forceTutorial) {
       return
     }
 
-    const timeoutId = window.setTimeout(() => {
+    // Wrap state updates in a timeout to avoid cascading-render lint
+    // violation.  forceTutorial is a one-shot signal from the parent —
+    // the effect intentionally sets tutorial state when it fires.
+    const id = window.setTimeout(() => {
       setActiveOnboardingStep('daemon')
       setFreshOnboardingPreview(false)
       setForceOnboardingTutorial(true)
@@ -673,8 +684,12 @@ export function WelcomePage({
       onRefreshData()
     }, 0)
 
-    return () => window.clearTimeout(timeoutId)
-  }, [onRefreshData, tutorialRequestId])
+    // Reset the parent flag so switching views and coming back doesn't
+    // re-trigger the tutorial on remount.
+    onTutorialStarted()
+
+    return () => window.clearTimeout(id)
+  }, [forceTutorial, onRefreshData, onTutorialStarted])
 
   useEffect(() => {
     if (!forceOnboardingTutorial && (onboarding?.completed === true || onboarding?.readyToComplete === true)) {
@@ -772,6 +787,16 @@ export function WelcomePage({
           <header className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4 max-[760px]:grid-cols-1">
             <div className="grid max-w-3xl gap-3">
               <div className="flex flex-wrap items-center gap-2 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#6b7280]">
+                {isMobileCheck && onOpenSidebar && (
+                  <button
+                    className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#344054] hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    aria-label="Open navigation"
+                    onClick={onOpenSidebar}
+                  >
+                    <Menu size={20} />
+                  </button>
+                )}
                 <span>{dashboardDate}</span>
               </div>
               <div className="grid gap-2">
@@ -790,10 +815,10 @@ export function WelcomePage({
                 </p>
               </div>
             </div>
-            {devMode && (
+            {(devMode || isCapacitor) && (
               <div className="flex flex-wrap justify-end gap-1 self-start text-xs">
                 <button
-                  className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   type="button"
                   onClick={() => {
                     setActiveOnboardingStep('daemon')
@@ -805,7 +830,7 @@ export function WelcomePage({
                   {t('welcome.tutorial')}
                 </button>
                 <button
-                  className="inline-flex h-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
                   type="button"
                   onClick={() => {
                     setActiveOnboardingStep('daemon')
@@ -1194,10 +1219,10 @@ export function WelcomePage({
             >
               {t('welcome.back')}
             </button>
-            <span className="text-center text-sm text-[#69707d]">
+            <span className="text-center text-sm text-[#69707d] max-[671px]:hidden">
               {activeOnboardingStepComplete
                 ? t('welcome.stepComplete')
-                : devMode
+                : (devMode || isCapacitor)
                   ? t('welcome.devPreviewStep')
                   : t('welcome.completeStep')}
             </span>

@@ -1,8 +1,9 @@
 import { InlineNotification, Tag } from '@carbon/react'
-import { ChevronDown, ChevronRight, JobRun, ListBoxes, Terminal } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Close, JobRun, ListBoxes, Menu, Terminal } from '@carbon/react/icons'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DaemonDevice, LocalRun, RunEvent, RunStatus } from '../lib/api'
+import { useIsMobile } from '../lib/useIsMobile'
 import { WorkspacePanel } from '../components/WorkspacePanel'
 import {
   eventLogLine,
@@ -112,6 +113,8 @@ export function RunsPage({
   selectRun,
 }: RunsPageProps) {
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const selectedRun = runs.find((localRun) => localRun.run.id === selectedRunId) ?? runs[0] ?? null
   const [expandedPromptByRunId, setExpandedPromptByRunId] = useState<Record<string, boolean>>({})
   const [promptViewByRunId, setPromptViewByRunId] = useState<Record<string, 'structured' | 'raw'>>({})
@@ -136,8 +139,72 @@ export function RunsPage({
       className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
       aria-label={t('runs.aria')}
     >
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 z-40 flex">
+          <button
+            className="absolute inset-0 bg-black/40"
+            type="button"
+            aria-label="Close sidebar"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside className="relative z-10 h-full w-[80vw] max-w-[20rem] overflow-hidden border-r border-[var(--cds-border-subtle-01)] shadow-xl animate-[agenthub-slide-in_0.2s_ease-out]">
+            <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171]">
+              <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
+                <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">{t('runs.title')}</h1>
+                <button
+                  className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  aria-label="Close sidebar"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <Close size={16} />
+                </button>
+              </header>
+              {runs.length === 0 ? (
+                <div className="grid gap-3 p-4 text-[#69707d]">
+                  <JobRun size={24} />
+                  <p>{t('runs.noRunsSidebar')}</p>
+                </div>
+              ) : (
+                <div className="grid gap-1 p-3">
+                  {runs.map((localRun) => (
+                    <button
+                      className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                        selectedRun?.run.id === localRun.run.id
+                          ? 'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+                          : 'bg-transparent text-[#596171] hover:bg-[#eef0f4] hover:text-[#161616]'
+                      }`}
+                      key={localRun.run.id}
+                      type="button"
+                      onClick={() => {
+                        selectRun(localRun.run.id)
+                        setSidebarOpen(false)
+                      }}
+                    >
+                      <span
+                        className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
+                        aria-hidden="true"
+                      >
+                        <JobRun size={18} />
+                      </span>
+                      <span className="grid min-w-0 gap-0.5">
+                        <strong className="truncate leading-6">{runDisplayTitle(localRun, t('search.agentType'))}</strong>
+                        <small className="truncate font-normal leading-5 text-[#69707d]">
+                          Run {localRun.run.id.slice(0, 8)} · {formatTime(localRun.run.createdAt)}
+                        </small>
+                      </span>
+                      <StatusDot status={localRun.run.status} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
       <aside
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:h-auto max-[671px]:max-h-72"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:hidden"
         aria-label={t('runs.listAria')}
       >
         <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
@@ -188,6 +255,16 @@ export function RunsPage({
         <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label={t('runs.detailAria')}>
           <header className="flex min-h-16 items-center gap-4 border-b border-[#eef0f3] bg-white px-6 max-[671px]:px-4">
             <div className="flex min-w-0 items-center gap-3">
+              {isMobile && (
+                <button
+                  className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  aria-label="Open run list"
+                  onClick={() => setSidebarOpen(true)}
+                >
+                  <Menu size={20} />
+                </button>
+              )}
               <span
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"

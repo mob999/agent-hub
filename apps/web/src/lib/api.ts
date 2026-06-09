@@ -1,4 +1,36 @@
-const apiBaseUrl = import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://localhost:3000'
+function resolveApiBaseUrl(): string {
+  const configured = import.meta.env.VITE_AGENTHUB_API_URL
+
+  // On Capacitor native platforms, the WebView origin is https://localhost
+  // (Capacitor's local asset server). Same-origin API calls won't work
+  // because there is no API on the Capacitor server – we must reach the
+  // actual backend. For the Android emulator the host machine is always
+  // 10.0.2.2; for iOS simulator it's localhost.
+  //
+  // Only override when VITE_AGENTHUB_API_URL is not explicitly set AND
+  // we detect Capacitor at runtime. An explicit URL always wins.
+  if (!configured) {
+    try {
+      if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform) {
+        const platform = window.Capacitor.getPlatform()
+        if (platform === 'android') {
+          return 'http://10.0.2.2:3000'
+        }
+        if (platform === 'ios') {
+          return 'http://localhost:3000'
+        }
+      }
+    } catch {
+      // Capacitor bridge not available
+    }
+  }
+
+  // Preserve original behavior: configured URL (including empty string for
+  // same-origin in web production) or fallback for local development
+  return configured ?? 'http://localhost:3000'
+}
+
+const apiBaseUrl = resolveApiBaseUrl()
 
 export function apiUrl(path: string): string {
   return `${apiBaseUrl}${path}`

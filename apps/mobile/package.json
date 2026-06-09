@@ -1,0 +1,20 @@
+{
+  "name": "@agent-hub/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tavro AI mobile app (Capacitor)",
+  "scripts": {
+    "build": "cd ../web && pnpm build",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "android": "pnpm build && pnpm cap:sync && npx cap run android",
+    "android:dev": "npx cap run android --livereload --external"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/browser": "^6.0.6",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1"
+  }
+}

@@ -8,6 +8,8 @@ import { and, eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 import {
+  buildDesktopCompleteHtml,
+  buildDesktopOAuthCallbackHtml,
   buildDesktopOAuthCallbackUrl,
   buildGitHubAuthorizeUrl,
   buildGitHubOAuthErrorRedirect,
@@ -30,9 +32,11 @@ import { ErrorResponseSchema, OkResponseSchema } from "../schemas/common.js";
 const githubOAuthProvider = "github";
 const githubOAuthStateMaxAgeSeconds = 10 * 60;
 const desktopOAuthStateTtlSeconds = 10 * 60;
-const desktopLoginCodeTtlSeconds = 60;
+const desktopLoginCodeTtlSeconds = 5 * 60; // 5 minutes — enough for mobile OAuth flow
 const desktopOAuthStateKeyPrefix = "agenthub:auth:desktop-oauth:state";
 const desktopLoginCodeKeyPrefix = "agenthub:auth:desktop-login-code";
+const developmentUserEmail = "developer@tavro.local";
+const developmentUserName = "developer";
 
 const DesktopGitHubStartRequestSchema = z.object({
   redirectPath: z.string().optional(),
@@ -58,6 +62,26 @@ type GitHubAuthUser = {
   id: string;
   name: string | null;
 };
+
+type GitHubOAuthConfig = {
+  callbackUrl: string;
+  clientId: string;
+  clientSecret: string;
+};
+
+function getGitHubOAuthConfig(
+  env: AppBindings["Variables"]["env"],
+): GitHubOAuthConfig | null {
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+    return null;
+  }
+
+  return {
+    callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+    clientId: env.GITHUB_CLIENT_ID,
+    clientSecret: env.GITHUB_CLIENT_SECRET,
+  };
+}
 
 function sessionCookieOptions(env: AppBindings["Variables"]["env"]) {
   return {
@@ -369,6 +393,41 @@ async function findOrCreateUserFromGitHub(input: {
   return { user };
 }
 
+async function findOrCreateDevelopmentUser(
+  db: AppBindings["Variables"]["db"],
+): Promise<GitHubAuthUser | null> {
+  const [existingUser] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      avatar: users.avatar,
+    })
+    .from(users)
+    .where(eq(users.email, developmentUserEmail))
+    .limit(1);
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  const [createdUser] = await db
+    .insert(users)
+    .values({
+      email: developmentUserEmail,
+      name: developmentUserName,
+      avatar: pickRandomDefaultAvatar(),
+    })
+    .returning({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      avatar: users.avatar,
+    });
+
+  return createdUser ?? null;
+}
+
 const githubStartRoute = createRoute({
   method: "get",
   path: "/github/start",
@@ -439,6 +498,41 @@ const desktopCompleteRoute = createRoute({
   responses: {
     302: {
       description: "Redirect to the web app",
+    },
+  },
+});
+
+const developmentLoginRoute = createRoute({
+  method: "post",
+  path: "/dev/login",
+  tags: ["Auth"],
+  summary: "Development login",
+  description:
+    "Create a local development session for the built-in developer user. This route is unavailable in production.",
+  responses: {
+    200: {
+      description: "Development login succeeded",
+      content: {
+        "application/json": {
+          schema: AuthUserResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: "Development login is not available",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: "Development user could not be created",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
     },
   },
 });
@@ -539,6 +633,19 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
   const logger = c.get("logger");
   const redis = c.get("redis");
   const body = c.req.valid("json");
+  const githubConfig = getGitHubOAuthConfig(env);
+  if (!githubConfig) {
+    return c.json(
+      {
+        error: {
+          code: "GITHUB_OAUTH_UNCONFIGURED",
+          message: "GitHub OAuth is not configured.",
+        },
+      },
+      503,
+    );
+  }
+
   const state = crypto.randomBytes(32).toString("base64url");
   const redirectPath = getSafeAuthRedirectPath(body.redirectPath ?? null);
   const webOrigin = getSafeWebOrigin(
@@ -564,8 +671,8 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
   return c.json(
     {
       authorizeUrl: buildGitHubAuthorizeUrl({
-        clientId: env.GITHUB_CLIENT_ID,
-        callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+        clientId: githubConfig.clientId,
+        callbackUrl: githubConfig.callbackUrl,
         state,
       }),
     },
@@ -575,12 +682,20 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
 
 authRoutes.openapi(githubStartRoute, (c) => {
   const env = c.get("env");
+  const githubConfig = getGitHubOAuthConfig(env);
   const state = crypto.randomBytes(32).toString("base64url");
   const redirectPath = getSafeAuthRedirectPath(c.req.query("redirect") ?? null);
   const webOrigin = getGitHubOAuthWebOrigin(
     c.req.query("web_origin") ?? null,
     env.AGENTHUB_PUBLIC_WEB_URL,
   );
+
+  if (!githubConfig) {
+    return c.redirect(
+      buildGitHubOAuthErrorRedirect(webOrigin, "github_oauth_unconfigured"),
+      302,
+    );
+  }
 
   setCookie(
     c,
@@ -597,8 +712,8 @@ authRoutes.openapi(githubStartRoute, (c) => {
 
   return c.redirect(
     buildGitHubAuthorizeUrl({
-      clientId: env.GITHUB_CLIENT_ID,
-      callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+      clientId: githubConfig.clientId,
+      callbackUrl: githubConfig.callbackUrl,
       state,
     }),
     302,
@@ -609,6 +724,7 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
   const db = c.get("db");
   const env = c.get("env");
   const redis = c.get("redis");
+  const githubConfig = getGitHubOAuthConfig(env);
   const code = c.req.query("code");
   const state = c.req.query("state");
   const stateCookie = parseGitHubStateCookieValue(
@@ -635,30 +751,49 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
       : null;
   const returnTarget = webReturnTarget ?? desktopReturnTarget;
   const isDesktopFlow = desktopReturnTarget !== null;
-  const errorRedirect = (error: string) =>
-    c.redirect(
-      isDesktopFlow
-        ? buildDesktopOAuthCallbackUrl({ error })
-        : buildGitHubOAuthErrorRedirect(
-            getSafeWebOrigin(returnTarget?.webOrigin ?? null, env.AGENTHUB_PUBLIC_WEB_URL),
-            error,
-          ),
+
+  const desktopCallbackResponse = (input:
+    | { code: string; error?: never }
+    | { code?: never; error: string }
+  ) => {
+    // Chrome Custom Tabs cannot follow HTTP 302 redirects to custom URL
+    // schemes (tavro://).  Return an HTML page with a "Return to Tavro"
+    // button that the user can tap — a user gesture reliably fires the
+    // Android intent for the custom scheme and opens the app.
+    const html = buildDesktopOAuthCallbackHtml(input);
+    return c.body(html, 200, { "Content-Type": "text/html; charset=utf-8" });
+  };
+
+  const errorResponse = (error: string) => {
+    if (isDesktopFlow) {
+      return desktopCallbackResponse({ error });
+    }
+    return c.redirect(
+      buildGitHubOAuthErrorRedirect(
+        getSafeWebOrigin(returnTarget?.webOrigin ?? null, env.AGENTHUB_PUBLIC_WEB_URL),
+        error,
+      ),
       302,
     );
+  };
 
   if (!code || !state || !returnTarget) {
-    return errorRedirect("github_invalid_state");
+    return errorResponse("github_invalid_state");
+  }
+
+  if (!githubConfig) {
+    return errorResponse("github_oauth_unconfigured");
   }
 
   const accessToken = await exchangeGitHubCodeForToken({
-    clientId: env.GITHUB_CLIENT_ID,
-    clientSecret: env.GITHUB_CLIENT_SECRET,
-    callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+    clientId: githubConfig.clientId,
+    clientSecret: githubConfig.clientSecret,
+    callbackUrl: githubConfig.callbackUrl,
     code,
   });
 
   if (!accessToken) {
-    return errorRedirect("github_token_exchange_failed");
+    return errorResponse("github_token_exchange_failed");
   }
 
   const [githubUser, githubEmails] = await Promise.all([
@@ -667,12 +802,12 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
   ]);
 
   if (!githubUser || !githubEmails) {
-    return errorRedirect("github_profile_unavailable");
+    return errorResponse("github_profile_unavailable");
   }
 
   const result = await findOrCreateUserFromGitHub({ db, githubEmails, githubUser });
   if (result.error) {
-    return errorRedirect(result.error);
+    return errorResponse(result.error);
   }
 
   if (isDesktopFlow) {
@@ -683,10 +818,10 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
     }).catch(() => null);
 
     if (!loginCode) {
-      return errorRedirect("desktop_auth_failed");
+      return errorResponse("desktop_auth_failed");
     }
 
-    return c.redirect(buildDesktopOAuthCallbackUrl({ code: loginCode }), 302);
+    return desktopCallbackResponse({ code: loginCode });
   }
 
   const { token } = await createSession(db, {
@@ -710,17 +845,33 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
   const env = c.get("env");
   const redis = c.get("redis");
   const code = c.req.query("code");
+  const asHtml = c.req.query("redirect") === "html";
   const fallbackWebOrigin = getSafeWebOrigin(null, env.AGENTHUB_PUBLIC_WEB_URL);
-  const redirectToLogin = (error: string, webOrigin = fallbackWebOrigin) =>
-    c.redirect(buildGitHubOAuthErrorRedirect(webOrigin, error), 302);
+
+  const ok = (targetUrl: string) => {
+    if (asHtml) {
+      const html = buildDesktopCompleteHtml(targetUrl);
+      return c.body(html, 200, { "Content-Type": "text/html; charset=utf-8" });
+    }
+    return c.redirect(targetUrl, 302);
+  };
+
+  const fail = (error: string, webOrigin = fallbackWebOrigin) => {
+    const targetUrl = buildGitHubOAuthErrorRedirect(webOrigin, error);
+    if (asHtml) {
+      const html = buildDesktopCompleteHtml(targetUrl);
+      return c.body(html, 200, { "Content-Type": "text/html; charset=utf-8" });
+    }
+    return c.redirect(targetUrl, 302);
+  };
 
   if (!code) {
-    return redirectToLogin("desktop_auth_expired");
+    return fail("desktop_auth_expired");
   }
 
   const payload = await consumeDesktopLoginCode(redis, code).catch(() => null);
   if (!payload) {
-    return redirectToLogin("desktop_auth_expired");
+    return fail("desktop_auth_expired");
   }
 
   const session = await createSession(db, {
@@ -728,7 +879,7 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
     ttlDays: env.AUTH_SESSION_TTL_DAYS,
   }).catch(() => null);
   if (!session) {
-    return redirectToLogin(
+    return fail(
       "desktop_auth_failed",
       getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL),
     );
@@ -736,13 +887,51 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
 
   setCookie(c, env.AUTH_SESSION_COOKIE, session.token, sessionCookieOptions(env));
 
-  return c.redirect(
-    new URL(
-      payload.redirectPath,
-      getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL),
-    ).toString(),
-    302,
-  );
+  const targetUrl = new URL(
+    payload.redirectPath,
+    getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL),
+  ).toString();
+
+  return ok(targetUrl);
+});
+
+authRoutes.openapi(developmentLoginRoute, async (c) => {
+  const db = c.get("db");
+  const env = c.get("env");
+
+  if (env.NODE_ENV === "production") {
+    return c.json(
+      {
+        error: {
+          code: "NOT_FOUND",
+          message: "Not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const user = await findOrCreateDevelopmentUser(db);
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "DEVELOPMENT_USER_CREATE_FAILED",
+          message: "Development user could not be created.",
+        },
+      },
+      500,
+    );
+  }
+
+  const { token } = await createSession(db, {
+    userId: user.id,
+    ttlDays: env.AUTH_SESSION_TTL_DAYS,
+  });
+
+  setCookie(c, env.AUTH_SESSION_COOKIE, token, sessionCookieOptions(env));
+
+  return c.json({ user }, 200);
 });
 
 authRoutes.openapi(logoutRoute, async (c) => {

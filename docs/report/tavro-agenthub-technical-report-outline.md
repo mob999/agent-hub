@@ -190,6 +190,16 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 
 这种设计让 Agent 获得了“长期工作台”而不是“临时进程目录”。短期上下文仍由 Run prompt 和聊天历史提供，长期经验则沉淀到 Agent 自己的 memory workspace；项目代码保留在项目仓库或 per-run worktree 中，Agent 记忆保留在 Agent workspace 中，两者边界清晰。由此，Tavro 能够支持长期协作、跨会话经验复用和安全的本地文件执行，同时避免把系统记忆误提交到用户项目里。
 
+### 3.7 Runtime 适配与能力桥接机制
+
+Tavro 需要同时接入 Claude Code、Codex 等不同 CLI runtime，而这些工具在命令参数、会话恢复、日志格式、工具调用和错误表现上并不一致。系统没有要求上层业务直接理解每个 runtime 的差异，而是在 daemon 中设计 runtime adapter 层，将不同 CLI 工具归一为统一的 Agent 执行接口。Adapter 对外暴露 runtime kind、版本、可执行路径和能力列表，对内负责命令构造、工作目录设置、进程生命周期、取消信号和输出解析。
+
+日志和事件解析是 runtime 适配的核心。Codex、Claude Code 等工具会输出 JSON line 或普通 stdout/stderr 文本，adapter 通过统一的 line decoder 读取进程输出：能够解析为 JSON 的内容会被映射为 `runtime.event`、`message.delta`、`tool.call.started`、`tool.call.completed`、`runtime.session.started` 等结构化 RunEvent；无法解析的普通文本则降级为 `log.line`。这样前端和后端只处理 AgentHub 的统一事件协议，而不依赖某个 CLI 工具的原始输出格式。
+
+能力桥接主要通过 MCP relay 完成。Daemon 启动本地 AgentHub MCP relay，并在运行任务时为当前 Run 创建带 token 的 MCP session。Claude Code 通过生成的 MCP config 加载 `agenthub` stdio server，Codex 通过配置项注入 `mcp_servers.agenthub`，二者最终都连接到 daemon 内部的 relay。Runtime 调用 `send_message`、`create_task`、`upload_artifact`、`append_memory`、`read_memory`、`deploy_static_site` 等工具时，relay 会在本地完成可本地处理的能力，或通过 daemon WebSocket 发送 `agenthub.tool.call`、`artifact.upload`、`static_site.deploy` 等消息交给 Worker/API 侧持久化。
+
+适配层还承担会话恢复与抢占控制。调度层在发现同一会话、同一 Agent 已有 queued/running Run 时，会复用已有 runtime session id，将新 Run 标记为 `resume`，并把正在运行的旧 Run 放入 `preemptRunIds`。Daemon 接到新 `run.assigned` 后会先中断需要抢占的本地进程，旧 Run 被标记为 `interrupted`，新 Run 再接管上下文继续执行。通过这种机制，系统既避免同一 Agent 在同一上下文中并发写入冲突，也保留了 runtime 原生 session 的连续性。
+
 ## 第 4 章 系统详细设计与实现
 
 ### 4.1 前端实现
@@ -222,6 +232,7 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - Worker 消费 Run 队列并负责长任务执行。
 - Worker 在群聊或项目会话中承载协调者调度流程，将目标拆解、任务分派和状态推进写回会话。
 - 对本地任务，Worker 通过 daemon gateway 将任务分发给在线 daemon。
+- Worker 在调度新 Run 时处理 runtime session 复用和抢占关系，将旧 Run 标记为 interrupted，并把 `preemptRunIds` 下发给 daemon。
 - Worker 持久化 RunEvent、message、goal/task、artifact 和 deployment 记录。
 - Worker 在任务分派和状态变化时发布实时事件，使聊天流卡片和任务页保持同步。
 - Worker 将 transcript、Goal/Task、Artifact 等事件生成 memory append job，并通过 daemon gateway 写入 Agent 本地记忆空间。
@@ -230,8 +241,8 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 ### 4.5 Daemon 实现
 
 - Daemon 检测本地 runtime，例如 Claude Code、Codex。
-- Daemon 封装 CLI 进程执行、日志流、取消任务和错误归一化。
-- MCP stdio relay 负责连接本地 MCP 工具能力。
+- Runtime adapter 封装 CLI 进程执行、JSONL/日志解析、runtime session 恢复、取消任务和错误归一化。
+- MCP stdio relay 负责把 Claude Code、Codex 等 runtime 的工具调用桥接到 daemon 和 AgentHub 后端能力。
 - Agent workspace 提供 `.agenthub` 元数据、memory、skills、files、runs、artifacts 和 cache 等隔离目录；run workspace 和项目 worktree 限制本地文件访问范围。
 - 记忆工具支持 append、search、read，并将长期记忆、每日记忆和会话 transcript 保存在 Agent 自己的 workspace 中。
 - Windows shell/stdin 差异需要在 runtime adapter 层处理。
@@ -332,6 +343,8 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - 创建 Goal、分派 Task，并验证 Task 状态从运行到成功或失败。
 - daemon 在线检测。
 - Agent workspace 初始化、run workspace 隔离和 memory append/read/search。
+- runtime adapter 能检测 Claude/Codex 能力，解析日志为统一 RunEvent，并通过 MCP relay 调用 AgentHub 工具。
+- 同一 Agent 连续任务能触发 runtime session resume 和旧 Run 抢占，旧 Run 状态进入 interrupted。
 - Agent 执行并回传消息。
 - 聊天流 Goal/Task 卡片与任务页状态同步。
 - Artifact 上传、读取、编辑和发布。

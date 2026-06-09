@@ -45,7 +45,6 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [desktopDaemonBusy, setDesktopDaemonBusy] = useState(false)
   const selectedDevice =
     devices.find((device) => device.id === selectedDeviceId) ?? devices[0] ?? null
   const selectedDeviceIsDesktopManaged = isDesktopManagedDaemonDevice(selectedDevice)
@@ -125,23 +124,6 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
     setRegistrationCommand(null)
     setRegistrationError(null)
     setCommandCopied(false)
-  }
-
-  const startDesktopDaemon = async () => {
-    if (!desktopDaemon || desktopDaemonBusy) {
-      return
-    }
-
-    setDesktopDaemonBusy(true)
-    try {
-      const status = await desktopDaemon.start()
-      if (status.deviceId) {
-        setSelectedDeviceId(status.deviceId)
-      }
-      onDevicesChanged()
-    } finally {
-      setDesktopDaemonBusy(false)
-    }
   }
 
   const openReconnectModal = () => {
@@ -254,14 +236,7 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
             className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
             type="button"
             aria-label={t('daemon.add')}
-            onClick={() => {
-              if (desktopDaemon) {
-                void startDesktopDaemon()
-                return
-              }
-
-              openRegistrationModal()
-            }}
+            onClick={openRegistrationModal}
           >
             <Add size={16} />
           </button>

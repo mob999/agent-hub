@@ -14,6 +14,7 @@ import { createDb } from "@agent-hub/db";
 import {
   ackAgentProvisioningQueueMessage,
   ackArtifactActionQueueMessage,
+  ackDaemonRpcQueueMessage,
   ackMemoryAppendQueueMessage,
   ackProjectCloneQueueMessage,
   ackRunQueueMessage,
@@ -28,6 +29,7 @@ import {
   enqueueMemoryAppendJob,
   ensureAgentProvisioningQueueGroup,
   ensureArtifactActionQueueGroup,
+  ensureDaemonRpcQueueGroup,
   ensureMemoryAppendQueueGroup,
   ensureProjectCloneQueueGroup,
   ensureRunQueueGroup,
@@ -49,6 +51,7 @@ import {
   publishRealtimeEvent,
   readAgentProvisioningQueueMessages,
   readArtifactActionQueueMessages,
+  readDaemonRpcQueueMessages,
   readMemoryAppendQueueMessages,
   readProjectCloneQueueMessages,
   readRunQueueMessages,
@@ -57,6 +60,7 @@ import {
   upsertDaemonRuntime,
   upsertDaemonDevice,
   verifyDaemonDeviceToken,
+  writeDaemonRpcResponse,
 } from "@agent-hub/server";
 
 import { DaemonGateway } from "./daemon/gateway.js";
@@ -497,6 +501,7 @@ await ensureAgentProvisioningQueueGroup(redis);
 await ensureArtifactActionQueueGroup(redis);
 await ensureMemoryAppendQueueGroup(redis);
 await ensureProjectCloneQueueGroup(redis);
+await ensureDaemonRpcQueueGroup(redis);
 await new Promise<void>((resolve) => {
   server.listen(env.WORKER_PORT, resolve);
 });
@@ -610,6 +615,55 @@ while (!shuttingDown) {
     }
 
     await ackProjectCloneQueueMessage(redis, message.id);
+  }
+
+  const daemonRpcMessages = await readDaemonRpcQueueMessages(
+    redis,
+    env.AGENTHUB_WORKER_CONSUMER_NAME,
+    {
+      count: 10,
+      blockMs: 100,
+    },
+  );
+
+  for (const message of daemonRpcMessages) {
+    try {
+      const result = await gateway.requestProjectRpc({
+        ...message.job.operation,
+        daemonDeviceId: message.job.daemonDeviceId,
+        requestId: message.job.requestId,
+        sentAt: new Date().toISOString(),
+      });
+
+      await writeDaemonRpcResponse(redis, message.job.requestId, {
+        ok: true,
+        result,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const unavailable = /not connected|timed out|disconnected/i.test(errorMessage);
+
+      await writeDaemonRpcResponse(redis, message.job.requestId, {
+        ok: false,
+        error: {
+          code: unavailable
+            ? "PROJECT_DAEMON_UNAVAILABLE"
+            : "PROJECT_DAEMON_REQUEST_FAILED",
+          message: errorMessage,
+        },
+      });
+      logger.warn(
+        {
+          daemonDeviceId: message.job.daemonDeviceId,
+          err: error,
+          requestId: message.job.requestId,
+          type: message.job.operation.type,
+        },
+        "Failed to complete daemon RPC",
+      );
+    }
+
+    await ackDaemonRpcQueueMessage(redis, message.id);
   }
 
   const messages = await readRunQueueMessages(

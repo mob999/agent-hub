@@ -16,6 +16,7 @@ import type {
 import type {
   AgentHubLogger,
   AgentProvisioningJob,
+  DaemonRpcResult,
   RunQueueJob,
 } from "@agent-hub/server";
 import { WebSocket, WebSocketServer } from "ws";
@@ -81,6 +82,40 @@ interface PendingAgentProvisioning {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingProjectRpc {
+  daemonDeviceId: DaemonDeviceId;
+  resolve(result: DaemonRpcResult): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+type ProjectRpcServerMessage = Extract<
+  DaemonServerMessage,
+  | { type: "project.files.list" }
+  | { type: "project.file.read" }
+  | { type: "project.file.write" }
+  | { type: "project.change.files.list" }
+  | { type: "project.change.file.read" }
+>;
+
+type ProjectRpcCompletedMessage = Extract<
+  DaemonClientMessage,
+  | { type: "project.files.list.completed" }
+  | { type: "project.file.read.completed" }
+  | { type: "project.file.write.completed" }
+  | { type: "project.change.files.list.completed" }
+  | { type: "project.change.file.read.completed" }
+>;
+
+type ProjectRpcFailedMessage = Extract<
+  DaemonClientMessage,
+  | { type: "project.files.list.failed" }
+  | { type: "project.file.read.failed" }
+  | { type: "project.file.write.failed" }
+  | { type: "project.change.files.list.failed" }
+  | { type: "project.change.file.read.failed" }
+>;
+
 function nowIsoDateTime(): string {
   return new Date().toISOString();
 }
@@ -103,11 +138,62 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function isProjectRpcCompletedMessage(message: DaemonClientMessage): message is ProjectRpcCompletedMessage {
+  return (
+    message.type === "project.files.list.completed" ||
+    message.type === "project.file.read.completed" ||
+    message.type === "project.file.write.completed" ||
+    message.type === "project.change.files.list.completed" ||
+    message.type === "project.change.file.read.completed"
+  );
+}
+
+function isProjectRpcFailedMessage(message: DaemonClientMessage): message is ProjectRpcFailedMessage {
+  return (
+    message.type === "project.files.list.failed" ||
+    message.type === "project.file.read.failed" ||
+    message.type === "project.file.write.failed" ||
+    message.type === "project.change.files.list.failed" ||
+    message.type === "project.change.file.read.failed"
+  );
+}
+
+function projectRpcResultFromMessage(message: ProjectRpcCompletedMessage): DaemonRpcResult {
+  if (message.type === "project.files.list.completed") {
+    return { type: "project.files.list", files: message.files };
+  }
+
+  if (message.type === "project.file.read.completed") {
+    return {
+      type: "project.file.read",
+      contentBase64: message.contentBase64,
+      sizeBytes: message.sizeBytes,
+    };
+  }
+
+  if (message.type === "project.file.write.completed") {
+    return { type: "project.file.write", baseHead: message.baseHead };
+  }
+
+  if (message.type === "project.change.files.list.completed") {
+    return { type: "project.change.files.list", files: message.files };
+  }
+
+  return {
+    type: "project.change.file.read",
+    binary: message.binary,
+    file: message.file,
+    newContent: message.newContent,
+    oldContent: message.oldContent,
+  };
+}
+
 export class DaemonGateway {
   readonly webSocketServer = new WebSocketServer({ noServer: true });
 
   #connections = new Map<DaemonDeviceId, DaemonConnection>();
   #pendingAgentProvisioning = new Map<AgentId, PendingAgentProvisioning>();
+  #pendingProjectRpc = new Map<string, PendingProjectRpc>();
   #options: DaemonGatewayOptions;
 
   constructor(options: DaemonGatewayOptions) {
@@ -176,6 +262,28 @@ export class DaemonGateway {
         }
 
         connection.lastSeenAt = nowIsoDateTime();
+
+        if (isProjectRpcCompletedMessage(message)) {
+          const pending = this.#pendingProjectRpc.get(message.requestId);
+
+          if (pending !== undefined) {
+            clearTimeout(pending.timer);
+            this.#pendingProjectRpc.delete(message.requestId);
+            pending.resolve(projectRpcResultFromMessage(message));
+          }
+          return;
+        }
+
+        if (isProjectRpcFailedMessage(message)) {
+          const pending = this.#pendingProjectRpc.get(message.requestId);
+
+          if (pending !== undefined) {
+            clearTimeout(pending.timer);
+            this.#pendingProjectRpc.delete(message.requestId);
+            pending.reject(new Error(message.reason));
+          }
+          return;
+        }
 
         if (message.type === "daemon.heartbeat") {
           connection.runningRunIds = new Set(message.runningRunIds);
@@ -448,6 +556,13 @@ export class DaemonGateway {
               pending.reject(new Error("Daemon disconnected while creating agent."));
             }
           }
+          for (const [requestId, pending] of this.#pendingProjectRpc) {
+            if (pending.daemonDeviceId === connection.deviceId) {
+              clearTimeout(pending.timer);
+              this.#pendingProjectRpc.delete(requestId);
+              pending.reject(new Error("Daemon disconnected while reading project files."));
+            }
+          }
           void Promise.resolve(
             this.#options.onDaemonDisconnected?.(connection.deviceId),
           ).catch((error) => {
@@ -532,6 +647,59 @@ export class DaemonGateway {
           daemonDeviceId: job.daemonDeviceId,
         },
         "Requested daemon agent provisioning",
+      );
+    });
+  }
+
+  requestProjectRpc(
+    message: ProjectRpcServerMessage & { daemonDeviceId: DaemonDeviceId },
+    options: { timeoutMs?: number } = {},
+  ): Promise<DaemonRpcResult> {
+    const connection = this.#connections.get(message.daemonDeviceId);
+
+    if (connection === undefined || connection.ws.readyState !== WebSocket.OPEN) {
+      this.#options.logger?.warn(
+        {
+          daemonDeviceId: message.daemonDeviceId,
+          requestId: message.requestId,
+          type: message.type,
+        },
+        "Cannot request project files because daemon is not connected",
+      );
+      return Promise.reject(
+        new Error(`Daemon ${message.daemonDeviceId} is not connected.`),
+      );
+    }
+
+    if (this.#pendingProjectRpc.has(message.requestId)) {
+      return Promise.reject(
+        new Error(`Project request ${message.requestId} is already pending.`),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutMs = options.timeoutMs ?? 15_000;
+      const timer = setTimeout(() => {
+        this.#pendingProjectRpc.delete(message.requestId);
+        reject(new Error("Project daemon request timed out."));
+      }, timeoutMs);
+      const { daemonDeviceId: _daemonDeviceId, ...serverMessage } = message;
+
+      this.#pendingProjectRpc.set(message.requestId, {
+        daemonDeviceId: message.daemonDeviceId,
+        resolve,
+        reject,
+        timer,
+      });
+
+      send(connection.ws, serverMessage);
+      this.#options.logger?.info(
+        {
+          daemonDeviceId: message.daemonDeviceId,
+          requestId: message.requestId,
+          type: message.type,
+        },
+        "Requested project files from daemon",
       );
     });
   }

@@ -178,6 +178,53 @@ describe("DaemonGateway", () => {
     });
   });
 
+  it("round-trips project file requests through connected daemons", async () => {
+    const gateway = new DaemonGateway({
+      verifyDaemonToken: (input) => input.token === token,
+      onRunEvent: () => undefined,
+    });
+    const listening = await createGatewayServer(gateway);
+    server = listening.server;
+    ws = new WebSocket(listening.url);
+
+    await waitForOpen(ws);
+    sendHello(ws);
+    await waitForJsonMessage(ws);
+
+    const daemonMessage = waitForJsonMessage<{
+      baseRepoPath: string;
+      requestId: string;
+      type: string;
+    }>(ws);
+    const result = gateway.requestProjectRpc({
+      type: "project.files.list",
+      daemonDeviceId: "local-dev",
+      requestId: "project_request_1",
+      baseRepoPath: "/workspace/project/base",
+      sentAt: "2026-05-25T00:00:00.000Z",
+    });
+
+    await expect(daemonMessage).resolves.toMatchObject({
+      type: "project.files.list",
+      requestId: "project_request_1",
+      baseRepoPath: "/workspace/project/base",
+    });
+
+    ws.send(
+      JSON.stringify({
+        type: "project.files.list.completed",
+        requestId: "project_request_1",
+        files: [{ path: "src/index.ts", type: "file", sizeBytes: 12 }],
+        sentAt: "2026-05-25T00:00:00.000Z",
+      }),
+    );
+
+    await expect(result).resolves.toEqual({
+      type: "project.files.list",
+      files: [{ path: "src/index.ts", type: "file", sizeBytes: 12 }],
+    });
+  });
+
   it("forwards daemon run events to the callback", async () => {
     const events: RunEvent[] = [];
     const gateway = new DaemonGateway({

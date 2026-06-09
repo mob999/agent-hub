@@ -37,8 +37,13 @@ import {
   type RunQueueJob,
   type UserMessageAttachmentUpload,
   createDaemonDeviceToken,
+  deleteDaemonRpcResponse,
+  enqueueDaemonRpcJob,
   invalidateCachesForRealtimeEvents,
+  readDaemonRpcResponse,
   writeArtifactBuffer,
+  type DaemonProjectRpcOperation,
+  type DaemonRpcResult,
 } from "@agent-hub/server";
 
 import type { ApiContext } from "../context.js";
@@ -63,6 +68,21 @@ export function createApiServices(context: ApiContext) {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const daemonDeviceIdPattern = /^[A-Za-z0-9_.:-]{1,120}$/;
   const repositoryRoot = context.repositoryRoot;
+
+  class DaemonProjectRpcError extends Error {
+    readonly code: string;
+    readonly status: number;
+
+    constructor(code: string, message: string, status = 500) {
+      super(message);
+      this.code = code;
+      this.status = status;
+    }
+  }
+
+  async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
   
   function powerShellQuote(value: string): string {
     return `'${value.replaceAll("'", "''")}'`;
@@ -900,6 +920,49 @@ export function createApiServices(context: ApiContext) {
   
     return result.stdout.trim();
   }
+
+  async function requestDaemonProjectRpc(input: {
+    daemonDeviceId: string;
+    operation: DaemonProjectRpcOperation;
+    timeoutMs?: number;
+  }): Promise<DaemonRpcResult> {
+    const requestId = randomUUID();
+    const timeoutMs = input.timeoutMs ?? 18_000;
+    const deadline = Date.now() + timeoutMs;
+
+    await deleteDaemonRpcResponse(redis, requestId);
+    await enqueueDaemonRpcJob(redis, {
+      daemonDeviceId: input.daemonDeviceId,
+      operation: input.operation,
+      requestId,
+    });
+
+    while (Date.now() < deadline) {
+      const response = await readDaemonRpcResponse(redis, requestId);
+
+      if (response !== null) {
+        await deleteDaemonRpcResponse(redis, requestId);
+
+        if (response.ok) {
+          return response.result;
+        }
+
+        throw new DaemonProjectRpcError(
+          response.error.code,
+          response.error.message,
+          response.error.code === "PROJECT_DAEMON_UNAVAILABLE" ? 503 : 500,
+        );
+      }
+
+      await sleep(150);
+    }
+
+    throw new DaemonProjectRpcError(
+      "PROJECT_DAEMON_UNAVAILABLE",
+      "Project daemon request timed out.",
+      503,
+    );
+  }
   
   type ProjectChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "binary";
   
@@ -1349,6 +1412,7 @@ export function createApiServices(context: ApiContext) {
     groupChatMcpToolsForAgent,
     toMcpGoalList,
     applyContextCompressionToJob,
+    requestDaemonProjectRpc,
     listProjectFileTree,
     listProjectChangedFiles,
     readProjectFileAtCommit,

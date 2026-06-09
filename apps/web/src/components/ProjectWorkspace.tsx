@@ -689,14 +689,14 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
           {mode === 'code' && activeFileInfo?.canEdit && (
             <Button
               disabled={!fileDirty || isSavingFile}
-              kind="secondary"
+              hasIconOnly
+              iconDescription={isSavingFile ? 'Saving' : 'Save'}
+              kind="ghost"
               renderIcon={Save}
               size="sm"
               type="button"
               onClick={saveActiveFile}
-            >
-              {isSavingFile ? 'Saving' : 'Save'}
-            </Button>
+            />
           )}
         </div>
         <div className="min-h-0 overflow-hidden">

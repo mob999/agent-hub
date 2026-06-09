@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { loadDaemonEnv } from "@agent-hub/config";
+import { inferArtifactFileInfo } from "@agent-hub/core";
 import type {
   DaemonRuntime,
   DaemonClientMessage,
   DaemonServerMessage,
+  DaemonProjectChangedFile,
+  DaemonProjectChangedFileStatus,
+  DaemonProjectFileEntry,
   AgentHubMcpToolCall,
   AgentHubMcpToolResult,
   AgentHubDeployStaticSiteToolResult,
@@ -136,6 +140,308 @@ function getProjectRootPath(
   conversationId: string,
 ): string {
   return path.join(env.AGENTHUB_WORKSPACE_ROOT, "projects", conversationId);
+}
+
+const maxProjectFileTreeDepth = 5;
+const maxProjectFileTreeEntries = 2_000;
+const maxProjectFileReadBytes = 5 * 1024 * 1024;
+const maxProjectFileWriteBytes = 5 * 1024 * 1024;
+
+function normalizeProjectRelativePath(requestedPath?: string): string {
+  const relativePath = (requestedPath ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const segments = relativePath.split("/").filter(Boolean);
+
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    throw new Error("Path is outside the project repository.");
+  }
+
+  return segments.join("/");
+}
+
+function resolveProjectFilePath(baseRepoPath: string, requestedPath?: string): string {
+  const relativePath = normalizeProjectRelativePath(requestedPath);
+  const resolved = path.resolve(baseRepoPath, relativePath);
+  const root = path.resolve(baseRepoPath);
+  const relativeToRoot = path.relative(root, resolved);
+
+  if (
+    relativeToRoot.startsWith("..") ||
+    path.isAbsolute(relativeToRoot)
+  ) {
+    throw new Error("Path is outside the project repository.");
+  }
+
+  return resolved;
+}
+
+async function assertNotSymlink(filePath: string): Promise<void> {
+  const info = await lstat(filePath);
+
+  if (info.isSymbolicLink()) {
+    throw new Error("Project symlinks cannot be accessed.");
+  }
+}
+
+async function listProjectFileTree(input: {
+  baseRepoPath: string;
+  relativePath?: string;
+  rows?: DaemonProjectFileEntry[];
+  depth?: number;
+}): Promise<DaemonProjectFileEntry[]> {
+  const depth = input.depth ?? 0;
+  const rows = input.rows ?? [];
+
+  if (depth > maxProjectFileTreeDepth || rows.length >= maxProjectFileTreeEntries) {
+    return rows;
+  }
+
+  const directory = resolveProjectFilePath(input.baseRepoPath, input.relativePath);
+  await assertNotSymlink(directory);
+  const entries = await readdir(directory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (rows.length >= maxProjectFileTreeEntries) {
+      break;
+    }
+
+    if (entry.name === ".git") {
+      continue;
+    }
+
+    const relativePath = [input.relativePath, entry.name]
+      .filter((segment): segment is string => segment !== undefined && segment.length > 0)
+      .join("/");
+    const fullPath = resolveProjectFilePath(input.baseRepoPath, relativePath);
+    const fileInfo = await lstat(fullPath);
+
+    if (fileInfo.isSymbolicLink()) {
+      continue;
+    }
+
+    if (fileInfo.isDirectory()) {
+      rows.push({ path: relativePath, type: "directory" });
+      await listProjectFileTree({
+        baseRepoPath: input.baseRepoPath,
+        depth: depth + 1,
+        relativePath,
+        rows,
+      });
+    } else if (fileInfo.isFile()) {
+      rows.push({
+        path: relativePath,
+        sizeBytes: fileInfo.size,
+        type: "file",
+      });
+    }
+  }
+
+  return rows;
+}
+
+async function readProjectFileBase64(input: {
+  baseRepoPath: string;
+  path: string;
+}): Promise<{ contentBase64: string; sizeBytes: number }> {
+  const filePath = resolveProjectFilePath(input.baseRepoPath, input.path);
+  await assertNotSymlink(filePath);
+  const fileStat = await stat(filePath);
+
+  if (!fileStat.isFile()) {
+    throw new Error("Project file was not found.");
+  }
+
+  if (fileStat.size > maxProjectFileReadBytes) {
+    throw new Error("Project file is too large to read.");
+  }
+
+  return {
+    contentBase64: (await readFile(filePath)).toString("base64"),
+    sizeBytes: fileStat.size,
+  };
+}
+
+async function commitProjectBaseFile(input: {
+  baseRepoPath: string;
+  relativePath: string;
+}): Promise<string | undefined> {
+  await git(["add", "--", input.relativePath], { cwd: input.baseRepoPath });
+
+  const status = await git(["status", "--porcelain", "--", input.relativePath], {
+    cwd: input.baseRepoPath,
+  });
+
+  if (status.length > 0) {
+    await git(
+      [
+        "-c",
+        "user.name=AgentHub",
+        "-c",
+        "user.email=agenthub@example.local",
+        "commit",
+        "-m",
+        `User edit ${input.relativePath}`,
+      ],
+      {
+        cwd: input.baseRepoPath,
+        maxBuffer: 20 * 1024 * 1024,
+      },
+    );
+  }
+
+  return git(["rev-parse", "HEAD"], {
+    cwd: input.baseRepoPath,
+  }).catch(() => undefined);
+}
+
+async function writeProjectFileContent(input: {
+  baseRepoPath: string;
+  content: string;
+  path: string;
+}): Promise<{ baseHead?: string }> {
+  const relativePath = normalizeProjectRelativePath(input.path);
+  const filePath = resolveProjectFilePath(input.baseRepoPath, relativePath);
+  await assertNotSymlink(filePath);
+  const fileStat = await stat(filePath);
+
+  if (!fileStat.isFile()) {
+    throw new Error("Project file was not found.");
+  }
+
+  if (Buffer.byteLength(input.content, "utf8") > maxProjectFileWriteBytes) {
+    throw new Error("Project file is too large to write.");
+  }
+
+  await writeFile(filePath, input.content, "utf8");
+  return {
+    baseHead: await commitProjectBaseFile({
+      baseRepoPath: input.baseRepoPath,
+      relativePath,
+    }),
+  };
+}
+
+function toProjectChangedFileStatus(statusCode: string): DaemonProjectChangedFileStatus {
+  if (statusCode.startsWith("A")) {
+    return "added";
+  }
+
+  if (statusCode.startsWith("D")) {
+    return "deleted";
+  }
+
+  if (statusCode.startsWith("R")) {
+    return "renamed";
+  }
+
+  return "modified";
+}
+
+async function listProjectChangedFiles(input: {
+  baseCommit?: string;
+  headCommit?: string;
+  worktreePath: string;
+}): Promise<DaemonProjectChangedFile[]> {
+  if (input.headCommit === undefined) {
+    return [];
+  }
+
+  const output = input.baseCommit === undefined
+    ? await git(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      })
+    : await git(["diff", "--name-status", "-M", input.baseCommit, input.headCommit], {
+        cwd: input.worktreePath,
+        maxBuffer: 20 * 1024 * 1024,
+      });
+
+  if (output.length === 0) {
+    return [];
+  }
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [statusCode, firstPath, secondPath] = line.split("\t");
+      const status = toProjectChangedFileStatus(statusCode);
+      const pathValue = status === "renamed" ? secondPath : firstPath;
+      const oldPath = status === "renamed" ? firstPath : undefined;
+      const fileInfo = inferArtifactFileInfo({ filename: pathValue ?? firstPath ?? "" });
+
+      return {
+        binary: !fileInfo.canEdit,
+        oldPath,
+        path: pathValue ?? firstPath ?? "",
+        status: !fileInfo.canEdit ? "binary" : status,
+      };
+    })
+    .filter((file) => file.path.length > 0);
+}
+
+async function readProjectFileAtCommit(input: {
+  commit?: string;
+  filePath?: string;
+  worktreePath: string;
+}): Promise<string> {
+  if (input.commit === undefined || input.filePath === undefined) {
+    return "";
+  }
+
+  return git(["show", `${input.commit}:${input.filePath}`], {
+    cwd: input.worktreePath,
+    maxBuffer: maxProjectFileReadBytes,
+  }).catch(() => "");
+}
+
+async function readProjectChangeFile(input: {
+  baseCommit?: string;
+  headCommit?: string;
+  path: string;
+  worktreePath: string;
+}): Promise<{
+  binary: boolean;
+  file: DaemonProjectChangedFile;
+  newContent: string;
+  oldContent: string;
+}> {
+  const files = await listProjectChangedFiles(input);
+  const file = files.find((entry) => entry.path === input.path || entry.oldPath === input.path);
+
+  if (file === undefined) {
+    throw new Error("Project change file was not found.");
+  }
+
+  if (file.binary) {
+    return {
+      binary: true,
+      file,
+      newContent: "",
+      oldContent: "",
+    };
+  }
+
+  return {
+    binary: false,
+    file,
+    newContent: file.status === "deleted"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: input.headCommit,
+          filePath: file.path,
+          worktreePath: input.worktreePath,
+        }),
+    oldContent: file.status === "added"
+      ? ""
+      : await readProjectFileAtCommit({
+          commit: input.baseCommit,
+          filePath: file.oldPath ?? file.path,
+          worktreePath: input.worktreePath,
+        }),
+  };
 }
 
 async function handleProjectClone(input: {
@@ -585,6 +891,159 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
           logger.error(
             { err: error, changeId: message.changeId },
             "Project change merge failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.files.list") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.baseRepoPath);
+          send(ws, {
+            type: "project.files.list.completed",
+            requestId: message.requestId,
+            files: await listProjectFileTree({ baseRepoPath: message.baseRepoPath }),
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "project.files.list.failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Project file tree listing failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.file.read") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.baseRepoPath);
+          const result = await readProjectFileBase64({
+            baseRepoPath: message.baseRepoPath,
+            path: message.path,
+          });
+          send(ws, {
+            type: "project.file.read.completed",
+            requestId: message.requestId,
+            contentBase64: result.contentBase64,
+            sizeBytes: result.sizeBytes,
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "project.file.read.failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Project file read failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.file.write") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.baseRepoPath);
+          const result = await writeProjectFileContent({
+            baseRepoPath: message.baseRepoPath,
+            content: message.content,
+            path: message.path,
+          });
+          send(ws, {
+            type: "project.file.write.completed",
+            requestId: message.requestId,
+            baseHead: result.baseHead,
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "project.file.write.failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Project file write failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.change.files.list") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.worktreePath);
+          send(ws, {
+            type: "project.change.files.list.completed",
+            requestId: message.requestId,
+            files: await listProjectChangedFiles({
+              baseCommit: message.baseCommit,
+              headCommit: message.headCommit,
+              worktreePath: message.worktreePath,
+            }),
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "project.change.files.list.failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Project change file listing failed",
+          );
+        }
+      })();
+      return;
+    }
+
+    if (message.type === "project.change.file.read") {
+      void (async () => {
+        try {
+          assertPathInsideWorkspace(env.AGENTHUB_WORKSPACE_ROOT, message.worktreePath);
+          const result = await readProjectChangeFile({
+            baseCommit: message.baseCommit,
+            headCommit: message.headCommit,
+            path: message.path,
+            worktreePath: message.worktreePath,
+          });
+          send(ws, {
+            type: "project.change.file.read.completed",
+            requestId: message.requestId,
+            binary: result.binary,
+            file: result.file,
+            newContent: result.newContent,
+            oldContent: result.oldContent,
+            sentAt: nowIsoDateTime(),
+          });
+        } catch (error) {
+          send(ws, {
+            type: "project.change.file.read.failed",
+            requestId: message.requestId,
+            reason: error instanceof Error ? error.message : String(error),
+            sentAt: nowIsoDateTime(),
+          });
+          logger.error(
+            { err: error, requestId: message.requestId },
+            "Project change file read failed",
           );
         }
       })();

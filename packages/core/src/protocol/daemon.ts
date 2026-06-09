@@ -54,6 +54,26 @@ export interface DaemonRunAssignment {
   agentHubMcpGoals?: AgentHubListGoalsToolResult["goals"];
 }
 
+export interface DaemonProjectFileEntry {
+  path: string;
+  sizeBytes?: number;
+  type: "directory" | "file";
+}
+
+export type DaemonProjectChangedFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "binary";
+
+export interface DaemonProjectChangedFile {
+  binary: boolean;
+  oldPath?: string;
+  path: string;
+  status: DaemonProjectChangedFileStatus;
+}
+
 export type DaemonClientMessage =
   | {
       type: "daemon.hello";
@@ -192,6 +212,70 @@ export type DaemonClientMessage =
       sentAt: IsoDateTime;
     }
   | {
+      type: "project.files.list.completed";
+      requestId: string;
+      files: DaemonProjectFileEntry[];
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.files.list.failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.read.completed";
+      requestId: string;
+      contentBase64: string;
+      sizeBytes: number;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.read.failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.write.completed";
+      requestId: string;
+      baseHead?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.write.failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.files.list.completed";
+      requestId: string;
+      files: DaemonProjectChangedFile[];
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.files.list.failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.file.read.completed";
+      requestId: string;
+      binary: boolean;
+      file: DaemonProjectChangedFile;
+      newContent: string;
+      oldContent: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.file.read.failed";
+      requestId: string;
+      reason: string;
+      sentAt: IsoDateTime;
+    }
+  | {
       type: "artifact.action.completed";
       actionId: ConversationArtifactActionId;
       status: "succeeded" | "failed" | "cancelled";
@@ -284,6 +368,44 @@ export type DaemonServerMessage =
       baseRepoPath: string;
       branchName: string;
       message?: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.files.list";
+      requestId: string;
+      baseRepoPath: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.read";
+      requestId: string;
+      baseRepoPath: string;
+      path: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.file.write";
+      requestId: string;
+      baseRepoPath: string;
+      content: string;
+      path: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.files.list";
+      requestId: string;
+      baseCommit?: string;
+      headCommit?: string;
+      worktreePath: string;
+      sentAt: IsoDateTime;
+    }
+  | {
+      type: "project.change.file.read";
+      requestId: string;
+      baseCommit?: string;
+      headCommit?: string;
+      path: string;
+      worktreePath: string;
       sentAt: IsoDateTime;
     }
   | {

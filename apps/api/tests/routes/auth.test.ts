@@ -348,12 +348,15 @@ describe("auth routes", () => {
       `/auth/github/callback?code=github-code&state=${state}`,
     );
 
-    expect(callbackResponse.status).toBe(302);
-    const callbackUrl = new URL(callbackResponse.headers.get("location") ?? "");
-    expect(callbackUrl.protocol).toBe("tavro:");
-    expect(callbackUrl.hostname).toBe("auth");
-    expect(callbackUrl.pathname).toBe("/callback");
-    const loginCode = callbackUrl.searchParams.get("code");
+    // The desktop callback now returns an HTML bridge page (200) instead of a
+    // 302 redirect, because Chrome Custom Tabs cannot follow HTTP redirects to
+    // custom URL schemes (tavro://).  The login code is embedded in the HTML.
+    expect(callbackResponse.status).toBe(200);
+    expect(callbackResponse.headers.get("Content-Type")).toContain("text/html");
+    const html = await callbackResponse.text();
+    const codeMatch = html.match(/tavro:\/\/auth\/callback\?code=([^"&]+)/);
+    expect(codeMatch).toBeTruthy();
+    const loginCode = codeMatch![1];
     expect(loginCode).toBeTruthy();
 
     const completeResponse = await app.request(

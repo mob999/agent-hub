@@ -63,13 +63,12 @@
 
 > 图源文件：`docs/report/diagrams/system-architecture.drawio`，可使用 diagrams.net 继续编辑。
 
-该架构将系统划分为客户端层、控制面、执行面以及数据与基础设施层。客户端层包含 Web SPA 和 Desktop Client，两者共享同一套工作台界面，负责用户交互、消息展示、实时反馈和用户确认。客户端不直接执行 Agent 任务，也不保存业务数据的权威状态。
+该架构将系统划分为四个层次：
 
-控制面由 API Service 和 Realtime Channel 组成。API Service 负责 GitHub 登录、用户会话、权限校验、会话历史、Agent 管理、Run 创建、Artifact 元数据和 OpenAPI 路由；Realtime Channel 负责将消息、运行事件、任务状态和产物变化推送给 Web 与桌面端。控制面关注“谁可以做什么、当前状态是什么、任务应该投递到哪里”，不直接承载长时间运行的 Agent 执行过程。
-
-执行面由 Worker Service、Daemon Gateway、Local Daemon 和 Agent Runtimes 组成。Worker 负责消费队列任务、执行协调者调度、推进 Run 生命周期，并在需要本地能力时通过 Daemon Gateway 将任务分发给在线 daemon。Local Daemon 运行在用户本机，通过出站连接接入平台，负责检测和调用 Claude Code、Codex、OpenCode 等本地 runtime，并将日志、消息和产物事件回传给 Worker。
-
-数据与基础设施层为系统提供持久化和运行支撑。PostgreSQL 保存用户、会话、消息、Run、Goal/Task、Artifact 和 deployment 等业务数据；Redis 承担队列、缓存、临时状态和实时协调；Supabase Storage 保存 Artifact、静态站点和 deployment 文件。通过将元数据、缓存和文件存储分离，系统可以避免依赖单个容器本地磁盘，并支持 API 与 Worker 分离部署。
+1. 客户端层：负责用户交互、消息展示、实时反馈和用户确认，不直接执行 Agent 任务，也不保存业务数据的权威状态。该层包含 Web SPA 和 Desktop Client，两者共享同一套工作台界面；其中 Web SPA 以纯静态前端形式部署，Desktop Client 通过 Electron 复用 Web 界面并补充桌面端能力。
+2. 控制面：负责认证、权限、会话、Agent、Run、Artifact 元数据、OpenAPI 路由和实时推送，关注“谁可以做什么、当前状态是什么、任务应该投递到哪里”。该层包含 API Service 和 Realtime Channel；API Service 承担业务控制入口，Realtime Channel 将消息、运行事件、任务状态和产物变化推送给客户端。
+3. 执行面：负责长任务执行、协调者调度、Run 生命周期推进、本地 runtime 调用和日志回传。该层包含 Worker Service、Daemon Gateway、Local Daemon 和 Agent Runtimes；Worker 消费队列任务并执行调度，Daemon Gateway 接入本地 daemon 的出站连接，Local Daemon 调用 Claude Code、Codex、OpenCode 等 runtime 完成实际执行。
+4. 数据与基础设施层：负责系统持久化、队列缓存、临时状态和产物文件存储。该层包含 PostgreSQL、Redis 和 Supabase Storage；PostgreSQL 保存用户、会话、消息、Run、Goal/Task、Artifact 和 deployment 等业务数据，Redis 支撑队列、缓存和实时协调，Supabase Storage 保存 Artifact、静态站点和 deployment 文件。
 
 ### 2.2 分层职责
 

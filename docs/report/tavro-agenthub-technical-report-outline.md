@@ -180,6 +180,16 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 
 这种产物闭环是 Tavro 区别于普通聊天机器人的重要能力。它让多 Agent 协作的结果不再停留在文本说明，而是进入可管理的工程对象生命周期：从需求进入会话，到 Run 执行，再到 Artifact 生成、预览、编辑、发布和记录，用户可以在同一工作台中完成从意图到产物的全过程。
 
+### 3.6 独立 Workspace 与记忆系统
+
+多 Agent 长期协作还需要解决两个容易被忽略的问题：一是不同 Agent、不同 Run 的文件环境不能互相污染；二是 Agent 需要保留跨任务的经验，但这些经验又不应混入用户项目仓库。Tavro 为此设计了独立 workspace 与记忆系统，把执行文件、产物、缓存、技能和记忆从聊天消息中分离出来，形成每个 Agent 可持续使用的本地工作区。
+
+在 workspace 层面，daemon 会为每个 Agent 在对应设备下创建独立目录，目录中包含 `.agenthub` 元数据、`memory`、`skills`、`files`、`runs`、`artifacts` 和 `cache` 等子目录。`.agenthub/manifest.json` 记录 agent id、daemon device id 和 `local-only` 同步模式，`.agenthub/runtime.json` 记录绑定 runtime。每次 Run 又会在该 Agent workspace 下创建独立的 run workspace；项目会话中的代码任务则使用 per-run Git worktree 和 branch，避免多个 Agent 同时直接修改共享 base repository。
+
+记忆系统与 workspace 绑定，但不写入项目仓库。初始化 workspace 时会创建 `MEMORY.md`、每日记忆文件和 transcript 文件；运行过程中，Agent 可以通过 MCP 工具 `append_memory`、`search_memory`、`read_memory` 读写自己的记忆空间。系统也会把会话 transcript、Goal/Task 变化、Artifact 上传和 action 结果转化为 memory append job，经 Redis 队列投递给 Worker，再由 Worker 通过 daemon gateway 下发 `memory.append` 给本地 daemon 写入对应 workspace。
+
+这种设计让 Agent 获得了“长期工作台”而不是“临时进程目录”。短期上下文仍由 Run prompt 和聊天历史提供，长期经验则沉淀到 Agent 自己的 memory workspace；项目代码保留在项目仓库或 per-run worktree 中，Agent 记忆保留在 Agent workspace 中，两者边界清晰。由此，Tavro 能够支持长期协作、跨会话经验复用和安全的本地文件执行，同时避免把系统记忆误提交到用户项目里。
+
 ## 第 4 章 系统详细设计与实现
 
 ### 4.1 前端实现
@@ -204,7 +214,7 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - PostgreSQL 保存用户、OAuth 账户、会话、消息、Run、Artifact、deployment 和 daemon device 等数据。
 - Goal/Task 数据与会话、消息和 Run 关联，结构化卡片消息用于记录目标创建和任务分派过程。
 - Drizzle ORM 管理 schema 与迁移。
-- Redis 用于队列、缓存、临时 OAuth state、desktop login code 和实时协调。
+- Redis 用于 Run 队列、memory append 队列、缓存、临时 OAuth state、desktop login code 和实时协调。
 - Supabase Storage 存储生成产物、静态站点文件和 deployment 文件。
 
 ### 4.4 Worker 实现
@@ -214,6 +224,7 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - 对本地任务，Worker 通过 daemon gateway 将任务分发给在线 daemon。
 - Worker 持久化 RunEvent、message、goal/task、artifact 和 deployment 记录。
 - Worker 在任务分派和状态变化时发布实时事件，使聊天流卡片和任务页保持同步。
+- Worker 将 transcript、Goal/Task、Artifact 等事件生成 memory append job，并通过 daemon gateway 写入 Agent 本地记忆空间。
 - Worker 在数据变更后触发相关会话、任务和产物缓存失效。
 
 ### 4.5 Daemon 实现
@@ -221,7 +232,8 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - Daemon 检测本地 runtime，例如 Claude Code、Codex。
 - Daemon 封装 CLI 进程执行、日志流、取消任务和错误归一化。
 - MCP stdio relay 负责连接本地 MCP 工具能力。
-- Workspace root 限制本地文件访问范围。
+- Agent workspace 提供 `.agenthub` 元数据、memory、skills、files、runs、artifacts 和 cache 等隔离目录；run workspace 和项目 worktree 限制本地文件访问范围。
+- 记忆工具支持 append、search、read，并将长期记忆、每日记忆和会话 transcript 保存在 Agent 自己的 workspace 中。
 - Windows shell/stdin 差异需要在 runtime adapter 层处理。
 
 ### 4.6 桌面客户端实现
@@ -319,6 +331,7 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - 用户消息发送后先进入消息流，再由真实消息替换临时状态。
 - 创建 Goal、分派 Task，并验证 Task 状态从运行到成功或失败。
 - daemon 在线检测。
+- Agent workspace 初始化、run workspace 隔离和 memory append/read/search。
 - Agent 执行并回传消息。
 - 聊天流 Goal/Task 卡片与任务页状态同步。
 - Artifact 上传、读取、编辑和发布。
@@ -350,7 +363,7 @@ Artifact 采用元数据与文件内容分离的设计。Artifact、revision、a
 - 完整多 Agent IM 工作台原型。
 - Web、API、Worker、Daemon、Desktop 端到端链路。
 - 线上部署和可演示 Demo。
-- 支持本地执行器、Artifact、任务状态和静态站点预览。
+- 支持本地执行器、独立 Agent workspace、记忆系统、Artifact、任务状态和静态站点预览。
 - 形成 `AGENTS.md` 与项目 skills 结合的 AI 协作开发方法。
 
 ### 8.2 当前不足

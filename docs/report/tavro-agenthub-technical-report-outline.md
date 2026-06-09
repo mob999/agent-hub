@@ -59,51 +59,9 @@
 
 系统总体架构如下图所示：
 
-```mermaid
-flowchart TB
-  subgraph client["客户端层"]
-    web["Web SPA\nVercel 静态部署"]
-    desktop["Desktop Client\nElectron 桌面端"]
-  end
+![Tavro / Agent Hub 系统总体架构](./diagrams/system-architecture.svg)
 
-  subgraph control["控制面"]
-    api["API Service\n认证 / 会话 / Agent / Run / Artifact 元数据"]
-    realtime["Realtime Channel\nSSE / WebSocket"]
-  end
-
-  subgraph execution["执行面"]
-    worker["Worker Service\n队列消费 / Orchestrator / Run 执行"]
-    gateway["Daemon Gateway\n出站连接接入点"]
-    daemon["Local Daemon\n本地执行器"]
-    runtime["Agent Runtimes\nClaude Code / Codex / OpenCode"]
-  end
-
-  subgraph storage["数据与基础设施"]
-    postgres[("PostgreSQL\n业务数据")]
-    redis[("Redis\n队列 / 缓存 / 临时状态")]
-    objectStorage[("Supabase Storage\nArtifact / Deployment 文件")]
-  end
-
-  web --> api
-  desktop --> api
-  api --> realtime
-  realtime --> web
-  realtime --> desktop
-
-  api --> postgres
-  api --> redis
-  api --> objectStorage
-  api --> worker
-
-  worker --> postgres
-  worker --> redis
-  worker --> objectStorage
-  worker --> gateway
-
-  daemon --> gateway
-  daemon --> runtime
-  gateway --> worker
-```
+> 图源文件：`docs/report/diagrams/system-architecture.drawio`，可使用 diagrams.net 继续编辑。
 
 该架构将用户交互、控制面、执行面和数据基础设施拆开：Web 与桌面端共享同一套工作台界面；API 负责用户态数据和任务投递；Worker 承担长任务执行和协调者调度；daemon 通过出站连接接入用户本机 runtime；PostgreSQL、Redis 和 Supabase Storage 分别承担业务数据、队列缓存和产物文件存储。
 

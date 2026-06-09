@@ -1,0 +1,88 @@
+<mxfile host="app.diagrams.net" modified="2026-06-09T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="system-architecture" name="System Architecture">
+    <mxGraphModel dx="1120" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1120" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Tavro / Agent Hub 系统总体架构" style="text;html=1;strokeColor=none;fillColor=none;fontSize=28;fontStyle=1;fontColor=#111827;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="56" y="34" width="520" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="以 IM 工作台统一多 Agent 协作、本地执行、运行状态和产物管理" style="text;html=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#64748B;align=left;" vertex="1" parent="1">
+          <mxGeometry x="56" y="72" width="620" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="clientLayer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#bfdbfe;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="118" width="1040" height="102" as="geometry"/>
+        </mxCell>
+        <mxCell id="clientLabel" value="CLIENTS" style="text;html=1;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#475569;align=left;" vertex="1" parent="1">
+          <mxGeometry x="64" y="134" width="100" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="web" value="&lt;b&gt;Web SPA&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Vercel 静态部署 / 浏览器工作台&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bfdbfe;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="210" y="140" width="240" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="desktop" value="&lt;b&gt;Desktop Client&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Electron 壳 / 托管本地执行器&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bfdbfe;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="670" y="140" width="240" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="controlLayer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#bbf7d0;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="254" width="1040" height="118" as="geometry"/>
+        </mxCell>
+        <mxCell id="controlLabel" value="CONTROL PLANE" style="text;html=1;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#475569;align=left;" vertex="1" parent="1">
+          <mxGeometry x="64" y="270" width="150" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="api" value="&lt;b&gt;API Service&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;认证 / 会话 / Agent / Run / Artifact 元数据&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bbf7d0;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="154" y="294" width="290" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="realtime" value="&lt;b&gt;Realtime Channel&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;SSE / WebSocket 推送消息与运行事件&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bbf7d0;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="676" y="294" width="290" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="executionLayer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fed7aa;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="406" width="1040" height="146" as="geometry"/>
+        </mxCell>
+        <mxCell id="executionLabel" value="EXECUTION PLANE" style="text;html=1;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#475569;align=left;" vertex="1" parent="1">
+          <mxGeometry x="64" y="422" width="160" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="worker" value="&lt;b&gt;Worker Service&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;队列消费 / Orchestrator / Run 执行&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#fed7aa;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="116" y="458" width="240" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="gateway" value="&lt;b&gt;Daemon Gateway&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;接收本地 daemon 出站连接&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#fed7aa;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="440" y="458" width="240" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="daemon" value="&lt;b&gt;Local Daemon&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;本地 runtime 检测 / 任务执行 / 日志回传&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#fed7aa;shadow=1;arcSize=12;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="764" y="458" width="240" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="infraLayer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#cbd5e1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="586" width="1040" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="infraLabel" value="DATA &amp;amp; RUNTIME INFRASTRUCTURE" style="text;html=1;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#475569;align=left;" vertex="1" parent="1">
+          <mxGeometry x="64" y="602" width="300" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="postgres" value="PostgreSQL 业务数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cbd5e1;arcSize=10;fontSize=13;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="116" y="628" width="210" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="redis" value="Redis 队列 / 缓存" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cbd5e1;arcSize=10;fontSize=13;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="356" y="628" width="190" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="storage" value="Supabase Storage 产物文件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cbd5e1;arcSize=10;fontSize=13;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="576" y="628" width="230" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="runtimes" value="Claude / Codex / OpenCode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cbd5e1;arcSize=10;fontSize=13;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="836" y="628" width="190" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="web" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="desktop" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="api" target="realtime"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="realtime" target="web"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="realtime" target="desktop"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="api" target="worker"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="worker" target="gateway"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="gateway" target="daemon"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#64748b;strokeWidth=2;" edge="1" parent="1" source="daemon" target="runtimes"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="api" target="postgres"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="api" target="redis"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="api" target="storage"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="worker" target="postgres"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="worker" target="redis"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#94a3b8;strokeWidth=2;dashed=1;" edge="1" parent="1" source="worker" target="storage"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

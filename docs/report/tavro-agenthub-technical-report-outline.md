@@ -65,24 +65,37 @@
 
 该架构将系统划分为四个层次：
 
-1. 客户端层：负责用户交互、消息展示、实时反馈和用户确认，不直接执行 Agent 任务，也不保存业务数据的权威状态。该层包含 Web SPA 和 Desktop Client，两者共享同一套工作台界面；其中 Web SPA 以纯静态前端形式部署，Desktop Client 通过 Electron 复用 Web 界面并补充桌面端能力。
-2. 控制面：负责认证、权限、会话、Agent、Run、Artifact 元数据、OpenAPI 路由和实时推送，关注“谁可以做什么、当前状态是什么、任务应该投递到哪里”。该层包含 API Service 和 Realtime Channel；API Service 承担业务控制入口，Realtime Channel 将消息、运行事件、任务状态和产物变化推送给客户端。
-3. 执行面：负责长任务执行、协调者调度、Run 生命周期推进、本地 runtime 调用和日志回传。该层包含 Worker Service、Daemon Gateway、Local Daemon 和 Agent Runtimes；Worker 消费队列任务并执行调度，Daemon Gateway 接入本地 daemon 的出站连接，Local Daemon 调用 Claude Code、Codex、OpenCode 等 runtime 完成实际执行。
-4. 数据与基础设施层：负责系统持久化、队列缓存、临时状态和产物文件存储。该层包含 PostgreSQL、Redis 和 Supabase Storage；PostgreSQL 保存用户、会话、消息、Run、Goal/Task、Artifact 和 deployment 等业务数据，Redis 支撑队列、缓存和实时协调，Supabase Storage 保存 Artifact、静态站点和 deployment 文件。
+1. 客户端层：负责把复杂的 Agent 执行过程转化为用户可以理解和操作的工作台体验。客户端层只负责用户交互、消息展示、实时反馈和用户确认，不直接执行 Agent 任务，也不保存业务数据的权威状态。
 
-### 2.2 分层职责
+   1.1 Web SPA：以纯静态前端形式部署在 Vercel，提供登录、会话、消息流、任务页、Artifact 工作区、Daemon 页面等核心工作台能力。
 
-客户端层的职责是把复杂的 Agent 执行过程转化为用户可以理解和操作的工作台体验。Web 端作为纯静态 SPA 运行在浏览器中，桌面端通过 Electron 复用同一套界面，并额外提供本地执行器托管、系统浏览器登录和更新提醒等桌面能力。无论 Web 还是桌面端，都只负责展示会话、任务、产物和执行器状态，并触发用户确认后的操作。
+   1.2 Desktop Client：通过 Electron 复用 Web 工作台界面，并补充桌面端能力，例如系统浏览器登录、本地执行器托管和客户端更新提醒。
 
-API 层是系统控制面。它负责认证、权限、会话、Agent、Run、Artifact、deployment 和 daemon device 等元数据管理，同时通过 OpenAPI 路由对外暴露业务接口。API 的关键边界是只创建和调度任务，不在 HTTP 请求中直接执行长任务，从而保证控制面请求能够快速返回并保持稳定。
+2. 控制面：负责认证、权限、会话、Agent、Run、Artifact 元数据、OpenAPI 路由和实时推送，关注“谁可以做什么、当前状态是什么、任务应该投递到哪里”。控制面只创建和调度任务，不在 HTTP 请求中直接执行长任务。
 
-Worker 层是系统执行面的调度中心。它从队列中消费 Run，承载协调者 Orchestrator 的目标拆分和任务分派流程，选择云端 runtime 或已连接 daemon 执行任务，并将运行事件、消息、Goal/Task 状态和 Artifact 记录写回系统。Worker 同时负责触发实时事件和缓存失效，使前端视图能及时反映后台执行结果。
+   2.1 API Service：承担业务控制入口，管理用户会话、权限校验、会话历史、Agent、Run、Artifact、deployment 和 daemon device 等元数据。
 
-Daemon 层是本地执行边界。daemon 运行在用户电脑上，通过出站 WebSocket 连接到 Worker gateway，接收经过授权的任务，调用本地 Claude Code、Codex 等 runtime，并回传日志、消息、文件和状态。daemon 不负责用户系统、会话历史或全局权限判断，因此不是第二套后端，而是受平台控制的本地执行器。
+   2.2 Realtime Channel：通过 SSE 或 WebSocket 将消息、运行事件、任务状态和产物变化推送给 Web 与桌面端，使前端视图能够实时反映后台执行结果。
 
-存储层负责保存权威状态和生成产物。PostgreSQL 提供可恢复的业务状态，Redis 支撑队列、缓存和临时状态，Supabase Storage 解决生成文件与静态部署产物在多服务部署中的共享问题。这一层使系统在页面刷新、服务重启或 API/Worker 分离部署时仍然能够恢复历史记录和产物访问。
+3. 执行面：负责长任务执行、协调者调度、Run 生命周期推进、本地 runtime 调用和日志回传。执行面将耗时任务从 API 请求中解耦，保证控制面保持稳定响应。
 
-### 2.3 核心数据流
+   3.1 Worker Service：消费队列中的 Run，承载协调者 Orchestrator 的目标拆分和任务分派流程，选择云端 runtime 或已连接 daemon 执行任务，并写回运行事件、消息、Goal/Task 状态和 Artifact 记录。
+
+   3.2 Daemon Gateway：接入本地 daemon 的出站连接，负责在 Worker 和用户本机 daemon 之间传递授权后的任务与运行事件。
+
+   3.3 Local Daemon：运行在用户电脑上，检测本地 runtime，接收经过授权的任务，调用本地 Claude Code、Codex 等工具，并回传日志、消息、文件和状态。daemon 不负责用户系统、会话历史或全局权限判断，因此不是第二套后端。
+
+   3.4 Agent Runtimes：包括 Claude Code、Codex、OpenCode 等实际执行工具，负责完成代码、文档、网页、项目文件等具体任务。
+
+4. 数据与基础设施层：负责保存权威状态和生成产物，支撑系统恢复、队列缓存、临时状态和跨服务文件共享。
+
+   4.1 PostgreSQL：保存用户、会话、消息、Run、Goal/Task、Artifact、deployment 和 daemon device 等业务数据。
+
+   4.2 Redis：支撑队列、缓存、临时 OAuth state、桌面登录 code 和实时协调。
+
+   4.3 Supabase Storage：保存 Artifact、静态站点和 deployment 文件，避免 API/Worker 分离部署后依赖单个容器本地磁盘。
+
+### 2.2 核心数据流
 
 建议配图：Run 生命周期时序图。
 
@@ -96,7 +109,7 @@ Daemon 层是本地执行边界。daemon 运行在用户电脑上，通过出站
 6. API/Worker 持久化数据，并通过实时事件推送给前端。
 7. 前端更新消息流、Goal/Task 状态和产物视图。
 
-### 2.4 Daemon 连接与任务分发
+### 2.3 Daemon 连接与任务分发
 
 建议配图：Daemon 连接与任务分发图。
 

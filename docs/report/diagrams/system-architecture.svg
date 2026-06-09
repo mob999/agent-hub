@@ -52,7 +52,7 @@
   <text x="462" y="502" class="box-body">接收本地 daemon 出站连接</text>
   <rect x="764" y="458" width="240" height="58" rx="14" fill="#ffffff" stroke="#fed7aa" filter="url(#shadow)"/>
   <text x="786" y="482" class="box-title">Local Daemon</text>
-  <text x="786" y="502" class="box-body">本地 runtime 检测 / 任务执行 / 日志回传</text>
+  <text x="786" y="502" class="box-body">runtime 检测 / 任务执行 / 日志回传</text>
 
   <rect x="40" y="586" width="1040" height="90" rx="18" fill="#f8fafc" stroke="#cbd5e1"/>
   <text x="64" y="614" class="layer-label">DATA &amp; RUNTIME INFRASTRUCTURE</text>

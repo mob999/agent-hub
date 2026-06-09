@@ -1,9 +1,10 @@
 import { Button, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Image, Json, Renew, Save, Zip } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Image, Json, Menu, Renew, Save, Zip } from '@carbon/react/icons'
 import { inferArtifactFileInfo } from '@agent-hub/core'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { useIsMobile } from '../lib/useIsMobile'
 import type {
   AgentDetails,
   Conversation,
@@ -179,6 +180,8 @@ function ProjectFileIcon({ path }: { path: string }) {
 
 export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps) {
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mode, setMode] = useState<ProjectWorkspaceMode>('code')
   const [projectError, setProjectError] = useState<{ conversationId: string; message: string } | null>(null)
   const [preloadedCodeConversationId, setPreloadedCodeConversationId] = useState<string | null>(null)
@@ -587,7 +590,120 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:max-h-80 max-[671px]:border-b max-[671px]:border-r-0">
+      <style>{`
+        @keyframes agenthub-slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        .agenthub-slide-in { animation: agenthub-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+      `}</style>
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 z-50 flex" aria-modal="true" role="dialog">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+          <div className="agenthub-slide-in relative w-[80vw] max-w-xs h-full overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] shadow-[4px_0_24px_rgba(15,23,42,0.14)]">
+            <div className="border-b border-[#eef0f3] bg-white p-3">
+              <div className="flex items-center justify-between">
+                <div className="inline-flex h-8 rounded-full bg-[#eef0f4] p-0.5">
+                  {(['code', 'changes'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={`h-7 cursor-pointer rounded-full border-0 px-3 text-xs font-semibold capitalize transition-colors ${
+                        mode === item
+                          ? 'bg-white text-[#161616] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                          : 'bg-transparent text-[#69707d] hover:text-[#161616]'
+                      }`}
+                      onClick={() => setMode(item)}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#344054] hover:bg-[#f0f2f5]"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-label="Close sidebar"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 overflow-y-auto p-2">
+              {projectErrorMessage && (
+                <InlineNotification
+                  kind="error"
+                  title="Project unavailable"
+                  subtitle={projectErrorMessage}
+                  lowContrast
+                  hideCloseButton
+                />
+              )}
+              {mode === 'code' ? (
+                codeProjectLoading ? (
+                  <div className="px-2 py-3">
+                    <InlineLoading description="Loading project files..." />
+                  </div>
+                ) : codeTree.length === 0 ? (
+                  <p className="px-2 py-8 text-center text-sm text-[var(--cds-text-secondary)]">No project files yet.</p>
+                ) : (
+                  <div className="grid gap-0.5">
+                    {renderTreeNodes(codeTree, {
+                      activePath: activeFilePath,
+                      expandedDirectories: effectiveExpandedCodeDirectories,
+                      onSelectFile: (file) => {
+                        setSelectedFilePath(file.path)
+                        setSidebarOpen(false)
+                        setExpandedCodeDirectories((current) => {
+                          const next = new Set(current)
+                          expandedDirectoriesForPath(file.path).forEach((directory) => next.add(directory))
+                          return next
+                        })
+                      },
+                      onToggleDirectory: toggleCodeDirectory,
+                    })}
+                  </div>
+                )
+              ) : (
+                <div className="grid gap-3">
+                  <section className="grid gap-1">
+                    <h3 className="px-2 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
+                      Changes ({changes.length})
+                    </h3>
+                    {changes.length === 0 ? (
+                      <p className="px-2 py-6 text-center text-sm text-[var(--cds-text-secondary)]">No internal changes yet.</p>
+                    ) : (
+                      changes.map((change) => {
+                        const selected = change.id === activeChangeId
+                        const agent = agents.find((item) => item.agent.id === change.agentId)
+
+                        return (
+                          <button
+                            key={change.id}
+                            type="button"
+                            className={`grid cursor-pointer gap-1 rounded-lg border-0 px-2 py-2 text-left text-sm ${
+                              selected
+                                ? 'bg-[#e9eaee] text-[#161616]'
+                                : 'bg-transparent text-[#4f5f72] hover:bg-[#eef0f4] hover:text-[#161616]'
+                            }`}
+                            onClick={() => {
+                              setSelectedChangeId(change.id)
+                              setSidebarOpen(false)
+                            }}
+                          >
+                            <span className="line-clamp-2 font-semibold">{change.summary ?? 'Untitled change'}</span>
+                            {agent && (
+                              <span className="text-xs text-[#69707d]">{agent.agent.name}</span>
+                            )}
+                          </button>
+                        )
+                      })
+                    )}
+                  </section>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:hidden">
         <div className="border-b border-[#eef0f3] bg-white p-3">
           <div className="inline-flex h-8 rounded-full bg-[#eef0f4] p-0.5">
             {(['code', 'changes'] as const).map((item) => (
@@ -714,6 +830,16 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
       </aside>
       <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
         <div className="flex min-h-12 items-center justify-between gap-3 border-b border-[#eef0f3] bg-white px-4">
+          {isMobile && (
+            <button
+              type="button"
+              className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#344054] hover:bg-[#f0f2f5]"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open file browser"
+            >
+              <Menu size={20} />
+            </button>
+          )}
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-[var(--cds-text-primary)]">
               {mode === 'code'

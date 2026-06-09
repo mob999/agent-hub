@@ -853,11 +853,11 @@ export function WelcomePage({
           <div className="welcome-dashboard-deck relative min-h-0 overflow-hidden">
             <style>{roundedFieldStyles}</style>
             <section
-              className={`${dashboardCardBase} left-0 ${conversationsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
+              className={`${dashboardCardBase} left-0 flex flex-col ${conversationsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
               aria-label={t('welcome.recentConversations')}
               aria-hidden={!conversationsActive}
               inert={!conversationsActive}
-              style={conversationsActive ? undefined : {
+              style={conversationsActive ? { zIndex: 25 } : {
                 opacity: 0.88,
                 transform: 'translateX(-82%) translateY(1.15rem) scale(0.94)',
                 zIndex: 20,
@@ -871,8 +871,9 @@ export function WelcomePage({
                 <h2 className="text-lg font-semibold leading-6 text-[#161616]">{t('welcome.recentConversations')}</h2>
                 <p className="text-sm leading-5 text-[#69707d]">{t('welcome.conversationsPanelSubtitle')}</p>
               </div>
+              <div className="flex flex-1 flex-col min-h-0 overflow-y-auto">
               {dashboardConversations.length === 0 ? (
-                <div className="grid min-h-0 place-items-center px-8 py-12 text-center">
+                <div className="grid min-h-0 flex-1 place-items-center px-8 py-12 text-center">
                   <div className="grid max-w-sm justify-items-center gap-3">
                     <span className="grid h-11 w-11 place-items-center rounded-lg border border-[#dde3ea] bg-[#f7f9fc] text-[#596171]">
                       <ChatBot size={20} />
@@ -884,7 +885,7 @@ export function WelcomePage({
                   </div>
                 </div>
               ) : (
-                <div className="min-h-0 overflow-y-auto">
+                <>
                   {dashboardConversations.map(({ conversation, latestMessage }, index) => (
                     <button
                       key={conversation.id}
@@ -914,8 +915,9 @@ export function WelcomePage({
                       </time>
                     </button>
                   ))}
-                </div>
+                </>
               )}
+              </div>
               <footer className="flex min-h-16 shrink-0 items-center justify-end border-t border-[#e8edf3] px-4 py-3">
                 <button
                   className={dashboardArrowButton}
@@ -929,11 +931,11 @@ export function WelcomePage({
             </section>
 
             <section
-              className={`${dashboardCardBase} right-0 ${goalsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
+              className={`${dashboardCardBase} right-0 flex flex-col ${goalsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
               aria-label={t('welcome.recentGoals')}
               aria-hidden={!goalsActive}
               inert={!goalsActive}
-              style={goalsActive ? undefined : {
+              style={goalsActive ? { zIndex: 25 } : {
                 opacity: 0.88,
                 transform: 'translateX(82%) translateY(1.15rem) scale(0.94)',
                 zIndex: 20,
@@ -947,8 +949,9 @@ export function WelcomePage({
                 <h2 className="text-lg font-semibold leading-6 text-[#161616]">{t('welcome.goalsPanelTitle')}</h2>
                 <p className="text-sm leading-5 text-[#69707d]">{t('welcome.goalsPanelSubtitle')}</p>
               </div>
+              <div className="flex flex-1 flex-col min-h-0 overflow-y-auto">
               {dashboardGoals.length === 0 ? (
-                <div className="grid min-h-0 place-items-center px-8 py-12 text-center">
+                <div className="grid min-h-0 flex-1 place-items-center px-8 py-12 text-center">
                   <div className="grid max-w-sm justify-items-center gap-3">
                     <span className="grid h-11 w-11 place-items-center rounded-lg border border-[#dde3ea] bg-[#f7f9fc] text-[#596171]">
                       <Task size={20} />
@@ -960,7 +963,7 @@ export function WelcomePage({
                   </div>
                 </div>
               ) : (
-                <div className="min-h-0 overflow-hidden px-4 py-4">
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
                   <GoalStatusBoard
                     emptyLabel={t('chat.noTasks')}
                     goals={dashboardRecentGoals}
@@ -969,6 +972,7 @@ export function WelcomePage({
                   />
                 </div>
               )}
+              </div>
               <footer className="flex min-h-16 shrink-0 items-center justify-start border-t border-[#e8edf3] px-4 py-3">
                 <button
                   className={dashboardArrowButton}

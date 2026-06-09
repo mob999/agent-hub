@@ -1,8 +1,9 @@
 import { Button, IconButton, InlineLoading, InlineNotification } from '@carbon/react'
-import { ChevronDown, ChevronRight, Close, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Close, Code, Document, FileDiff, Folder, FolderOpen, Html, Image, Json, Menu, Zip, Download, Launch, Play, Rocket, Save } from '@carbon/react/icons'
 import Editor, { DiffEditor } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useIsMobile } from '../lib/useIsMobile'
 import { useTranslation } from 'react-i18next'
 import type {
   ConversationArtifact,
@@ -358,6 +359,8 @@ export function ArtifactWorkspace({
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? artifacts[0] ?? null,
     [artifacts, selectedArtifactId],
   )
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [details, setDetails] = useState<ConversationArtifactDetails | null>(null)
   const [content, setContent] = useState('')
   const [draft, setDraft] = useState('')
@@ -778,7 +781,79 @@ export function ArtifactWorkspace({
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:border-b max-[671px]:border-r-0">
+      <style>{`
+        @keyframes agenthub-slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        .agenthub-slide-in { animation: agenthub-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+      `}</style>
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 z-50 flex" aria-modal="true" role="dialog">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+          <div className="agenthub-slide-in relative w-[80vw] max-w-xs h-full overflow-y-auto border-r border-[#eef0f3] bg-[#f7f8fa] shadow-[4px_0_24px_rgba(15,23,42,0.14)]">
+            <div className="border-b border-[#eef0f3] bg-white p-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#596171]">
+                  Files ({artifacts.length})
+                </h2>
+                <button
+                  type="button"
+                  className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#344054] hover:bg-[#f0f2f5]"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-label="Close sidebar"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="grid content-start gap-0.5 overflow-y-auto p-2">
+              {artifacts.map((item) => {
+                const selected = item.id === artifact?.id
+                const itemFileInfo = item.kind === 'site'
+                  ? inferArtifactFileInfo(item.entrypoint ?? 'index.html')
+                  : inferArtifactFileInfo(item.filename)
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`grid cursor-pointer gap-0.5 rounded-md border-0 px-2 py-1.5 text-left text-sm transition-colors ${
+                      selected
+                        ? 'bg-[#dde3ea] text-[#161616]'
+                        : 'bg-transparent text-[#5f6877] hover:bg-[#edf0f4] hover:text-[#161616]'
+                    }`}
+                    onClick={() => { onActiveArtifactChange?.(item.id); setSidebarOpen(false) }}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="grid size-5 shrink-0 place-items-center text-[var(--cds-icon-secondary)]">
+                        <ArtifactFileIcon fileInfo={itemFileInfo} />
+                      </span>
+                      <span className="truncate font-semibold">{item.filename}</span>
+                    </span>
+                    {item.kind === 'site' && (
+                      <span className="truncate pl-7 text-xs text-[#69707d]">
+                        Site project · {item.fileCount ?? 0} files
+                      </span>
+                    )}
+                    {item.title !== item.filename && (
+                      <span className="truncate pl-7 text-xs text-[#69707d]">{item.title}</span>
+                    )}
+                  </button>
+                )
+              })}
+              {artifact?.kind === 'site' && siteFileTree.length > 0 && (
+                <div className="mt-3 border-t border-[#e1e5ea] pt-3">
+                  <h3 className="mb-2 px-2 text-xs font-semibold uppercase text-[#69707d]">
+                    Site files
+                  </h3>
+                  <div className="grid gap-0.5">
+                    {renderSiteTreeNodes(siteFileTree)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:hidden">
         <div className="border-b border-[#eef0f3] bg-white p-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[#596171]">
             Files ({artifacts.length})
@@ -891,6 +966,16 @@ export function ArtifactWorkspace({
 
       <main className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[#eef0f3] bg-white p-3">
+          {isMobile && (
+            <button
+              type="button"
+              className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#344054] hover:bg-[#f0f2f5]"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open file browser"
+            >
+              <Menu size={20} />
+            </button>
+          )}
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-[var(--cds-text-primary)]">
               {artifact?.title ?? 'File'}

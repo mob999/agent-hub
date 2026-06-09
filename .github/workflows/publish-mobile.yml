@@ -79,11 +79,17 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          mv apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk \
+             "dist/Tavro-AI-${VERSION}-android.apk"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: tavro-mobile-apk
-          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: dist/Tavro-AI-*.apk
           if-no-files-found: error
 
   release:

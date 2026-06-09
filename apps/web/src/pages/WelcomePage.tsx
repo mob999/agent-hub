@@ -847,7 +847,7 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="welcome-dashboard-deck grid grid-cols-2 gap-5 min-h-0 max-[960px]:block max-[960px]:relative max-[960px]:overflow-hidden">
+          <div className="welcome-dashboard-deck grid grid-cols-2 gap-5 min-h-0 h-full max-[960px]:block max-[960px]:relative max-[960px]:overflow-hidden">
             <style>{roundedFieldStyles}</style>
             <section
               className={`${dashboardCardBase} max-[960px]:left-0 ${conversationsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
@@ -860,7 +860,7 @@ export function WelcomePage({
                 zIndex: 20,
               }}
             >
-              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5" style={{ minHeight: '5.75rem' }}>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestMessage')}</p>
                   <ChatBot size={19} />
@@ -936,7 +936,7 @@ export function WelcomePage({
                 zIndex: 20,
               }}
             >
-              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5" style={{ minHeight: '5.75rem' }}>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestGoal')}</p>
                   <Task size={19} />

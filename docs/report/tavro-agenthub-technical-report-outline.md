@@ -97,17 +97,27 @@
 
 ### 2.2 核心数据流
 
-建议配图：Run 生命周期时序图。
+Run 生命周期与核心数据流如下图所示：
+
+![Run 生命周期与核心数据流](./diagrams/run-lifecycle.svg)
+
+> 图源文件：`docs/report/diagrams/run-lifecycle.drawio`，可使用 diagrams.net 继续编辑。
+
+Tavro 的一次 Agent 执行不是由前端直接调用某个 CLI 完成，而是被抽象为一个可持久化、可排队、可观察的 Run。Run 是用户消息进入执行系统后的核心状态载体：它记录任务从排队、运行到成功或失败的生命周期，也把消息、Goal/Task、运行事件和 Artifact 串联成同一条可追踪链路。
+
+该数据流的关键设计是将控制面请求和长任务执行解耦。用户发送消息时，API 只负责完成权限校验、消息持久化、Run 创建和队列投递，不在 HTTP 请求中等待 Agent 执行完成。真正的耗时任务由 Worker 消费队列后继续推进，并根据 Agent 与 runtime 的绑定关系选择本地 daemon 或云端 runtime。这样可以避免长任务阻塞普通 API 请求，也便于系统在失败、重试、刷新页面或多端查看时恢复状态。
 
 核心流程：
 
 1. 用户在会话中发送消息。
 2. API 创建 Run，保存 queued 状态并投递队列。
 3. Worker 消费 Run，选择本地 daemon 或云端 runtime。
-4. 协调者 Orchestrator 根据会话上下文理解用户意图，创建 Goal，并在 Goal 下分派多个 Task 给不同 Agent。
-5. Runtime 生成运行事件、消息和 Artifact，Task 状态随执行过程更新。
+4. Daemon 或云端 runtime 接收任务并开始执行，产生运行事件和中间状态。
+5. 需要多 Agent 协作时，runtime 调用协调者 Orchestrator，根据会话上下文创建 Goal，并在 Goal 下分派多个 Task 给不同 Agent。
 6. API/Worker 持久化数据，并通过实时事件推送给前端。
 7. 前端更新消息流、Goal/Task 状态和产物视图。
+
+在执行过程中，文本回复、结构化卡片、任务状态和 Artifact 元数据写入 PostgreSQL，生成文件、静态站点和 deployment 文件写入 Supabase Storage。实时通道只承担事件推送职责，不作为权威存储；前端收到事件后更新消息流、任务页和产物视图。如果前端刷新或断线重连，也可以重新从 API 读取数据库中的权威状态。通过这种方式，系统形成了“用户消息创建 Run、Worker 推进执行、runtime 产生产物、数据库保存状态、实时通道反馈前端”的闭环。
 
 ### 2.3 Daemon 连接与任务分发
 

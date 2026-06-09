@@ -2353,9 +2353,9 @@ export function WorkspacePage({
   return (
     <main
       className={
-        activeView === 'chat'
-          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[3.25rem_minmax(0,1fr)]'
-          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)]'
+        activeView === 'chat' && route !== '/welcome'
+          ? 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_15rem_minmax(0,1fr)] max-[671px]:grid-cols-[minmax(0,1fr)]'
+          : 'fixed inset-0 grid min-h-0 grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[1055px]:grid-cols-[3.25rem_minmax(0,1fr)] max-[671px]:grid-cols-[minmax(0,1fr)]'
       }
       aria-label="AgentHub workspace"
     >
@@ -2419,7 +2419,7 @@ export function WorkspacePage({
                 </div>
               </div>
             )
-          ) : (
+          ) : route !== '/welcome' ? (
             <ChatSidebar
               conversations={conversations}
               archivedAgents={archivedAgents}
@@ -2455,7 +2455,7 @@ export function WorkspacePage({
                 void openAgentConversation(input)
               }}
             />
-          )}
+          ) : null}
           <WorkspacePanel>
             {route === '/welcome' ? (
               <WelcomePage

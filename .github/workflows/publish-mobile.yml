@@ -1,11 +1,20 @@
 name: Publish Mobile
 
 on:
+  push:
+    branches:
+      - dev
+    paths:
+      - apps/mobile/**
+      - apps/web/src/**
+      - packages/**
+      - pnpm-lock.yaml
+      - .github/workflows/publish-mobile.yml
   workflow_dispatch:
     inputs:
       version:
         description: "Exact mobile app version to publish, matching apps/mobile/package.json"
-        required: true
+        required: false
         type: string
       draft:
         description: "Create the GitHub Release as a draft"
@@ -24,9 +33,10 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      VERSION: ${{ inputs.version }}
       # Production API URL — the mobile app always talks to the production
       # backend (tavro-api-production.up.railway.app).
       VITE_AGENTHUB_API_URL: https://tavro-api-production.up.railway.app
@@ -34,6 +44,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          PKG_VERSION=$(node -e "console.log(require('./apps/mobile/package.json').version)")
+          INPUT_VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ] && [ "$INPUT_VERSION" != "$PKG_VERSION" ]; then
+            echo "Input version $INPUT_VERSION does not match package version $PKG_VERSION."
+            exit 1
+          fi
+          echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved version: $PKG_VERSION"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -59,6 +82,8 @@ jobs:
         shell: bash
         run: |
           node -e 'const pkg = require("./apps/mobile/package.json"); if (pkg.version !== process.env.VERSION) { console.error("Input version " + process.env.VERSION + " does not match mobile package version " + pkg.version + "."); process.exit(1); }'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
 
       - name: Typecheck web
         run: pnpm --filter @agent-hub/web typecheck
@@ -98,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      VERSION: ${{ inputs.version }}
+      VERSION: ${{ needs.build.outputs.version }}
       DRAFT: ${{ inputs.draft }}
 
     steps:

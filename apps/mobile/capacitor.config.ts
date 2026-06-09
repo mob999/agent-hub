@@ -1,5 +1,9 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
+const apiHostname = process.env.VITE_AGENTHUB_API_URL
+  ? new URL(process.env.VITE_AGENTHUB_API_URL).hostname
+  : null
+
 const config: CapacitorConfig = {
   appId: 'ai.tavro.mobile',
   appName: 'Tavro AI',
@@ -12,7 +16,11 @@ const config: CapacitorConfig = {
     // Allow Capacitor to load API URLs inside the WebView so the
     // OAuth login flow (which navigates to the API to set the session
     // cookie) stays in-app instead of opening the system browser.
-    allowNavigation: ['10.0.2.2', 'localhost'],
+    allowNavigation: [
+      '10.0.2.2',
+      'localhost',
+      ...(apiHostname ? [apiHostname] : []),
+    ],
   },
   android: {
     allowMixedContent: true,

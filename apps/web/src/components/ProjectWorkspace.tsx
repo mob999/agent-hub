@@ -586,8 +586,8 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[900px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-[#eef0f3] bg-[#f7f8fa] max-[900px]:max-h-80 max-[900px]:border-b max-[900px]:border-r-0">
+    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:grid-cols-1">
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:max-h-80 max-[671px]:border-b max-[671px]:border-r-0">
         <div className="border-b border-[#eef0f3] bg-white p-3">
           <div className="inline-flex h-8 rounded-full bg-[#eef0f4] p-0.5">
             {(['code', 'changes'] as const).map((item) => (

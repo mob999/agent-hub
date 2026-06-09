@@ -781,15 +781,15 @@ export function WelcomePage({
 
     return (
       <section
-        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-y-auto max-[671px]:p-4"
+        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-hidden max-[671px]:p-4"
         style={{
           backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #f5f6f8 38%, #d9dde4 72%, #111827 100%)',
         }}
         aria-label="Welcome dashboard"
       >
-        <div className="relative mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5 max-[960px]:h-auto max-[960px]:min-h-full">
-          <header className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4 max-[760px]:grid-cols-1">
-            <div className="grid max-w-3xl gap-3">
+        <div className="relative mx-auto grid h-full min-h-0 w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-5 max-[960px]:h-full">
+          <header className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#6b7280]">
                 {isMobileCheck && onOpenSidebar && (
                   <button
@@ -803,6 +803,35 @@ export function WelcomePage({
                 )}
                 <span>{dashboardDate}</span>
               </div>
+              {(devMode || isCapacitor) && (
+                <div className="flex flex-wrap gap-1 text-xs">
+                  <button
+                    className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    onClick={() => {
+                      setActiveOnboardingStep('daemon')
+                      setFreshOnboardingPreview(false)
+                      setForceOnboardingTutorial(true)
+                    }}
+                  >
+                    <ArrowLeft size={16} />
+                    {t('welcome.tutorial')}
+                  </button>
+                  <button
+                    className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    onClick={() => {
+                      setActiveOnboardingStep('daemon')
+                      setFreshOnboardingPreview(true)
+                      setForceOnboardingTutorial(true)
+                    }}
+                  >
+                    {t('welcome.freshStart')}
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="grid max-w-3xl gap-3">
               <div className="grid gap-2">
                 <div className="flex min-w-0 items-start gap-3">
                   <img
@@ -819,33 +848,6 @@ export function WelcomePage({
                 </p>
               </div>
             </div>
-            {(devMode || isCapacitor) && (
-              <div className="flex flex-wrap justify-end gap-1 self-start text-xs">
-                <button
-                  className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                  type="button"
-                  onClick={() => {
-                    setActiveOnboardingStep('daemon')
-                    setFreshOnboardingPreview(false)
-                    setForceOnboardingTutorial(true)
-                  }}
-                >
-                  <ArrowLeft size={16} />
-                  {t('welcome.tutorial')}
-                </button>
-                <button
-                  className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                  type="button"
-                  onClick={() => {
-                    setActiveOnboardingStep('daemon')
-                    setFreshOnboardingPreview(true)
-                    setForceOnboardingTutorial(true)
-                  }}
-                >
-                  {t('welcome.freshStart')}
-                </button>
-              </div>
-            )}
           </header>
 
           <div className="welcome-dashboard-deck relative min-h-0 overflow-hidden">
@@ -1206,7 +1208,7 @@ export function WelcomePage({
             )}
           </div>
 
-          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[#edf0f4] pt-5 max-[671px]:grid">
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[#edf0f4] pt-5">
             <button
               className={subtleButton}
               type="button"

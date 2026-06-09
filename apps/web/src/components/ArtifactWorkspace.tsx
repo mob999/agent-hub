@@ -777,14 +777,14 @@ export function ArtifactWorkspace({
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[1055px]:grid-cols-1">
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[1055px]:border-b max-[1055px]:border-r-0">
+    <div className="grid h-full min-h-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-[#e1e5ea] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-[671px]:grid-cols-1">
+      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#eef0f3] bg-[#f7f8fa] max-[671px]:border-b max-[671px]:border-r-0">
         <div className="border-b border-[#eef0f3] bg-white p-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[#596171]">
             Files ({artifacts.length})
           </h2>
         </div>
-        <div className="grid content-start gap-0.5 overflow-y-auto p-2 max-[1055px]:max-h-56">
+        <div className="grid content-start gap-0.5 overflow-y-auto p-2 max-[671px]:max-h-56">
           {artifacts.map((item) => {
             const selected = item.id === artifact?.id
             const itemFileInfo = item.kind === 'site'
@@ -1057,7 +1057,7 @@ export function ArtifactWorkspace({
               }}
             />
           ) : isMarkdown ? (
-            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[1055px]:grid-cols-1">
+            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[671px]:grid-cols-1">
               <div className="min-h-0 min-w-0 overflow-hidden">
                 <Editor
                   height="100%"
@@ -1068,7 +1068,7 @@ export function ArtifactWorkspace({
                   onChange={(value) => setDraft(value ?? '')}
                 />
               </div>
-              <div className="min-h-0 min-w-0 overflow-hidden border-l border-[var(--cds-border-subtle-01)] max-[1055px]:border-l-0 max-[1055px]:border-t">
+              <div className="min-h-0 min-w-0 overflow-hidden border-l border-[var(--cds-border-subtle-01)] max-[671px]:border-l-0 max-[671px]:border-t">
                 <div ref={markdownPreviewRef} className="h-full min-h-0 overflow-y-auto p-3">
                   <MessageContent className="block text-sm leading-5" content={draft} />
                 </div>

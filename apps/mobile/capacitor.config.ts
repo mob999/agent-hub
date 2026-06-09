@@ -1,9 +1,5 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
-const apiHostname = process.env.VITE_AGENTHUB_API_URL
-  ? new URL(process.env.VITE_AGENTHUB_API_URL).hostname
-  : null
-
 const config: CapacitorConfig = {
   appId: 'ai.tavro.mobile',
   appName: 'Tavro AI',
@@ -19,7 +15,7 @@ const config: CapacitorConfig = {
     allowNavigation: [
       '10.0.2.2',
       'localhost',
-      ...(apiHostname ? [apiHostname] : []),
+      'tavro-api-production.up.railway.app',
     ],
   },
   android: {
@@ -27,7 +23,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     CapacitorHttp: {
-      enabled: false,
+      enabled: true,
     },
   },
 }

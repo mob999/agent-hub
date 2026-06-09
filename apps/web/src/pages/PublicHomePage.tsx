@@ -103,10 +103,12 @@ export function PublicHomePage({ navigate }: PublicHomePageProps) {
     <main className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)_auto] bg-[#fafafa] text-[#161616]" aria-label="Tavro AI">
       <PublicHeader navigate={navigate} />
 
-      <section className="mx-auto grid min-h-0 w-full max-w-7xl grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)] items-center gap-8 px-6 py-10 max-[1055px]:grid-cols-1 max-[1055px]:items-start max-[671px]:px-4 max-[671px]:py-8">
-        <ChatPreview />
+      <section className="mx-auto grid min-h-0 w-full max-w-7xl grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)] items-center gap-8 overflow-y-auto px-6 py-10 max-[1055px]:grid-cols-1 max-[1055px]:items-start max-[671px]:px-4 max-[671px]:py-6">
+        <div className="max-[1055px]:order-2">
+          <ChatPreview />
+        </div>
 
-        <div className="grid max-w-[48rem] gap-7">
+        <div className="grid max-w-[48rem] gap-7 max-[1055px]:order-1">
           <div className="grid gap-4">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#69707d]">
               {t('publicHome.hero.eyebrow')}

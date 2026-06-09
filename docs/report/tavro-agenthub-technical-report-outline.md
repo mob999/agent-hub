@@ -260,35 +260,35 @@ Daemon 同时维护本地 workspace 与工具桥接。Agent workspace 由 `works
 
 ### 5.1 线上部署拓扑
 
-建议配图：生产部署拓扑图。
+![生产部署拓扑](diagrams/production-deployment.svg)
 
-- Web：Vercel。
-- API/Worker/Redis：Railway。
-- Database：Supabase PostgreSQL。
-- Object Storage：Supabase Storage。
-- Daemon：npm 包 `@tavro-ai/daemon`。
-- Desktop：GitHub Release。
+Tavro 的生产部署遵循“静态前端、控制面、执行面、数据基础设施、本地执行器”分离的原则。Web 主站部署在 Vercel，作为纯静态 SPA 对外提供工作台页面；文档站 `apps/docs` 同样作为独立 Vercel 项目部署，用于承载产品文档和使用说明。由于前端不依赖 SSR，Vercel 只需要执行前端构建并发布静态产物，运行时请求统一访问后端 API。
+
+后端控制面和执行面部署在 Railway。API Service 提供认证、OpenAPI 路由、会话、Agent、Run、Artifact、Deployment、Daemon 设备管理和 SSE 实时通道；Worker Service 负责 Run 队列消费、daemon gateway、Agent workspace provisioning、project clone、Artifact action、memory append 等后台任务。Redis 同样运行在 Railway，用于队列、缓存、实时协调和 OAuth 临时状态。API 与 Worker 可以独立部署和重启，但必须共享同一套 PostgreSQL、Redis、对象存储和关键密钥。
+
+数据库采用 Supabase PostgreSQL，保存用户、会话、Run、Goal/Task、Artifact 元数据、daemon devices 和部署记录等权威数据。对象存储采用 Supabase Storage 的 S3-compatible API，生产环境将 `AGENTHUB_STORAGE_DRIVER` 设置为 `s3`，API 与 Worker 使用相同 bucket 读写 Artifact、站点文件和 deployment 文件。这样可以避免 API 与 Worker 分别运行在不同容器时依赖本地磁盘，从根源上解决生成产物跨服务不可见的问题。
+
+本地执行器不部署在云端，而是通过 npm 包 `@tavro-ai/daemon` 分发。用户可以手动运行 `npx -y @tavro-ai/daemon@latest connect ...`，桌面客户端也可以托管同一条 npx 命令并在后台启动 daemon。桌面客户端安装包通过 GitHub Release 分发，三端构建产物包括 Windows、macOS 和 Linux 安装包。整体部署形态保证 Web/API/Worker 可以独立上线，同时 daemon 和 desktop 作为客户端侧能力单独发版。
 
 ### 5.2 环境变量与配置
 
-需要说明的配置包括：
+生产环境配置围绕四类边界展开：访问域名、认证密钥、执行器连接和产物存储。访问域名方面，API 与 Worker 都需要设置 `AGENTHUB_PUBLIC_WEB_URL`，用于生成 OAuth 跳转、Artifact 链接、deployment 链接和用户可见的 Web URL；API 还需要根据该 origin 配置 CORS。GitHub OAuth 需要配置 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET` 和 `GITHUB_OAUTH_CALLBACK_URL`，其中 callback URL 指向生产 API 的 `/auth/github/callback`。
 
-- GitHub OAuth client id、client secret 和 callback URL。
-- CORS/Web origin。
-- Database URL。
-- Redis URL。
-- daemon token secret。
-- Supabase Storage bucket 和 service role。
+数据与队列配置包括 `DATABASE_URL` 和 `REDIS_URL`。`DATABASE_URL` 指向 Supabase PostgreSQL，API、Worker 和 migration workflow 必须使用同一生产库；`REDIS_URL` 指向 Railway Redis，用于队列、缓存、SSE pub/sub、desktop OAuth state 和 login code。为了保证 daemon token 在多服务之间可验证，生产环境需要设置 `AGENTHUB_DAEMON_TOKEN_SECRET`，API 用它生成设备 token，Worker gateway 用它校验 daemon 连接。
+
+产物存储配置通过统一 storage adapter 暴露。开发环境默认使用 `AGENTHUB_STORAGE_DRIVER=local` 和 `AGENTHUB_STORAGE_ROOT`；生产环境使用 `AGENTHUB_STORAGE_DRIVER=s3`，并配置 `AGENTHUB_S3_ENDPOINT`、`AGENTHUB_S3_REGION`、`AGENTHUB_S3_ACCESS_KEY_ID`、`AGENTHUB_S3_SECRET_ACCESS_KEY`、`AGENTHUB_S3_BUCKET`。当底层使用 Supabase Storage 时，这些变量指向 Supabase 的 S3 兼容 endpoint 和 bucket。API 与 Worker 必须使用完全一致的存储配置，否则 Artifact 或 deployment 可能出现写入端可见、读取端不可见的问题。
+
+配置管理上，本地 `.env.example` 保留开发默认值，生产密钥只放在 Vercel、Railway、GitHub Actions secrets 或 Supabase 控制台中，不进入仓库。Vercel Web 项目主要需要公开的 API origin 配置；Railway API/Worker 则需要数据库、Redis、OAuth、daemon、storage、public web URL 等服务端变量；GitHub Actions 中的生产迁移 workflow 只需要 `PROD_DATABASE_URL`，daemon publish workflow 需要 npm token，desktop release workflow 依赖 GitHub token 创建或更新 Release。
 
 ### 5.3 CI/CD 流程
 
-建议配图：CI/CD 发布流程图。
+Tavro 的 CI/CD 采用“日常开发在 dev、生产发布手动 promote”的模式。`ci.yml` 在 `dev` 和 `main` 分支上执行 `pnpm check`，覆盖 lint、typecheck 和测试。功能开发完成后先合入 `dev`，通过 CI 后再由 `Promote to Production` workflow 手动触发发布。该 workflow 可以选择是否运行 `pnpm check` 和生产数据库迁移，随后将指定来源分支 fast-forward 到 `main`。Vercel 和 Railway 监听 `main` 分支，因此真正的 Web/API/Worker 生产部署由平台自动触发，但入口仍由 GitHub Actions 的手动 promote 控制。
 
-- main 分支触发 Vercel/Railway 平台自动部署。
-- promote workflow 控制 dev 到 main 的发布入口。
-- Supabase migration workflow 负责生产数据库迁移。
-- daemon publish workflow 负责 npm 包发版。
-- desktop release workflow 负责三端桌面安装包构建和 GitHub Release。
+数据库迁移与代码发布绑定在同一个 promote workflow 中。生产迁移使用 `PROD_DATABASE_URL` 注入 `DATABASE_URL`，执行 `pnpm --filter @agent-hub/db db:migrate`。这种方式避免开发者在本机直接连生产库执行迁移，也保证迁移可以和 main 分支代码版本对应。由于迁移可能具有破坏性，workflow 将 `run_migrations` 作为显式输入，发布时由维护者确认是否需要执行。
+
+Daemon 与 Desktop 不跟随 main 自动发版。`publish-daemon.yml` 是手动 workflow，输入版本号必须与 `packages/tavro-daemon/package.json` 中的版本一致，并且会检查 npm 上该版本是否已经存在；随后构建 `@tavro-ai/daemon` 包、执行 dry-run pack，并发布到 npm。`publish-desktop.yml` 同样手动触发，输入版本必须与 `apps/desktop/package.json` 一致；workflow 在 Windows、macOS、Linux 三个平台分别 typecheck、build、dist 打包，再统一创建或更新 `tavro-desktop-vX.Y.Z` GitHub Release。
+
+这种流程的特点是将不同交付物拆开治理：Web/API/Worker 通过 main 分支上线；数据库迁移由 promote workflow 显式控制；daemon 作为 npm 包独立演进；desktop 作为安装包独立发布。对于 Tavro 这种同时包含云端服务、本地执行器和桌面客户端的系统，这种模式可以减少无关改动触发错误部署，也能让课题演示时明确说明每类产物的发布边界。
 
 ## 第 6 章 AI 协作方法与工程规范
 

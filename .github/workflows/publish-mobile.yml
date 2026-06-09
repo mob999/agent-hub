@@ -1,0 +1,129 @@
+name: Publish Mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact mobile app version to publish, matching apps/mobile/package.json"
+        required: true
+        type: string
+      draft:
+        description: "Create the GitHub Release as a draft"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: publish-mobile
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      VERSION: ${{ inputs.version }}
+      # Production API URL — the mobile app always talks to the production
+      # backend (tavro-ai.vercel.app) because that is the canonical deployment.
+      VITE_AGENTHUB_API_URL: https://tavro-ai.vercel.app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify requested version
+        shell: bash
+        run: |
+          node -e 'const pkg = require("./apps/mobile/package.json"); if (pkg.version !== process.env.VERSION) { console.error("Input version " + process.env.VERSION + " does not match mobile package version " + pkg.version + "."); process.exit(1); }'
+
+      - name: Typecheck web
+        run: pnpm --filter @agent-hub/web typecheck
+
+      - name: Build web
+        run: pnpm --filter @agent-hub/web build
+
+      - name: Sync Capacitor
+        working-directory: apps/mobile
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: tavro-mobile-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      DRAFT: ${{ inputs.draft }}
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: tavro-mobile-apk
+          path: mobile-artifacts
+
+      - name: Create or update GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="tavro-mobile-v${VERSION}"
+          files=(mobile-artifacts/*)
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No APK artifacts were downloaded."
+            exit 1
+          fi
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${files[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
+            exit 0
+          fi
+
+          draft_flag=()
+          if [ "${DRAFT}" = "true" ]; then
+            draft_flag=(--draft)
+          fi
+
+          gh release create "${tag}" "${files[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Tavro Mobile ${VERSION}" \
+            --notes "Tavro AI Android client ${VERSION} (debug APK)." \
+            "${draft_flag[@]}"

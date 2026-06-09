@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type {
   AgentDetails,
   Conversation,
+  ConversationProjectChange,
   ProjectChangedFile,
   ProjectFileEntry,
   UpdateProjectFileContentResponse,
@@ -24,6 +25,8 @@ import {
 type ProjectWorkspaceMode = 'code' | 'changes'
 
 type TreeFile = ProjectFileEntry | ProjectChangedFile
+const emptyProjectFiles: ProjectFileEntry[] = []
+const emptyProjectChanges: ConversationProjectChange[] = []
 const emptyChangedFiles: ProjectChangedFile[] = []
 const maxPreloadedCodeFiles = 30
 const maxPreloadedCodeFileBytes = 512 * 1024
@@ -177,14 +180,14 @@ function ProjectFileIcon({ path }: { path: string }) {
 export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps) {
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<ProjectWorkspaceMode>('code')
-  const [projectError, setProjectError] = useState<string | null>(null)
+  const [projectError, setProjectError] = useState<{ conversationId: string; message: string } | null>(null)
   const [preloadedCodeConversationId, setPreloadedCodeConversationId] = useState<string | null>(null)
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [expandedCodeDirectories, setExpandedCodeDirectories] = useState<Set<string>>(() => new Set())
   const [fileDraftByKey, setFileDraftByKey] = useState<Record<string, string>>({})
   const [isSavingFile, setIsSavingFile] = useState(false)
-  const [activeChangeId, setActiveChangeId] = useState<string | null>(null)
-  const [activeChangeFileById, setActiveChangeFileById] = useState<Record<string, string>>({})
+  const [selectedChangeId, setSelectedChangeId] = useState<string | null>(null)
+  const [selectedChangeFileById, setSelectedChangeFileById] = useState<Record<string, string>>({})
   const [expandedChangeDirectories, setExpandedChangeDirectories] = useState<Set<string>>(() => new Set())
 
   const conversationId = conversation.id
@@ -193,7 +196,16 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
     queryFn: () => fetchProjectFiles(conversationId),
     queryKey: queryKeys.projectFiles(conversationId),
   })
-  const files = projectFilesQuery.data?.files ?? []
+  const files = projectFilesQuery.data?.files ?? emptyProjectFiles
+  const firstCodeFilePath = useMemo(() => (
+    selectPreloadableCodeFiles(files)[0]?.path
+      ?? files.find((file) => file.type === 'file')?.path
+      ?? null
+  ), [files])
+  const activeFilePath =
+    selectedFilePath !== null && files.some((file) => file.type === 'file' && file.path === selectedFilePath)
+      ? selectedFilePath
+      : firstCodeFilePath
   const fileContentKey = activeFilePath === null ? null : `${conversationId}:${activeFilePath}`
   const activeFileInfo = activeFilePath === null ? null : inferArtifactFileInfo({ filename: activeFilePath })
   const activeFileContentQuery = useQuery({
@@ -206,8 +218,15 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
   const fileContent = activeFileContentQuery.data?.content ?? ''
   const fileDraft = fileContentKey === null ? '' : fileDraftByKey[fileContentKey] ?? fileContent
   const fileDirty = fileContentKey !== null && fileDraft !== fileContent
-  const codeTree = useMemo(() => buildProjectTree(files), [files])
   const preloadableCodeFiles = useMemo(() => selectPreloadableCodeFiles(files), [files])
+  const codeTree = useMemo(() => buildProjectTree(files), [files])
+  const effectiveExpandedCodeDirectories = useMemo(() => {
+    const next = new Set(expandedCodeDirectories)
+    if (selectedFilePath === null && firstCodeFilePath !== null) {
+      expandedDirectoriesForPath(firstCodeFilePath).forEach((directory) => next.add(directory))
+    }
+    return next
+  }, [expandedCodeDirectories, firstCodeFilePath, selectedFilePath])
   const activeCodeFileContentPending =
     activeFileInfo?.canEdit === true &&
     activeFileContentQuery.data === undefined &&
@@ -217,7 +236,11 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
     queryFn: () => fetchProjectChanges(conversationId),
     queryKey: queryKeys.projectChanges(conversationId),
   })
-  const changes = projectChangesQuery.data?.changes ?? []
+  const changes = projectChangesQuery.data?.changes ?? emptyProjectChanges
+  const activeChangeId =
+    selectedChangeId !== null && changes.some((change) => change.id === selectedChangeId)
+      ? selectedChangeId
+      : changes[0]?.id ?? null
   const activeChange = changes.find((change) => change.id === activeChangeId) ?? null
   const activeChangeFilesQuery = useQuery({
     enabled: mode === 'changes' && activeChangeId !== null,
@@ -227,7 +250,12 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
       : queryKeys.projectChangeFiles(conversationId, activeChangeId),
   })
   const activeChangeFiles = activeChangeFilesQuery.data?.files ?? emptyChangedFiles
-  const activeChangeFilePath = activeChangeId === null ? null : activeChangeFileById[activeChangeId] || null
+  const selectedChangeFilePath = activeChangeId === null ? null : selectedChangeFileById[activeChangeId] || null
+  const activeChangeFilePath =
+    selectedChangeFilePath !== null &&
+    activeChangeFiles.some((file) => file.path === selectedChangeFilePath || file.oldPath === selectedChangeFilePath)
+      ? selectedChangeFilePath
+      : activeChangeFiles[0]?.path ?? null
   const activeChangeFile = activeChangeFilePath === null
     ? null
     : activeChangeFiles.find((file) => file.path === activeChangeFilePath || file.oldPath === activeChangeFilePath) ?? null
@@ -241,53 +269,24 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
   const activeChangeContent = activeChangeContentQuery.data ?? null
   const activeChangeFileInfo = activeChangeFile === null ? null : inferArtifactFileInfo({ filename: activeChangeFile.path })
   const changeTree = useMemo(() => buildProjectTree(activeChangeFiles), [activeChangeFiles])
+  const effectiveExpandedChangeDirectories = useMemo(() => {
+    const next = new Set(expandedChangeDirectories)
+    if (selectedChangeFilePath === null && activeChangeFilePath !== null) {
+      expandedDirectoriesForPath(activeChangeFilePath).forEach((directory) => next.add(directory))
+    }
+    return next
+  }, [activeChangeFilePath, expandedChangeDirectories, selectedChangeFilePath])
   const codeProjectLoading = projectFilesQuery.isPending || (projectFilesQuery.isFetching && files.length === 0)
   const projectQueryError = mode === 'code'
     ? projectFilesQuery.error ?? activeFileContentQuery.error
     : projectChangesQuery.error ?? activeChangeFilesQuery.error ?? activeChangeContentQuery.error
-  const projectErrorMessage = projectError
+  const scopedProjectError = projectError?.conversationId === conversationId ? projectError.message : null
+  const projectErrorMessage = scopedProjectError
     ?? (projectQueryError instanceof Error
       ? projectQueryError.message
       : projectQueryError === null
         ? null
         : 'Unable to load project data.')
-
-  useEffect(() => {
-    setProjectError(null)
-    setActiveFilePath(null)
-    setExpandedCodeDirectories(new Set())
-    setPreloadedCodeConversationId(null)
-    setActiveChangeId(null)
-    setActiveChangeFileById({})
-    setExpandedChangeDirectories(new Set())
-  }, [conversationId])
-
-  useEffect(() => {
-    if (mode !== 'code') {
-      return
-    }
-
-    if (files.length === 0) {
-      setActiveFilePath(null)
-      return
-    }
-
-    const firstFilePath = selectPreloadableCodeFiles(files)[0]?.path
-      ?? files.find((file) => file.type === 'file')?.path
-      ?? null
-
-    setActiveFilePath((current) => {
-      if (current !== null && files.some((file) => file.type === 'file' && file.path === current)) {
-        return current
-      }
-
-      if (firstFilePath !== null) {
-        setExpandedCodeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
-      }
-
-      return firstFilePath
-    })
-  }, [files, mode])
 
   useEffect(() => {
     if (
@@ -306,8 +305,6 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
         preloadableCodeFiles,
         codePreloadConcurrency,
         async (file) => {
-          const key = `${conversationId}:${file.path}`
-
           try {
             const response = await queryClient.fetchQuery({
               queryFn: () => fetchProjectFileContent(conversationId, file.path),
@@ -318,9 +315,7 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
               return
             }
 
-            setFileDraftByKey((current) => current[key] === undefined
-              ? { ...current, [key]: response.content }
-              : current)
+            queryClient.setQueryData(queryKeys.projectFileContent(conversationId, file.path), response)
           } catch {
             // Individual preload failures fall back to on-demand loading.
           }
@@ -343,54 +338,6 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
     projectFilesQuery.data,
     queryClient,
   ])
-
-  useEffect(() => {
-    if (fileContentKey === null || activeFileContentQuery.data === undefined) {
-      return
-    }
-
-    setFileDraftByKey((current) => current[fileContentKey] === undefined
-      ? { ...current, [fileContentKey]: activeFileContentQuery.data.content }
-      : current)
-  }, [activeFileContentQuery.data, fileContentKey])
-
-  useEffect(() => {
-    if (mode !== 'changes') {
-      return
-    }
-
-    setActiveChangeId((current) => {
-      if (current !== null && changes.some((change) => change.id === current)) {
-        return current
-      }
-
-      return changes[0]?.id ?? null
-    })
-  }, [changes, mode])
-
-  useEffect(() => {
-    if (mode !== 'changes' || activeChangeId === null || activeChangeFiles.length === 0) {
-      return
-    }
-
-    const firstFilePath = activeChangeFiles[0]?.path ?? ''
-    setActiveChangeFileById((current) => {
-      const currentPath = current[activeChangeId]
-      if (
-        currentPath !== undefined &&
-        activeChangeFiles.some((file) => file.path === currentPath || file.oldPath === currentPath)
-      ) {
-        return current
-      }
-
-      if (firstFilePath.length > 0) {
-        setExpandedChangeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
-        return { ...current, [activeChangeId]: firstFilePath }
-      }
-
-      return current
-    })
-  }, [activeChangeFiles, activeChangeId, mode])
 
   const refreshProjectCode = async () => {
     if (fileDirty || isSavingFile) {
@@ -465,7 +412,10 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectFiles(conversationId) })
       setProjectError(null)
     } catch (error) {
-      setProjectError(error instanceof Error ? error.message : 'Unable to save project file.')
+      setProjectError({
+        conversationId,
+        message: error instanceof Error ? error.message : 'Unable to save project file.',
+      })
     } finally {
       setIsSavingFile(false)
     }
@@ -677,9 +627,9 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
               <div className="grid gap-0.5">
                 {renderTreeNodes(codeTree, {
                   activePath: activeFilePath,
-                  expandedDirectories: expandedCodeDirectories,
+                  expandedDirectories: effectiveExpandedCodeDirectories,
                   onSelectFile: (file) => {
-                    setActiveFilePath(file.path)
+                    setSelectedFilePath(file.path)
                     setExpandedCodeDirectories((current) => {
                       const next = new Set(current)
                       expandedDirectoriesForPath(file.path).forEach((directory) => next.add(directory))
@@ -712,7 +662,7 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
                             ? 'bg-[#e9eaee] text-[#161616]'
                             : 'bg-transparent text-[#4f5f72] hover:bg-[#eef0f4] hover:text-[#161616]'
                         }`}
-                        onClick={() => setActiveChangeId(change.id)}
+                        onClick={() => setSelectedChangeId(change.id)}
                       >
                         <span className="flex min-w-0 items-center justify-between gap-2">
                           <span className="min-w-0 truncate font-semibold">{change.summary || change.branchName}</span>
@@ -740,12 +690,12 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
                   ) : (
                     renderTreeNodes(changeTree, {
                       activePath: activeChangeFilePath,
-                      expandedDirectories: expandedChangeDirectories,
+                      expandedDirectories: effectiveExpandedChangeDirectories,
                       onSelectFile: (file) => {
                         if (activeChangeId === null) {
                           return
                         }
-                        setActiveChangeFileById((current) => ({ ...current, [activeChangeId]: file.path }))
+                        setSelectedChangeFileById((current) => ({ ...current, [activeChangeId]: file.path }))
                         setExpandedChangeDirectories((current) => {
                           const next = new Set(current)
                           expandedDirectoriesForPath(file.path).forEach((directory) => next.add(directory))

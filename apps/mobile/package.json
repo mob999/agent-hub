@@ -1,6 +1,6 @@
 {
   "name": "@agent-hub/mobile",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Tavro AI mobile app (Capacitor)",
   "scripts": {

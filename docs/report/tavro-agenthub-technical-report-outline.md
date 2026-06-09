@@ -204,55 +204,57 @@ Tavro 需要同时接入 Claude Code、Codex 等不同 CLI runtime，而这些�
 
 ### 4.1 前端实现
 
-- 技术栈：Vite、React、TypeScript、Carbon Design System、Tailwind CSS。
-- 核心模块：工作台布局、会话侧边栏、消息流、任务页、Artifact 工作区、Project Code 面板和 Daemon 页面。
-- Goal/Task 在前端通过任务页、状态聚合视图和聊天流卡片展示；用户可从卡片跳转到对应目标或任务。
-- 状态管理：TanStack Query 管理服务端数据，本地 state 管理弹窗、草稿、选中态和交互状态。
-- 实时更新：接收消息、Run、任务、Artifact 和项目文件事件并同步更新 UI。
-- 交互反馈：用户消息采用 optimistic 入列，页面切换和项目文件读取通过前端缓存、预加载和手动刷新降低等待感。
+前端位于 `apps/web`，采用 Vite、React、TypeScript、Carbon Design System 与 Tailwind CSS 实现。整体上它是一个纯静态 SPA，不承担 Agent 执行、权限判定或业务状态的权威存储职责，而是通过 HTTP API 和实时事件通道展示控制面与执行面的状态。应用入口在 `main.tsx` 中挂载 `QueryClientProvider`，全局路由由 `App.tsx` 解析当前路径并分发到登录页、Welcome、工作台、Runs、Daemon、编辑器等页面。
+
+工作台的核心实现集中在 `WorkspacePage` 与若干领域组件中。`ChatSidebar` 承载群聊、项目和 Agent 会话入口；`ChannelWorkspace` 负责消息流、任务视图、Artifact 入口、项目工作区和部署记录；`ProjectWorkspace` 承载 Project Code 与 changes 视图；`ArtifactWorkspace` 提供文件、站点产物的预览、编辑、revision 和 action 触发能力。Goal/Task 在前端不是独立于聊天流的另一套页面，而是同时通过聊天卡片、任务页和状态聚合视图呈现，用户可以从卡片跳转到对应目标或任务。
+
+前端状态分为 server state 与本地 UI state。认证用户、daemon devices、agents、conversations、messages、tasks、artifacts、deployments、runs 和 Welcome summary 由 TanStack Query 管理，统一定义在 `lib/query.ts` 中；弹窗、草稿、选中态、搜索、消息发送状态和实时 toast 等则保留在组件本地。用户发送消息时，前端会先插入临时用户消息并显示 queued 状态，API 返回真实消息和 Run 后再替换临时消息；Project Code 面板也通过 query cache、预加载和手动刷新降低文件切换等待感。
+
+实时更新由浏览器端 `EventSource` 订阅 `/events` 完成。前端接收 `conversation.message.created/updated`、`run.updated`、`run.event.created`、`task.updated`、`artifact.created`、`artifact.action.updated` 等事件后，会同步更新 TanStack Query cache 和必要的本地 state。这样即使页面已经加载过历史数据，也能在 Run 执行、任务分派、Artifact 生成或部署状态变化时保持 UI 与后端状态一致。对于桌面端，Web 仍复用同一套页面，只通过 `window.tavroDesktop` bridge 访问登录、托管 daemon、检查更新等桌面专有能力。
 
 ### 4.2 API 实现
 
-- 技术栈：Hono、Node.js、`@hono/zod-openapi`。
-- 路由采用 `createRoute + app.openapi(...)` 暴露 OpenAPI 文档。
-- API 模块包括 auth、agents、conversations、runs、daemon、artifacts、deployments、search 和 realtime。
-- 协调者相关操作通过会话、Run、Goal/Task 和消息接口串联，不作为独立第二套执行服务。
-- API 是控制面，负责权限校验、状态持久化和任务投递，不直接执行长任务。
+API 位于 `apps/api`，运行在 Node.js 上，使用 Hono 与 `@hono/zod-openapi` 组织 HTTP 服务。`index.ts` 负责加载环境变量、创建 PostgreSQL/Redis/logger、订阅 realtime 事件并启动服务；`app.ts` 创建 `OpenAPIHono`，注入 `env/db/redis/user` 等上下文，挂载 Swagger/OpenAPI 文档和各领域路由。业务路由按 auth、agents、conversations、conversation messages、project files、artifacts、daemon、runs、search、welcome、realtime 等模块拆分，稳定 JSON API 尽量通过 `createRoute + app.openapi(...)` 或 `openApiRoute` helper 注册。
+
+认证模块采用 GitHub-only 登录。普通 Web 登录通过 GitHub OAuth cookie state 完成；桌面端登录则新增 desktop OAuth state 与一次性 login code，配合 `tavro://` 协议回跳 Electron，再由 `/auth/desktop/complete` 设置会话 cookie。`attachAuthUser` 中间件负责从 session cookie 解析用户，并对 session 结果做短 TTL Redis 缓存；登出和用户资料更新会主动删除相关 session cache。
+
+API 的职责是控制面而不是执行面。它负责权限校验、请求参数校验、业务元数据读写、Run 创建、队列投递、缓存失效和实时事件发布；长任务执行、runtime 调用、项目 clone、Artifact action 和记忆写入都交给 Worker/daemon。协调者相关能力也没有做成独立服务，而是通过会话消息、Run、Goal/Task、MCP 工具事件和 repository 逻辑串联。当前 Project Code 路由在 project ready 后仍基于 `baseRepoPath` 执行文件树读取、文件内容读取和文本保存提交，适合 API 与项目仓库同机或共享路径的 remote project 场景；如果项目仓库只存在于用户本地 daemon 机器，后续需要继续收敛到 daemon 文件访问网关。
 
 ### 4.3 数据层实现
 
-- PostgreSQL 保存用户、OAuth 账户、会话、消息、Run、Artifact、deployment 和 daemon device 等数据。
-- Goal/Task 数据与会话、消息和 Run 关联，结构化卡片消息用于记录目标创建和任务分派过程。
-- Drizzle ORM 管理 schema 与迁移。
-- Redis 用于 Run 队列、memory append 队列、缓存、临时 OAuth state、desktop login code 和实时协调。
-- Supabase Storage 存储生成产物、静态站点文件和 deployment 文件。
+数据层由 `packages/db` 与 `packages/server` 共同承担。`packages/db` 使用 Drizzle ORM 定义 PostgreSQL schema 和迁移，核心表覆盖 users、OAuth accounts、sessions、agents、daemon devices、conversations、messages、runs、run events、conversation projects、project changes、goals、goal tasks、artifacts、artifact files、revisions、actions 和 deployments 等。PostgreSQL 是系统权威状态来源，实时事件和前端缓存都可以在断线或刷新后从数据库恢复。
+
+`packages/server` 封装后端领域逻辑与基础设施 helper，避免把 repository、cache、storage、queue 等逻辑散落在 API route 中。conversations 模块负责会话、消息、Goal/Task、Artifact、project change 和 MCP 工具事件的读写映射；runs 模块负责 Run 调度准备、session resume、抢占和事件生成；daemon-token 模块负责设备 token；cache 模块提供 `cachedJson`、按 key/pattern 失效和基于 realtime event 的缓存失效。
+
+Redis 在系统中同时承担多种短期状态：Run 队列、Agent provisioning 队列、project clone 队列、Artifact action 队列、memory append 队列，session/sidebar/conversation/welcome 缓存，GitHub desktop OAuth state、desktop login code，以及 realtime pub/sub 协调。生成产物采用元数据与文件内容分离：数据库保存 Artifact、revision、file、action、deployment 的元数据；文件内容通过 storage adapter 写入本地文件系统或 S3-compatible 对象存储。生产环境可通过 S3 兼容配置接入 Supabase Storage，从而避免 API 与 Worker 多容器之间依赖本地磁盘共享。
 
 ### 4.4 Worker 实现
 
-- Worker 消费 Run 队列并负责长任务执行。
-- Worker 在群聊或项目会话中承载协调者调度流程，将目标拆解、任务分派和状态推进写回会话。
-- 对本地任务，Worker 通过 daemon gateway 将任务分发给在线 daemon。
-- Worker 在调度新 Run 时处理 runtime session 复用和抢占关系，将旧 Run 标记为 interrupted，并把 `preemptRunIds` 下发给 daemon。
-- Worker 持久化 RunEvent、message、goal/task、artifact 和 deployment 记录。
-- Worker 在任务分派和状态变化时发布实时事件，使聊天流卡片和任务页保持同步。
-- Worker 将 transcript、Goal/Task、Artifact 等事件生成 memory append job，并通过 daemon gateway 写入 Agent 本地记忆空间。
-- Worker 在数据变更后触发相关会话、任务和产物缓存失效。
+Worker 位于 `apps/worker`，是 Tavro 的后台执行服务。它启动 HTTP/WebSocket daemon gateway，同时以循环消费者方式读取 Redis 中的多类队列：Agent provisioning、project clone、Run、Artifact action 和 memory append。Worker 不处理普通用户界面请求，而是在 HTTP 请求之外消费长任务，保证用户发送消息后 API 可以快速返回 queued 状态，后续执行过程通过 RunEvent 和 realtime 推送补齐。
+
+Run 执行时，Worker 会读取 Run 及其上下文，判断目标 Agent、daemon device、workspace、memory workspace、项目 worktree 和可用 MCP 工具，并通过 daemon gateway 下发 `run.assigned`。如果调度层发现同一会话、同一 Agent 已有 active Run，Worker 会处理 runtime session 复用和抢占关系，将旧 Run 标记为 `interrupted`，并把 `preemptRunIds` 下发给 daemon。daemon 回传 `run.accepted`、`run.rejected` 和持续的 `run.event` 后，Worker/repository 侧将事件转化为消息、Goal/Task 状态、Artifact、project change 或 deployment 记录，并发布对应 realtime event。
+
+Worker 还负责执行侧的外围任务。Agent 创建时，它通过 daemon gateway 请求目标 daemon 初始化 Agent workspace，并把返回的 workspace/runtime 写回数据库；Project 创建时，它把 `project.clone` 下发给 daemon，daemon clone 完成后回填 base repo path、default branch 和 base head；Artifact action 和 static site deployment 通过队列和 daemon/存储层完成状态更新；memory append 队列则把会话 transcript、Goal/Task、Artifact 等事件写入 Agent 本地记忆空间。每次状态变化后，Worker 会发布实时事件并失效相关 Redis 缓存，使 API 与前端后续读取一致。
 
 ### 4.5 Daemon 实现
 
-- Daemon 检测本地 runtime，例如 Claude Code、Codex。
-- Runtime adapter 封装 CLI 进程执行、JSONL/日志解析、runtime session 恢复、取消任务和错误归一化。
-- MCP stdio relay 负责把 Claude Code、Codex 等 runtime 的工具调用桥接到 daemon 和 AgentHub 后端能力。
-- Agent workspace 提供 `.agenthub` 元数据、memory、skills、files、runs、artifacts 和 cache 等隔离目录；run workspace 和项目 worktree 限制本地文件访问范围。
-- 记忆工具支持 append、search、read，并将长期记忆、每日记忆和会话 transcript 保存在 Agent 自己的 workspace 中。
-- Windows shell/stdin 差异需要在 runtime adapter 层处理。
+Daemon 位于 `apps/daemon`，以 npm 包 `@tavro-ai/daemon` 的形式发布并运行在用户本机。它启动后向 Worker gateway 建立出站 WebSocket 连接，发送 `daemon.hello` 上报 device id、token 和 runtime 列表；gateway 校验 token 后返回 `daemon.hello.ack`。运行期间 daemon 定期发送 `daemon.heartbeat`，上报当前 running run ids，用于服务端感知设备在线和运行状态。由于连接是出站建立的，用户本机不需要暴露公网端口。
+
+本地执行能力由 runtime adapter 层封装。当前 daemon 包含 Claude Code 与 Codex adapter，负责检测本机可执行文件、读取版本、声明能力、构造 CLI 参数、设置工作目录、注入 MCP 配置、管理进程生命周期、解析 JSONL/stdout/stderr 和处理取消信号。Codex、Claude Code 等 runtime 的原始输出会被映射为统一 RunEvent；无法解析的文本输出降级为 `log.line`。Windows shell、stdin 和命令参数差异也在 adapter 与进程启动层处理，避免上层 Worker 关心具体平台差异。
+
+Daemon 同时维护本地 workspace 与工具桥接。Agent workspace 由 `workspace` 模块初始化，包含 `.agenthub` 元数据、memory、skills、files、runs、artifacts、cache 等目录；每次 Run 会在 Agent workspace 下创建独立 run workspace，项目会话则基于项目 base repo 创建 run worktree。MCP relay 向 runtime 暴露 `send_message`、`create_goal`、`create_task`、`complete_task`、`upload_artifact`、`deploy_static_site`、`append_memory`、`search_memory`、`read_memory` 等工具：本地可处理的记忆和文件读取在 daemon 内完成，需要平台持久化的调用通过 `agenthub.tool.call`、`artifact.upload`、`static_site.deploy` 等 daemon 协议消息回到 Worker/API。
+
+项目和产物相关操作也在 daemon 内受路径边界保护。Project clone、run worktree、project change 创建与 merge 都通过本地 Git 命令完成，并使用 workspace path guard 防止路径穿越。Artifact 上传和静态站点部署只允许读取当前 run workspace 内的文件或目录，上传时以 base64 或目录文件列表形式交给 Worker/API 存储。Memory 模块则维护长期记忆、每日记忆和 transcript 文件，支持 append、read、search，并可在 runtime prompt 构造阶段注入精简记忆上下文。
 
 ### 4.6 桌面客户端实现
 
-- Electron 客户端作为 Web 壳复用线上或本地 Web SPA。
-- GitHub 登录通过系统浏览器完成，再回跳桌面客户端。
-- 桌面端托管本地 `npx @tavro-ai/daemon@latest connect`。
-- 客户端支持检查更新，安装包通过 GitHub Release 分发。
+桌面客户端位于 `apps/desktop`，使用 Electron 实现。V1 是远端 Web 壳：生产默认加载 `https://tavro-ai.vercel.app`，本地开发默认加载 `http://localhost:5173`，也可以通过环境变量覆盖入口。Electron main process 创建 BrowserWindow，并保持 `contextIsolation: true`、`nodeIntegration: false` 等安全默认值；外部链接通过系统浏览器打开，Tavro Web origin 保留在客户端窗口内。
+
+桌面端登录采用系统浏览器 OAuth，而不是在 Electron WebView 内直接完成 GitHub 授权。点击 GitHub 登录后，preload 暴露的 `startGitHubLogin` 通过 IPC 请求 API 创建 desktop OAuth state，main process 使用 `shell.openExternal` 打开 GitHub 授权页；授权完成后 API 重定向到 `tavro://auth/callback?code=...`，Electron 通过自定义协议接收一次性 code，再加载 `/auth/desktop/complete` 设置当前 Electron session 的 Tavro cookie。这样浏览器登录体验与桌面 cookie 注入可以解耦，也避免把长期 token 放在 URL 中。
+
+桌面端还包含托管 daemon manager。用户登录后，Web 通过 `window.tavroDesktop.daemon.ensureAutoStart()` 触发自动启动；daemon manager 调用 `POST /daemon/desktop/bootstrap` 获取 device、gateway URL 和 token，并在本机后台启动 `npx -y @tavro-ai/daemon@latest connect ...`。token 优先通过 Electron `safeStorage` 加密保存，缺少加密能力时退化为会话内状态；应用退出时 main process 会停止托管子进程。preload 只暴露 `getStatus/start/restart/onStatusChange` 等受控接口，不开放任意文件系统或 shell 能力。
+
+客户端更新机制同样独立于 Web 业务代码。`update-manager` 定期查询 GitHub Release，发现新版本后通过 preload 通知 Web 显示右下角更新提醒；用户也可以在设置中手动检查更新，点击提醒后打开 Release 页面。安装包由单独的 GitHub Actions workflow 构建并发布到 GitHub Release，因此大多数 Web/API/Worker 功能更新不需要桌面客户端发版，只有 Electron 壳、daemon 托管、协议处理或本地能力变化时才需要发布新客户端。
 
 ## 第 5 章 部署方案与工程化
 

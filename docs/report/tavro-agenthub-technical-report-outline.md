@@ -134,7 +134,7 @@ Daemon 连接与任务分发流程如下图所示：
 
 ### 3.1 IM 化多 Agent 协作范式
 
-Tavro 将多 Agent 协作建模为 IM 工作台，而不是把 Agent 简单封装成一次性工具调用。在这个模型中，Agent 被视为会话成员：用户可以与单个 Agent 私聊，也可以在群聊或项目会话中同时引入多个 Agent。会话保存完整历史消息、参与 Agent、项目上下文和运行状态，使 Agent 能够基于连续上下文理解任务，而不是只处理孤立 prompt。
+Tavro 将多 Agent 协作建模为 IM 工作台，而不是把 Agent 简单封装成一次性工具调用。在这个模型中，Agent 被视为会话成员：用户可以与单个 Agent 私聊，也可以在群聊或项目会话中同时引入多个 Agent。会话保存完整历史消息、参与 Agent、Run、Goal/Task、Artifact、项目上下文和运行状态，使 Agent 能够基于连续上下文理解任务，而不是只处理孤立 prompt。
 
 IM 化设计的关键价值在于降低多 Agent 协作的组织成本。用户仍然使用熟悉的聊天方式发起需求、补充说明和确认结果；系统则在会话内部完成 Agent 选择、任务创建、状态追踪和产物归档。群聊中的 `@Agent` 语义提供了显式调度入口，既可以让用户直接指定某个 Agent，也可以由协调者根据上下文拆分任务并选择合适的执行者。
 
@@ -144,19 +144,19 @@ IM 化设计的关键价值在于降低多 Agent 协作的组织成本。用户�
 
 为避免多 Agent 协作停留在“多个机器人轮流发言”的层面，Tavro 引入了协调者 Orchestrator 与 Goal/Task 机制。Orchestrator 是群聊或项目会话中的调度角色，它不替代具体 Agent 执行任务，而是负责理解用户意图、维护协作上下文、创建阶段性目标，并将目标拆解为可执行任务分派给不同 Agent。
 
-Goal 表示从用户自然语言请求中抽取出的阶段性目标，例如“完成静态网页首页”或“为项目补充部署文档”。Task 是 Goal 下的工作单元，包含标题、描述、负责人 Agent、依赖关系、运行状态和关联 Run。这样的设计使系统能够表达串行与并行协作：没有依赖的任务可以立即派发；存在依赖的任务需要等待上游任务完成后，再由协调者通过审批动作继续推进。
+Goal 表示从用户自然语言请求中抽取出的阶段性目标，例如“完成静态网页首页”或“为项目补充部署文档”。Task 是 Goal 下的工作单元，包含标题、描述、负责人 Agent、依赖关系、运行状态和关联 Run。这样的设计使系统能够表达串行与并行协作：没有依赖的任务可以立即派发；存在依赖的任务需要等待上游任务完成后，再由协调者通过审批动作继续推进。为避免同一 Agent 同时处理多个互相影响的任务，系统还约束同一 Goal 内分配给同一 assignee 的任务默认串行，后续任务通过依赖关系指向前序任务。
 
-在实现上，协调者通过 `create_goal`、`create_task`、`approve_task`、`complete_goal` 等工具调用改变系统状态。`create_task` 和 `approve_task` 不只是生成一段文本，而是会创建可见的任务分派卡片、启动对应 Agent 的 Run，并写入任务状态和运行事件。任务完成后，系统通过新的 checkpoint run 让协调者重新审视 Goal 状态，决定继续派发下游任务、补充修复任务、取消过时任务或关闭目标。
+在实现上，协调者通过 `create_goal`、`create_task`、`approve_task`、`complete_goal` 等工具调用改变系统状态。`create_task` 和 `approve_task` 不只是生成一段文本，而是会创建可见的任务分派卡片、启动对应 Agent 的 Run，并写入任务状态和运行事件。任务完成后，系统通过新的 checkpoint run 让协调者重新审视 Goal 状态，决定继续派发下游任务、补充修复任务、取消过时任务或关闭目标。`complete_goal` 只应在目标下不存在 waiting、ready、assigned、running 等未完成任务时调用，从而保证 Goal 的完成状态与任务执行状态一致。
 
-结构化卡片消息是这一机制的用户可见载体。Goal 创建和 Task 分派会聚合到聊天流中的卡片消息，用户可以从聊天上下文直接跳转到目标或任务详情页。卡片本身并不取代数据库状态，而是对 Goal/Task 当前状态的可视化入口；真正的任务、Run、消息和实时事件仍由后端统一持久化和推送。
+结构化卡片消息是这一机制的用户可见载体。Goal 创建会产生 `conversation.message.created`，后续 Task 分派会更新同一条卡片消息并触发 `conversation.message.updated`。用户可以从聊天上下文直接跳转到目标或任务详情页。卡片本身并不取代数据库状态，而是对 Goal/Task 当前状态的可视化入口；真正的任务、Run、消息和实时事件仍由后端统一持久化和推送。
 
 ### 3.3 本地 daemon 执行模型
 
 Tavro 的另一个核心创新是将本地执行能力以 daemon 的方式接入云端工作台。Daemon 是运行在用户电脑上的轻量执行器，不是第二套后端：它不保存全局会话历史，不判断跨用户权限，也不承担控制面职责。它只在授权范围内检测本地 runtime、接收任务、调用本地工具并回传结果。
 
-Daemon 通过出站 WebSocket 与 Worker 的 daemon gateway 建立连接。连接建立时，daemon 使用设备 token 完成身份校验，并上报本机可用 runtime；连接期间通过 heartbeat 持续报告在线状态和正在运行的 Run。由于连接方向是从用户机器主动连向平台，用户不需要暴露本地端口，也不需要配置公网访问，这符合个人电脑接入云端服务的安全边界。
+Daemon 通过出站 WebSocket 与 Worker 的 daemon gateway 建立连接。连接建立时，daemon 发送 `daemon.hello`，携带 device id、token 和本机 runtime 列表；gateway 校验 token 后返回 `daemon.hello.ack`，并将设备标记为在线。连接期间，daemon 周期性发送 `daemon.heartbeat`，报告正在运行的 Run。由于连接方向是从用户机器主动连向平台，用户不需要暴露本地端口，也不需要配置公网访问，这符合个人电脑接入云端服务的安全边界。
 
-在本地执行层，daemon 使用 runtime adapter 屏蔽 Claude Code、Codex 等 CLI Agent 的差异。Adapter 负责 runtime 检测、命令构造、进程生命周期管理、日志采集、取消任务和错误归一化。对于需要工具调用的场景，daemon 还提供 MCP stdio relay，使本地 CLI runtime 能够通过受控协议调用 AgentHub 工具，例如发送消息、创建任务、上传 Artifact 或读取项目上下文。
+在本地执行层，daemon 使用 runtime adapter 屏蔽 Claude Code、Codex 等 CLI Agent 的差异。Worker 下发 `run.assigned` 后，daemon 会回传 `run.accepted`、`run.rejected` 或持续的 `run.event`，从而把本地进程状态转换为平台统一的 Run 事件。Adapter 负责 runtime 检测、命令构造、进程生命周期管理、日志采集、取消任务和错误归一化。对于需要工具调用的场景，daemon 还提供 MCP stdio relay，使本地 CLI runtime 能够通过受控协议调用 AgentHub 工具，例如发送消息、创建任务、读取上下文或通过 `artifact.upload` 上传产物。
 
 桌面客户端进一步降低了本地 daemon 的接入门槛。用户不需要手动复制命令运行 `npx @tavro-ai/daemon@latest connect`，桌面端可以在登录后托管该进程，并在应用退出时结束托管进程。这样既保持 daemon 通过 npm 独立发版的灵活性，也让普通用户获得接近原生客户端的一键本地执行体验。
 
@@ -166,7 +166,7 @@ Agent 任务通常具有执行时间长、过程不可预测、可能产生多�
 
 RunEvent 是系统观察长任务过程的基本单位。Run 从 queued、running 到 succeeded、failed、cancelled 等状态变化，runtime session 开始、日志输出、消息增量、工具调用结果、Artifact 上传等事件都会被转换为运行事件并持久化。这样即使前端刷新、实时连接中断或 Worker 重启，用户也可以重新从数据库读取权威状态，而不是依赖浏览器内存中的临时日志。
 
-实时反馈由持久化事件和实时通道共同完成。Worker 或后端领域模块在写入 RunEvent、消息、Goal/Task 或 Artifact 状态后发布 realtime event，前端通过 SSE/WebSocket 接收并更新消息流、任务页和产物视图。实时通道只负责通知，不作为权威存储；这种设计使系统同时具备低延迟反馈和状态恢复能力。
+实时反馈由持久化事件和实时通道共同完成。Worker 或后端领域模块在写入 RunEvent、消息、Goal/Task 或 Artifact 状态后发布 realtime event，例如 `run.event.created`、`run.updated`、`conversation.message.updated`、`task.updated` 和 `artifact.action.updated`。前端通过 SSE/WebSocket 接收这些事件并更新消息流、任务页和产物视图。实时通道只负责通知，不作为权威存储；这种设计使系统同时具备低延迟反馈和状态恢复能力。
 
 异步执行模型还为错误处理提供了清晰边界。API 请求失败表示控制面未能创建或投递任务；Run 失败表示任务已进入执行面但 runtime 或 daemon 执行失败；Artifact action 失败则表示产物操作失败。不同失败点都能落到对应状态和事件中，用户可以看到任务是尚未入队、正在运行、执行失败还是产物处理失败。
 
@@ -174,9 +174,9 @@ RunEvent 是系统观察长任务过程的基本单位。Run 从 queued、runnin
 
 Tavro 关注的不只是 Agent 回复本身，还包括 Agent 产生的可交付产物。Artifact 用于统一表示生成文件、网页站点、项目变更、预览结果和 deployment 记录。通过 Artifact，系统可以把“Agent 说它完成了某件事”转化为“用户可以查看、编辑、应用或发布的具体对象”。
 
-Artifact 采用元数据与文件内容分离的设计。Artifact、revision、action、deployment 等业务元数据存入 PostgreSQL，实际文件内容、静态站点文件和 deployment 文件存入 Supabase Storage。这样既保留了数据库查询和权限控制能力，又避免在线上 API 与 Worker 分离部署时依赖某一个容器的本地磁盘。此前本地路径在多容器环境中不可共享的问题，也正是通过对象存储层得到解决。
+Artifact 采用元数据与文件内容分离的设计。Artifact、revision、action、deployment 等业务元数据存入 PostgreSQL；实际文件内容、静态站点文件和 deployment 文件通过统一 storage adapter 写入存储层。代码层支持 local 与 S3 兼容存储两种 driver，本地开发继续使用文件系统，生产环境可通过 S3 兼容配置接入 Supabase Storage。这样既保留了数据库查询和权限控制能力，又避免在线上 API 与 Worker 分离部署时依赖某一个容器的本地磁盘。此前本地路径在多容器环境中不可共享的问题，也正是通过对象存储层得到解决。
 
-在协作流程中，Artifact 与 Run、Goal/Task 和聊天消息互相关联。Agent 可以在执行过程中上传文件或站点产物，系统将其作为消息附件或工作区资源展示；用户可以继续编辑内容、触发预览、发布静态站点或应用项目变更。产物的每一次操作都形成 action 或 revision 记录，使生成、修改、发布和追踪形成闭环。
+在协作流程中，Artifact 与 Run、Goal/Task 和聊天消息互相关联。Agent 可以在执行过程中上传文件或站点产物，系统将其作为消息附件或工作区资源展示；用户可以继续编辑内容、触发预览、发布静态站点或应用项目变更。内容修改会形成 revision，预览、应用、发布等操作会形成 action。站点发布时，系统会将 site artifact 的文件复制到 deployment storage prefix，并生成 deployment 记录，使生成、修改、发布和追踪形成闭环。
 
 这种产物闭环是 Tavro 区别于普通聊天机器人的重要能力。它让多 Agent 协作的结果不再停留在文本说明，而是进入可管理的工程对象生命周期：从需求进入会话，到 Run 执行，再到 Artifact 生成、预览、编辑、发布和记录，用户可以在同一工作台中完成从意图到产物的全过程。
 

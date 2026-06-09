@@ -389,10 +389,23 @@ const gateway = new DaemonGateway({
       baseHead: message.baseHead,
     });
     if (result.status === "updated") {
-      await publishConversationUpdated({
+      const conversation = await getConversationForUser(db, {
         conversationId: result.project.conversationId,
         ownerUserId: result.project.ownerUserId,
       });
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          conversation: conversation ?? undefined,
+          conversationId: result.project.conversationId,
+          ownerUserId: result.project.ownerUserId,
+          type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: result.project.conversationId,
+          ownerUserId: result.project.ownerUserId,
+          type: "project.files.updated",
+        }),
+      ]);
     }
     logger.info(
       {
@@ -452,6 +465,11 @@ const gateway = new DaemonGateway({
           conversationId: change.conversationId,
           ownerUserId: change.ownerUserId,
           type: "conversation.updated",
+        }),
+        createRealtimeEvent({
+          conversationId: change.conversationId,
+          ownerUserId: change.ownerUserId,
+          type: "project.files.updated",
         }),
       ]);
     }

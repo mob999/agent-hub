@@ -1476,9 +1476,22 @@ export function WorkspacePage({
         ],
       )
     }
+    const refreshProjectFiles = (event: Extract<RealtimeEvent, { type: 'project.files.updated' }>) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectFiles(event.conversationId) })
+
+      if (event.paths === undefined || event.paths.length === 0) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projectFileContents(event.conversationId) })
+        return
+      }
+
+      for (const path of event.paths) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projectFileContent(event.conversationId, path) })
+      }
+    }
     const handleRealtimeEvent = (event: RealtimeEvent) => {
       switch (event.type) {
         case 'conversation.updated':
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projectChanges(event.conversationId) })
           if (event.conversation !== undefined) {
             setConversations((current) => [
               event.conversation as Conversation,
@@ -1560,6 +1573,9 @@ export function WorkspacePage({
           void queryClient.invalidateQueries({ queryKey: queryKeys.conversationArtifacts(event.conversationId) })
           void loadArtifacts(event.conversationId)
           break
+        case 'project.files.updated':
+          refreshProjectFiles(event)
+          break
       }
     }
     const source = new EventSource(apiUrl('/events'), { withCredentials: true })
@@ -1572,6 +1588,7 @@ export function WorkspacePage({
       'task.updated',
       'artifact.created',
       'artifact.action.updated',
+      'project.files.updated',
     ]
 
     source.addEventListener('connected', refreshAfterReconnect)

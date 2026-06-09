@@ -1,27 +1,33 @@
 import { Button, InlineLoading, InlineNotification, Tag } from '@carbon/react'
-import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Image, Json, Save, Zip } from '@carbon/react/icons'
+import { ChevronDown, ChevronRight, Code, Document, FileDiff, Folder, FolderOpen, Image, Json, Renew, Save, Zip } from '@carbon/react/icons'
 import { inferArtifactFileInfo } from '@agent-hub/core'
 import Editor, { DiffEditor } from '@monaco-editor/react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import type {
   AgentDetails,
   Conversation,
-  ConversationProjectChange,
-  GetProjectChangeFileContentResponse,
-  GetProjectFileContentResponse,
-  ListConversationProjectChangesResponse,
-  ListProjectChangeFilesResponse,
-  ListProjectFilesResponse,
   ProjectChangedFile,
   ProjectFileEntry,
   UpdateProjectFileContentResponse,
 } from '../lib/api'
 import { apiRequest, apiUrl } from '../lib/api'
+import {
+  fetchProjectChangeFileContent,
+  fetchProjectChangeFiles,
+  fetchProjectChanges,
+  fetchProjectFileContent,
+  fetchProjectFiles,
+  queryKeys,
+} from '../lib/query'
 
 type ProjectWorkspaceMode = 'code' | 'changes'
 
 type TreeFile = ProjectFileEntry | ProjectChangedFile
 const emptyChangedFiles: ProjectChangedFile[] = []
+const maxPreloadedCodeFiles = 30
+const maxPreloadedCodeFileBytes = 512 * 1024
+const codePreloadConcurrency = 4
 
 interface ProjectTreeNode {
   children: ProjectTreeNode[]
@@ -103,6 +109,52 @@ function expandedDirectoriesForPath(filePath: string): string[] {
   return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
 }
 
+function filePathDepth(filePath: string): number {
+  return filePath.split('/').filter(Boolean).length
+}
+
+function isPreloadableCodeFile(file: ProjectFileEntry): boolean {
+  if (file.type !== 'file') {
+    return false
+  }
+
+  if (file.sizeBytes !== undefined && file.sizeBytes > maxPreloadedCodeFileBytes) {
+    return false
+  }
+
+  return inferArtifactFileInfo({ filename: file.path }).canEdit
+}
+
+function selectPreloadableCodeFiles(files: ProjectFileEntry[]): ProjectFileEntry[] {
+  return files
+    .filter(isPreloadableCodeFile)
+    .sort((left, right) => {
+      const depthDelta = filePathDepth(left.path) - filePathDepth(right.path)
+      return depthDelta === 0 ? left.path.localeCompare(right.path) : depthDelta
+    })
+    .slice(0, maxPreloadedCodeFiles)
+}
+
+async function preloadWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  load: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+
+      if (item !== undefined) {
+        await load(item)
+      }
+    }
+  })
+
+  await Promise.all(workers)
+}
+
 function ProjectFileIcon({ path }: { path: string }) {
   const fileInfo = inferArtifactFileInfo({ filename: path })
 
@@ -123,216 +175,160 @@ function ProjectFileIcon({ path }: { path: string }) {
 }
 
 export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps) {
+  const queryClient = useQueryClient()
   const [mode, setMode] = useState<ProjectWorkspaceMode>('code')
   const [projectError, setProjectError] = useState<string | null>(null)
-  const [files, setFiles] = useState<ProjectFileEntry[]>([])
+  const [preloadedCodeConversationId, setPreloadedCodeConversationId] = useState<string | null>(null)
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [expandedCodeDirectories, setExpandedCodeDirectories] = useState<Set<string>>(() => new Set())
-  const [fileContentByKey, setFileContentByKey] = useState<Record<string, string>>({})
   const [fileDraftByKey, setFileDraftByKey] = useState<Record<string, string>>({})
   const [isSavingFile, setIsSavingFile] = useState(false)
-  const [changes, setChanges] = useState<ConversationProjectChange[]>([])
   const [activeChangeId, setActiveChangeId] = useState<string | null>(null)
-  const [changeFilesById, setChangeFilesById] = useState<Record<string, ProjectChangedFile[]>>({})
   const [activeChangeFileById, setActiveChangeFileById] = useState<Record<string, string>>({})
   const [expandedChangeDirectories, setExpandedChangeDirectories] = useState<Set<string>>(() => new Set())
-  const [changeContentByKey, setChangeContentByKey] = useState<Record<string, GetProjectChangeFileContentResponse>>({})
 
   const conversationId = conversation.id
+  const projectFilesQuery = useQuery({
+    enabled: mode === 'code',
+    queryFn: () => fetchProjectFiles(conversationId),
+    queryKey: queryKeys.projectFiles(conversationId),
+  })
+  const files = projectFilesQuery.data?.files ?? []
   const fileContentKey = activeFilePath === null ? null : `${conversationId}:${activeFilePath}`
   const activeFileInfo = activeFilePath === null ? null : inferArtifactFileInfo({ filename: activeFilePath })
-  const fileContent = fileContentKey === null ? '' : fileContentByKey[fileContentKey] ?? ''
+  const activeFileContentQuery = useQuery({
+    enabled: mode === 'code' && activeFilePath !== null && activeFileInfo?.canEdit === true,
+    queryFn: () => fetchProjectFileContent(conversationId, activeFilePath!),
+    queryKey: activeFilePath === null
+      ? queryKeys.projectFileContent(conversationId, '__none__')
+      : queryKeys.projectFileContent(conversationId, activeFilePath),
+  })
+  const fileContent = activeFileContentQuery.data?.content ?? ''
   const fileDraft = fileContentKey === null ? '' : fileDraftByKey[fileContentKey] ?? fileContent
   const fileDirty = fileContentKey !== null && fileDraft !== fileContent
   const codeTree = useMemo(() => buildProjectTree(files), [files])
+  const preloadableCodeFiles = useMemo(() => selectPreloadableCodeFiles(files), [files])
+  const activeCodeFileContentPending =
+    activeFileInfo?.canEdit === true &&
+    activeFileContentQuery.data === undefined &&
+    (activeFileContentQuery.isPending || activeFileContentQuery.isFetching)
+  const projectChangesQuery = useQuery({
+    enabled: mode === 'changes',
+    queryFn: () => fetchProjectChanges(conversationId),
+    queryKey: queryKeys.projectChanges(conversationId),
+  })
+  const changes = projectChangesQuery.data?.changes ?? []
   const activeChange = changes.find((change) => change.id === activeChangeId) ?? null
-  const activeChangeFiles = useMemo(
-    () => activeChangeId === null ? emptyChangedFiles : changeFilesById[activeChangeId] ?? emptyChangedFiles,
-    [activeChangeId, changeFilesById],
-  )
-  const activeChangeFilePath = activeChangeId === null ? null : activeChangeFileById[activeChangeId] ?? null
+  const activeChangeFilesQuery = useQuery({
+    enabled: mode === 'changes' && activeChangeId !== null,
+    queryFn: () => fetchProjectChangeFiles(conversationId, activeChangeId!),
+    queryKey: activeChangeId === null
+      ? queryKeys.projectChangeFiles(conversationId, '__none__')
+      : queryKeys.projectChangeFiles(conversationId, activeChangeId),
+  })
+  const activeChangeFiles = activeChangeFilesQuery.data?.files ?? emptyChangedFiles
+  const activeChangeFilePath = activeChangeId === null ? null : activeChangeFileById[activeChangeId] || null
   const activeChangeFile = activeChangeFilePath === null
     ? null
     : activeChangeFiles.find((file) => file.path === activeChangeFilePath || file.oldPath === activeChangeFilePath) ?? null
-  const activeChangeContentKey = activeChangeId === null || activeChangeFilePath === null
-    ? null
-    : `${activeChangeId}:${activeChangeFilePath}`
-  const activeChangeContent = activeChangeContentKey === null ? null : changeContentByKey[activeChangeContentKey] ?? null
+  const activeChangeContentQuery = useQuery({
+    enabled: mode === 'changes' && activeChangeId !== null && activeChangeFilePath !== null,
+    queryFn: () => fetchProjectChangeFileContent(conversationId, activeChangeId!, activeChangeFilePath!),
+    queryKey: activeChangeId === null || activeChangeFilePath === null
+      ? queryKeys.projectChangeFileContent(conversationId, '__none__', '__none__')
+      : queryKeys.projectChangeFileContent(conversationId, activeChangeId, activeChangeFilePath),
+  })
+  const activeChangeContent = activeChangeContentQuery.data ?? null
   const activeChangeFileInfo = activeChangeFile === null ? null : inferArtifactFileInfo({ filename: activeChangeFile.path })
   const changeTree = useMemo(() => buildProjectTree(activeChangeFiles), [activeChangeFiles])
+  const codeProjectLoading = projectFilesQuery.isPending || (projectFilesQuery.isFetching && files.length === 0)
+  const projectQueryError = mode === 'code'
+    ? projectFilesQuery.error ?? activeFileContentQuery.error
+    : projectChangesQuery.error ?? activeChangeFilesQuery.error ?? activeChangeContentQuery.error
+  const projectErrorMessage = projectError
+    ?? (projectQueryError instanceof Error
+      ? projectQueryError.message
+      : projectQueryError === null
+        ? null
+        : 'Unable to load project data.')
 
   useEffect(() => {
-    let active = true
-
-    void (async () => {
-      try {
-        const response = await apiRequest<ListProjectFilesResponse>(
-          `/conversations/${conversationId}/project/files`,
-        )
-
-        if (!active) {
-          return
-        }
-
-        const firstFilePath = response.files.find((file) => file.type === 'file')?.path ?? null
-
-        setFiles(response.files)
-        setActiveFilePath((current) => current ?? firstFilePath)
-        if (firstFilePath !== null) {
-          setExpandedCodeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
-        }
-        setProjectError(null)
-      } catch (error) {
-        if (active) {
-          setProjectError(error instanceof Error ? error.message : 'Unable to load project files.')
-        }
-      }
-    })()
-
-    return () => {
-      active = false
-    }
+    setProjectError(null)
+    setActiveFilePath(null)
+    setExpandedCodeDirectories(new Set())
+    setPreloadedCodeConversationId(null)
+    setActiveChangeId(null)
+    setActiveChangeFileById({})
+    setExpandedChangeDirectories(new Set())
   }, [conversationId])
 
   useEffect(() => {
-    if (activeFilePath === null || activeFileInfo === null || !activeFileInfo.canEdit || fileContentKey === null) {
+    if (mode !== 'code') {
       return
     }
 
-    if (fileContentByKey[fileContentKey] !== undefined) {
+    if (files.length === 0) {
+      setActiveFilePath(null)
       return
     }
 
-    let active = true
-    const params = new URLSearchParams({ path: activeFilePath })
+    const firstFilePath = selectPreloadableCodeFiles(files)[0]?.path
+      ?? files.find((file) => file.type === 'file')?.path
+      ?? null
 
-    void (async () => {
-      try {
-        const response = await apiRequest<GetProjectFileContentResponse>(
-          `/conversations/${conversationId}/project/files/content?${params.toString()}`,
-        )
-
-        if (!active) {
-          return
-        }
-
-        setFileContentByKey((current) => ({ ...current, [fileContentKey]: response.content }))
-        setFileDraftByKey((current) => ({ ...current, [fileContentKey]: current[fileContentKey] ?? response.content }))
-        setProjectError(null)
-      } catch (error) {
-        if (active) {
-          setProjectError(error instanceof Error ? error.message : 'Unable to load project file.')
-        }
+    setActiveFilePath((current) => {
+      if (current !== null && files.some((file) => file.type === 'file' && file.path === current)) {
+        return current
       }
-    })()
 
-    return () => {
-      active = false
-    }
-  }, [activeFileInfo, activeFilePath, conversationId, fileContentByKey, fileContentKey])
-
-  useEffect(() => {
-    if (mode !== 'changes') {
-      return
-    }
-
-    let active = true
-
-    void (async () => {
-      try {
-        const response = await apiRequest<ListConversationProjectChangesResponse>(
-          `/conversations/${conversationId}/project/changes`,
-        )
-
-        if (!active) {
-          return
-        }
-
-        setChanges(response.changes)
-        setActiveChangeId((current) => current ?? response.changes[0]?.id ?? null)
-        setProjectError(null)
-      } catch (error) {
-        if (active) {
-          setProjectError(error instanceof Error ? error.message : 'Unable to load project changes.')
-        }
+      if (firstFilePath !== null) {
+        setExpandedCodeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
       }
-    })()
 
-    return () => {
-      active = false
-    }
-  }, [conversationId, mode])
-
-  useEffect(() => {
-    if (mode !== 'changes' || activeChangeId === null || changeFilesById[activeChangeId] !== undefined) {
-      return
-    }
-
-    let active = true
-
-    void (async () => {
-      try {
-        const response = await apiRequest<ListProjectChangeFilesResponse>(
-          `/conversations/${conversationId}/project/changes/${activeChangeId}/files`,
-        )
-
-        if (!active) {
-          return
-        }
-
-        const firstFilePath = response.files[0]?.path ?? ''
-
-        setChangeFilesById((current) => ({ ...current, [activeChangeId]: response.files }))
-        setActiveChangeFileById((current) => ({
-          ...current,
-          [activeChangeId]: current[activeChangeId] ?? firstFilePath,
-        }))
-        if (firstFilePath.length > 0) {
-          setExpandedChangeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
-        }
-        setProjectError(null)
-      } catch (error) {
-        if (active) {
-          setProjectError(error instanceof Error ? error.message : 'Unable to load project change files.')
-        }
-      }
-    })()
-
-    return () => {
-      active = false
-    }
-  }, [activeChangeId, changeFilesById, conversationId, mode])
+      return firstFilePath
+    })
+  }, [files, mode])
 
   useEffect(() => {
     if (
-      mode !== 'changes' ||
-      activeChangeId === null ||
-      activeChangeFilePath === null ||
-      activeChangeContentKey === null ||
-      changeContentByKey[activeChangeContentKey] !== undefined
+      mode !== 'code' ||
+      projectFilesQuery.data === undefined ||
+      preloadedCodeConversationId === conversationId ||
+      preloadableCodeFiles.length === 0
     ) {
       return
     }
 
     let active = true
-    const params = new URLSearchParams({ path: activeChangeFilePath })
 
     void (async () => {
-      try {
-        const response = await apiRequest<GetProjectChangeFileContentResponse>(
-          `/conversations/${conversationId}/project/changes/${activeChangeId}/files/content?${params.toString()}`,
-        )
+      await preloadWithConcurrency(
+        preloadableCodeFiles,
+        codePreloadConcurrency,
+        async (file) => {
+          const key = `${conversationId}:${file.path}`
 
-        if (!active) {
-          return
-        }
+          try {
+            const response = await queryClient.fetchQuery({
+              queryFn: () => fetchProjectFileContent(conversationId, file.path),
+              queryKey: queryKeys.projectFileContent(conversationId, file.path),
+            })
 
-        setChangeContentByKey((current) => ({ ...current, [activeChangeContentKey]: response }))
-        setProjectError(null)
-      } catch (error) {
-        if (active) {
-          setProjectError(error instanceof Error ? error.message : 'Unable to load project diff file.')
-        }
+            if (!active) {
+              return
+            }
+
+            setFileDraftByKey((current) => current[key] === undefined
+              ? { ...current, [key]: response.content }
+              : current)
+          } catch {
+            // Individual preload failures fall back to on-demand loading.
+          }
+        },
+      )
+
+      if (active) {
+        setPreloadedCodeConversationId(conversationId)
       }
     })()
 
@@ -340,13 +336,87 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
       active = false
     }
   }, [
-    activeChangeContentKey,
-    activeChangeFilePath,
-    activeChangeId,
-    changeContentByKey,
     conversationId,
     mode,
+    preloadableCodeFiles,
+    preloadedCodeConversationId,
+    projectFilesQuery.data,
+    queryClient,
   ])
+
+  useEffect(() => {
+    if (fileContentKey === null || activeFileContentQuery.data === undefined) {
+      return
+    }
+
+    setFileDraftByKey((current) => current[fileContentKey] === undefined
+      ? { ...current, [fileContentKey]: activeFileContentQuery.data.content }
+      : current)
+  }, [activeFileContentQuery.data, fileContentKey])
+
+  useEffect(() => {
+    if (mode !== 'changes') {
+      return
+    }
+
+    setActiveChangeId((current) => {
+      if (current !== null && changes.some((change) => change.id === current)) {
+        return current
+      }
+
+      return changes[0]?.id ?? null
+    })
+  }, [changes, mode])
+
+  useEffect(() => {
+    if (mode !== 'changes' || activeChangeId === null || activeChangeFiles.length === 0) {
+      return
+    }
+
+    const firstFilePath = activeChangeFiles[0]?.path ?? ''
+    setActiveChangeFileById((current) => {
+      const currentPath = current[activeChangeId]
+      if (
+        currentPath !== undefined &&
+        activeChangeFiles.some((file) => file.path === currentPath || file.oldPath === currentPath)
+      ) {
+        return current
+      }
+
+      if (firstFilePath.length > 0) {
+        setExpandedChangeDirectories(new Set(expandedDirectoriesForPath(firstFilePath)))
+        return { ...current, [activeChangeId]: firstFilePath }
+      }
+
+      return current
+    })
+  }, [activeChangeFiles, activeChangeId, mode])
+
+  const refreshProjectCode = async () => {
+    if (fileDirty || isSavingFile) {
+      return
+    }
+
+    setProjectError(null)
+    setPreloadedCodeConversationId(null)
+    setFileDraftByKey((current) => {
+      const next: Record<string, string> = {}
+      const prefix = `${conversationId}:`
+
+      for (const [key, value] of Object.entries(current)) {
+        if (!key.startsWith(prefix)) {
+          next[key] = value
+        }
+      }
+
+      return next
+    })
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectFiles(conversationId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectFileContents(conversationId) }),
+    ])
+  }
 
   const toggleCodeDirectory = (directory: string) => {
     setExpandedCodeDirectories((current) => {
@@ -387,12 +457,12 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
         },
       )
 
-      setFileContentByKey((current) => ({ ...current, [fileContentKey]: response.content }))
+      queryClient.setQueryData(queryKeys.projectFileContent(conversationId, response.path), {
+        content: response.content,
+        path: response.path,
+      })
       setFileDraftByKey((current) => ({ ...current, [fileContentKey]: response.content }))
-      const filesResponse = await apiRequest<ListProjectFilesResponse>(
-        `/conversations/${conversationId}/project/files`,
-      )
-      setFiles(filesResponse.files)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectFiles(conversationId) })
       setProjectError(null)
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : 'Unable to save project file.')
@@ -492,6 +562,14 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
       )
     }
 
+    if (activeCodeFileContentPending) {
+      return (
+        <div className="p-4 text-sm text-[var(--cds-text-secondary)]">
+          <InlineLoading description="Loading file..." />
+        </div>
+      )
+    }
+
     return (
       <Editor
         height="100%"
@@ -534,7 +612,11 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
     }
 
     if (activeChangeContent === null) {
-      return <InlineLoading description="Loading diff..." />
+      return (
+        <div className="p-4 text-sm text-[var(--cds-text-secondary)]">
+          <InlineLoading description="Loading diff..." />
+        </div>
+      )
     }
 
     return (
@@ -575,17 +657,21 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
           </div>
         </div>
         <div className="min-h-0 overflow-y-auto p-2">
-          {projectError && (
+          {projectErrorMessage && (
             <InlineNotification
               kind="error"
               title="Project unavailable"
-              subtitle={projectError}
+              subtitle={projectErrorMessage}
               lowContrast
               hideCloseButton
             />
           )}
           {mode === 'code' ? (
-            codeTree.length === 0 ? (
+            codeProjectLoading ? (
+              <div className="px-2 py-3">
+                <InlineLoading description="Loading project files..." />
+              </div>
+            ) : codeTree.length === 0 ? (
               <p className="px-2 py-8 text-center text-sm text-[var(--cds-text-secondary)]">No project files yet.</p>
             ) : (
               <div className="grid gap-0.5">
@@ -647,8 +733,10 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
                   <h3 className="px-2 text-xs font-semibold uppercase tracking-wide text-[#69707d]">
                     Files ({activeChangeFiles.length})
                   </h3>
-                  {changeTree.length === 0 ? (
+                  {activeChangeFilesQuery.isPending || (activeChangeFilesQuery.isFetching && activeChangeFiles.length === 0) ? (
                     <InlineLoading description="Loading files..." />
+                  ) : changeTree.length === 0 ? (
+                    <p className="px-2 py-6 text-center text-sm text-[var(--cds-text-secondary)]">No changed files.</p>
                   ) : (
                     renderTreeNodes(changeTree, {
                       activePath: activeChangeFilePath,
@@ -686,17 +774,31 @@ export function ProjectWorkspace({ agents, conversation }: ProjectWorkspaceProps
               {mode === 'code' ? 'Base repository' : activeChange?.branchName ?? 'Internal project changes'}
             </p>
           </div>
-          {mode === 'code' && activeFileInfo?.canEdit && (
-            <Button
-              disabled={!fileDirty || isSavingFile}
-              hasIconOnly
-              iconDescription={isSavingFile ? 'Saving' : 'Save'}
-              kind="ghost"
-              renderIcon={Save}
-              size="sm"
-              type="button"
-              onClick={saveActiveFile}
-            />
+          {mode === 'code' && (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                disabled={fileDirty || isSavingFile || projectFilesQuery.isFetching}
+                hasIconOnly
+                iconDescription="Refresh"
+                kind="ghost"
+                renderIcon={Renew}
+                size="sm"
+                type="button"
+                onClick={refreshProjectCode}
+              />
+              {activeFileInfo?.canEdit && (
+                <Button
+                  disabled={!fileDirty || isSavingFile}
+                  hasIconOnly
+                  iconDescription={isSavingFile ? 'Saving' : 'Save'}
+                  kind="ghost"
+                  renderIcon={Save}
+                  size="sm"
+                  type="button"
+                  onClick={saveActiveFile}
+                />
+              )}
+            </div>
           )}
         </div>
         <div className="min-h-0 overflow-hidden">

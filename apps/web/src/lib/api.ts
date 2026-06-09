@@ -750,6 +750,14 @@ export type RealtimeEvent =
       artifactId: string
       action: ConversationArtifactAction
     }
+  | {
+      type: 'project.files.updated'
+      eventId: string
+      ownerUserId: string
+      createdAt: string
+      conversationId: string
+      paths?: string[]
+    }
 
 export class ApiRequestError extends Error {
   readonly status: number

@@ -18,7 +18,8 @@ export type RealtimeEventType =
   | "run.event.created"
   | "task.updated"
   | "artifact.created"
-  | "artifact.action.updated";
+  | "artifact.action.updated"
+  | "project.files.updated";
 
 export interface RealtimeEventBase {
   createdAt: string;
@@ -81,6 +82,12 @@ export interface ArtifactActionUpdatedRealtimeEvent extends RealtimeEventBase {
   type: "artifact.action.updated";
 }
 
+export interface ProjectFilesUpdatedRealtimeEvent extends RealtimeEventBase {
+  conversationId: ConversationId;
+  paths?: string[];
+  type: "project.files.updated";
+}
+
 export type RealtimeEvent =
   | ConversationUpdatedRealtimeEvent
   | ConversationMessageCreatedRealtimeEvent
@@ -89,4 +96,5 @@ export type RealtimeEvent =
   | RunEventCreatedRealtimeEvent
   | TaskUpdatedRealtimeEvent
   | ArtifactCreatedRealtimeEvent
-  | ArtifactActionUpdatedRealtimeEvent;
+  | ArtifactActionUpdatedRealtimeEvent
+  | ProjectFilesUpdatedRealtimeEvent;

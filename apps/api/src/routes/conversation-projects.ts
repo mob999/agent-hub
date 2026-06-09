@@ -94,6 +94,7 @@ export function createConversationProjectRoutes(context: ApiRouteContext): OpenA
   const { db } = context;
   const {
     projectChangeStatuses,
+    publishRealtimeEvents,
     requestDaemonProjectRpc,
   } = context.services;
 
@@ -649,6 +650,15 @@ export function createConversationProjectRoutes(context: ApiRouteContext): OpenA
         baseHead,
         conversationId: project.conversationId,
       });
+
+      await publishRealtimeEvents([
+        createRealtimeEvent({
+          conversationId: project.conversationId,
+          ownerUserId: project.ownerUserId,
+          paths: [requestedPath],
+          type: "project.files.updated",
+        }),
+      ]);
   
       return c.json({ baseHead, content, path: requestedPath });
     } catch (error) {

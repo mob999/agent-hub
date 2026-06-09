@@ -11,9 +11,11 @@ describe("artifact file inference", () => {
     ["src/app.tsx", "text", "File", "text/typescript; charset=utf-8", false, true],
     ["Makefile", "text", "File", "text/x-makefile; charset=utf-8", false, true],
     [".gitignore", "text", "File", "text/plain; charset=utf-8", false, true],
+    [".python-version", "text", "File", "text/plain; charset=utf-8", false, true],
     ["LICENSE", "text", "File", "text/plain; charset=utf-8", false, true],
     ["Dockerfile", "text", "File", "text/plain; charset=utf-8", false, true],
     ["README", "markdown", "File", "text/markdown; charset=utf-8", true, true],
+    ["uv.lock", "text", "File", "text/plain; charset=utf-8", false, true],
     ["archive.zip", "binary", "File", "application/octet-stream", false, false],
   ])(
     "infers %s",

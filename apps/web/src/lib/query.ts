@@ -11,6 +11,11 @@ import {
   type ConversationGoal,
   type ConversationMessage,
   type DaemonDevice,
+  type GetProjectChangeFileContentResponse,
+  type GetProjectFileContentResponse,
+  type ListConversationProjectChangesResponse,
+  type ListProjectChangeFilesResponse,
+  type ListProjectFilesResponse,
   type RunEvent,
   type WelcomeSummary,
 } from './api'
@@ -40,6 +45,14 @@ export const queryKeys = {
   runs: () => ['runs'] as const,
   run: (runId: string) => ['run', runId] as const,
   runEvents: (runId: string) => ['run', runId, 'events'] as const,
+  projectFiles: (conversationId: string) => ['project', conversationId, 'files'] as const,
+  projectFileContent: (conversationId: string, path: string) => ['project', conversationId, 'file', path] as const,
+  projectFileContents: (conversationId: string) => ['project', conversationId, 'file'] as const,
+  projectChanges: (conversationId: string) => ['project', conversationId, 'changes'] as const,
+  projectChangeFiles: (conversationId: string, changeId: string) =>
+    ['project', conversationId, 'change', changeId, 'files'] as const,
+  projectChangeFileContent: (conversationId: string, changeId: string, path: string) =>
+    ['project', conversationId, 'change', changeId, 'file', path] as const,
   welcome: () => ['welcome'] as const,
 }
 
@@ -118,6 +131,46 @@ export async function fetchRun(runId: string): Promise<AgentRun> {
 export async function fetchRunEvents(runId: string): Promise<RunEvent[]> {
   const response = await apiRequest<{ events: RunEvent[] }>(`/runs/${runId}/events`)
   return response.events
+}
+
+export async function fetchProjectFiles(conversationId: string): Promise<ListProjectFilesResponse> {
+  return apiRequest<ListProjectFilesResponse>(`/conversations/${conversationId}/project/files`)
+}
+
+export async function fetchProjectFileContent(
+  conversationId: string,
+  path: string,
+): Promise<GetProjectFileContentResponse> {
+  const params = new URLSearchParams({ path })
+  return apiRequest<GetProjectFileContentResponse>(
+    `/conversations/${conversationId}/project/files/content?${params.toString()}`,
+  )
+}
+
+export async function fetchProjectChanges(
+  conversationId: string,
+): Promise<ListConversationProjectChangesResponse> {
+  return apiRequest<ListConversationProjectChangesResponse>(`/conversations/${conversationId}/project/changes`)
+}
+
+export async function fetchProjectChangeFiles(
+  conversationId: string,
+  changeId: string,
+): Promise<ListProjectChangeFilesResponse> {
+  return apiRequest<ListProjectChangeFilesResponse>(
+    `/conversations/${conversationId}/project/changes/${changeId}/files`,
+  )
+}
+
+export async function fetchProjectChangeFileContent(
+  conversationId: string,
+  changeId: string,
+  path: string,
+): Promise<GetProjectChangeFileContentResponse> {
+  const params = new URLSearchParams({ path })
+  return apiRequest<GetProjectChangeFileContentResponse>(
+    `/conversations/${conversationId}/project/changes/${changeId}/files/content?${params.toString()}`,
+  )
 }
 
 export async function fetchWelcomeSummary(): Promise<WelcomeSummary> {

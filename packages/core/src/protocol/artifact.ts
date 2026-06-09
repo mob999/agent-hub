@@ -67,11 +67,13 @@ const filenameInfo = {
   ".npmrc": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
   ".prettierignore": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
   ".prettierrc": { language: "json", mimeType: "application/json; charset=utf-8" },
+  ".python-version": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
   copying: { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
   dockerfile: { language: "dockerfile", mimeType: "text/plain; charset=utf-8" },
   license: { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
   makefile: { language: "makefile", mimeType: "text/x-makefile; charset=utf-8" },
   readme: { language: "markdown", mimeType: "text/markdown; charset=utf-8" },
+  "uv.lock": { language: "plaintext", mimeType: "text/plain; charset=utf-8" },
 } as const satisfies Record<string, { language: string; mimeType: string }>;
 
 const imageMimeTypes = {

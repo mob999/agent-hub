@@ -59,9 +59,9 @@ const dashboardPanelClass =
 const dashboardRowClass =
   'grid w-full cursor-pointer border-0 border-b border-[#eef1f5] bg-transparent text-left transition-[background-color,transform] duration-150 last:border-b-0 hover:-translate-y-px hover:bg-[#f5f7fb] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--cds-focus)]'
 const subtleButton =
-  'inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d8dee6] bg-white px-3 text-sm font-semibold text-[#344054] shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#e1e5ea] disabled:bg-[#f4f4f4] disabled:text-[#a2a9b0] disabled:shadow-none'
+  'inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#d8dee6] bg-white px-5 text-base font-semibold text-[#344054] shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:border-[#c7d0dc] hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#e1e5ea] disabled:bg-[#f4f4f4] disabled:text-[#a2a9b0] disabled:shadow-none'
 const primaryButton =
-  'inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#0f62fe] bg-[#0f62fe] px-3 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:border-[#0353e9] hover:bg-[#0353e9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#a6c8ff] disabled:bg-[#a6c8ff] disabled:text-white disabled:shadow-none'
+  'inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#0f62fe] bg-[#0f62fe] px-5 text-base font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:border-[#0353e9] hover:bg-[#0353e9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] disabled:cursor-not-allowed disabled:border-[#a6c8ff] disabled:bg-[#a6c8ff] disabled:text-white disabled:shadow-none'
 const roundedFieldStyles = `
   .welcome-rounded-fields .cds--text-input,
   .welcome-rounded-fields .cds--text-area,
@@ -108,8 +108,8 @@ const roundedFieldStyles = `
 
   @media (max-width: 960px) {
     .welcome-dashboard-deck {
-      height: clamp(30rem, calc(100vh - 12rem), 40rem);
-      min-height: 30rem;
+      height: clamp(26rem, calc(100vh - 16rem), 40rem);
+      min-height: 26rem;
     }
   }
 
@@ -130,18 +130,13 @@ const roundedFieldStyles = `
 
   @media (max-width: 900px) {
     .welcome-card-deck {
-      height: auto;
-      min-height: 0;
+      height: clamp(26rem, calc(100vh - 16rem), 38rem);
+      min-height: 26rem;
     }
 
     .welcome-onboarding-card {
-      position: relative !important;
-      left: auto !important;
-      top: auto !important;
-      transform: none !important;
       width: 100%;
       min-height: 0;
-      margin-top: -0.75rem;
     }
   }
 `
@@ -781,7 +776,7 @@ export function WelcomePage({
 
     return (
       <section
-        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-hidden max-[671px]:p-4"
+        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-hidden max-[671px]:p-4 max-[671px]:pb-20"
         style={{
           backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #f5f6f8 38%, #d9dde4 72%, #111827 100%)',
         }}
@@ -857,11 +852,12 @@ export function WelcomePage({
               aria-label={t('welcome.recentConversations')}
               aria-hidden={!conversationsActive}
               inert={!conversationsActive}
-              style={conversationsActive ? { zIndex: 25 } : {
-                opacity: 0.88,
-                transform: 'translateX(-82%) translateY(1.15rem) scale(0.94)',
-                zIndex: 20,
-              }}
+              style={conversationsActive
+                ? { zIndex: 25 }
+                : isMobileCheck
+                  ? { opacity: 0.88, transform: 'translateX(-82%) translateY(1.15rem) scale(0.94)', zIndex: 20 }
+                  : { zIndex: 20 }
+              }
             >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
@@ -935,11 +931,12 @@ export function WelcomePage({
               aria-label={t('welcome.recentGoals')}
               aria-hidden={!goalsActive}
               inert={!goalsActive}
-              style={goalsActive ? { zIndex: 25 } : {
-                opacity: 0.88,
-                transform: 'translateX(82%) translateY(1.15rem) scale(0.94)',
-                zIndex: 20,
-              }}
+              style={goalsActive
+                ? { zIndex: 25 }
+                : isMobileCheck
+                  ? { opacity: 0.88, transform: 'translateX(82%) translateY(1.15rem) scale(0.94)', zIndex: 20 }
+                  : { zIndex: 20 }
+              }
             >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
@@ -1054,12 +1051,14 @@ export function WelcomePage({
                 key={step.id}
                 aria-hidden={!isActive}
                 aria-label={stepTitle}
-                className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full max-h-[calc(100vh-12rem)] min-h-[34rem] w-[48%] flex-col overflow-hidden rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:h-auto max-[900px]:max-h-none max-[900px]:min-h-0 max-[900px]:w-full`}
+                className={`welcome-onboarding-card welcome-rounded-fields absolute top-0 flex h-full max-h-[calc(100vh-12rem)] min-h-[34rem] w-[48%] flex-col overflow-hidden rounded-2xl border p-5 ${positionClass} ${toneClass} ${isActive ? 'pointer-events-auto' : 'pointer-events-none'} max-[900px]:left-0 max-[900px]:max-h-none max-[900px]:min-h-0 max-[900px]:w-full`}
                 style={{
-                  opacity: isActive ? 1 : distanceFromActive > 1 ? 0.82 : 0.92,
-                  transform: isActive
-                    ? 'translateX(0) translateY(0) scale(1)'
-                    : `translateX(${horizontalOffset}) translateY(${distanceFromActive * 1.15}rem) scale(${distanceFromActive > 1 ? 0.92 : 0.95})`,
+                  opacity: isMobileCheck ? (isActive ? 1 : 0) : isActive ? 1 : distanceFromActive > 1 ? 0.82 : 0.92,
+                  transform: isMobileCheck
+                    ? 'none'
+                    : isActive
+                      ? 'translateX(0) translateY(0) scale(1)'
+                      : `translateX(${horizontalOffset}) translateY(${distanceFromActive * 1.15}rem) scale(${distanceFromActive > 1 ? 0.92 : 0.95})`,
                   zIndex: isActive ? 30 : 20 - distanceFromActive,
                 }}
               >

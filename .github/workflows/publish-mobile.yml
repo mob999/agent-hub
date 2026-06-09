@@ -105,6 +105,8 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Rename APK
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p dist
           mv apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk \

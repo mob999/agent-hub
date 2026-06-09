@@ -66,25 +66,22 @@ interface DesktopDaemonManagerOptions {
 const nodeInstallUrl = "https://nodejs.org/";
 const maxLogLines = 200;
 
-function quoteCmdArg(value: string): string {
-  if (/^[A-Za-z0-9_./:@=-]+$/.test(value)) {
-    return value;
-  }
-
-  return `"${value.replaceAll('"', '\\"')}"`;
-}
-
 function commandSpec(command: string, args: string[]): {
   args: string[];
   command: string;
+  shell: boolean;
 } {
   if (process.platform !== "win32") {
-    return { args, command };
+    return { args, command, shell: false };
   }
 
+  const windowsCommand = command === "npm" || command === "npx"
+    ? `${command}.cmd`
+    : command;
   return {
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteCmdArg).join(" ")],
-    command: "cmd.exe",
+    args,
+    command: windowsCommand,
+    shell: command === "npm" || command === "npx",
   };
 }
 
@@ -100,6 +97,36 @@ function safeDeviceName(): string {
 
 function platformName(): "windows" | "posix" {
   return process.platform === "win32" ? "windows" : "posix";
+}
+
+function normalizeWorkspaceRoot(value: string): string {
+  const trimmed = value.trim();
+  const unquoted =
+    trimmed.length >= 2 &&
+    trimmed.startsWith('"') &&
+    trimmed.endsWith('"')
+      ? trimmed.slice(1, -1)
+      : trimmed;
+  return path.resolve(unquoted);
+}
+
+function killProcessTree(child: ChildProcessWithoutNullStreams): void {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    const killer = spawn("taskkill.exe", [
+      "/pid",
+      String(child.pid),
+      "/t",
+      "/f",
+    ], {
+      windowsHide: true,
+    });
+    killer.once("error", () => {
+      child.kill();
+    });
+    return;
+  }
+
+  child.kill();
 }
 
 export class DesktopDaemonManager {
@@ -185,7 +212,7 @@ export class DesktopDaemonManager {
     }
 
     const bootstrap = await this.bootstrapDevice();
-    const workspaceRoot = bootstrap.workspaceRoot;
+    const workspaceRoot = normalizeWorkspaceRoot(bootstrap.workspaceRoot);
     this.setStatus({
       autoStart: true,
       deviceId: bootstrap.deviceId,
@@ -210,6 +237,7 @@ export class DesktopDaemonManager {
     const child = spawn(daemonCommand.command, daemonCommand.args, {
       cwd: workspaceRoot,
       env: process.env,
+      shell: daemonCommand.shell,
       windowsHide: true,
     });
 
@@ -254,6 +282,7 @@ export class DesktopDaemonManager {
         let child: ChildProcessWithoutNullStreams;
         try {
           child = spawn(spec.command, spec.args, {
+            shell: spec.shell,
             windowsHide: true,
           });
         } catch {
@@ -297,7 +326,7 @@ export class DesktopDaemonManager {
     const deviceId =
       existing?.deviceId ??
       `desktop-${process.platform}-${installationId.slice(0, 8)}-${shortHash(userId)}`;
-    const workspaceRoot = existing?.workspaceRoot ?? app.getPath("home");
+    const workspaceRoot = normalizeWorkspaceRoot(existing?.workspaceRoot ?? app.getPath("home"));
     const response = await this.requestJson<BootstrapResponse>(
       "/daemon/desktop/bootstrap",
       {
@@ -413,14 +442,14 @@ export class DesktopDaemonManager {
 
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+        killProcessTree(child);
         resolve();
       }, 3_000);
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();
       });
-      child.kill();
+      killProcessTree(child);
     });
     this.daemonProcess = null;
   }

@@ -28,8 +28,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       VERSION: ${{ inputs.version }}
       # Production API URL — the mobile app always talks to the production
-      # backend (tavro-ai.vercel.app) because that is the canonical deployment.
-      VITE_AGENTHUB_API_URL: https://tavro-ai.vercel.app
+      # backend (tavro-api-production.up.railway.app).
+      VITE_AGENTHUB_API_URL: https://tavro-api-production.up.railway.app
 
     steps:
       - name: Checkout

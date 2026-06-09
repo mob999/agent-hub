@@ -771,16 +771,17 @@ export function WelcomePage({
   if (showDashboard) {
     const conversationsActive = activeDashboardCard === 'conversations'
     const goalsActive = activeDashboardCard === 'goals'
-    // On desktop both cards sit side-by-side in a grid (relative positioning).
-    // On mobile (≤960px) they stack as absolutely-positioned swipeable cards.
+    // Both cards are absolutely positioned so they always stretch to the
+    // same deck height.  On desktop they sit side-by-side (both visible);
+    // on mobile (≤960px) they overlap and swipe between them.
     const dashboardCardBase =
-      `${dashboardPanelClass} welcome-dashboard-card relative h-full w-full max-[960px]:absolute max-[960px]:top-0 max-[960px]:h-full max-[960px]:w-[92%] max-[671px]:w-[92%]`
+      `${dashboardPanelClass} welcome-dashboard-card absolute top-0 h-full w-[calc(50%-0.625rem)] max-[960px]:w-[92%] max-[671px]:w-[92%]`
     const dashboardArrowButton =
-      'grid h-11 max-h-11 min-h-11 w-11 min-w-11 max-w-11 shrink-0 cursor-pointer place-items-center rounded-xl border-0 bg-transparent p-0 text-[#344054] transition hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] [&>svg]:block [&>svg]:h-5 [&>svg]:w-5 max-[960px]:inline-flex hidden'
+      'grid h-11 max-h-11 min-h-11 w-11 min-w-11 max-w-11 shrink-0 cursor-pointer place-items-center rounded-xl border-0 bg-transparent p-0 text-[#344054] transition hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] [&>svg]:block [&>svg]:h-5 [&>svg]:w-5'
 
     return (
       <section
-        className="relative grid h-full min-h-0 overflow-y-auto bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-hidden max-[671px]:p-4"
+        className="relative grid h-full min-h-0 overflow-hidden bg-[#f5f6f8] p-5 text-[#161616] max-[960px]:overflow-y-auto max-[671px]:p-4"
         style={{
           backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #f5f6f8 38%, #d9dde4 72%, #111827 100%)',
         }}
@@ -847,10 +848,10 @@ export function WelcomePage({
             )}
           </header>
 
-          <div className="welcome-dashboard-deck grid grid-cols-2 gap-5 min-h-0 h-full max-[960px]:block max-[960px]:relative max-[960px]:overflow-hidden">
+          <div className="welcome-dashboard-deck relative min-h-0 overflow-hidden">
             <style>{roundedFieldStyles}</style>
             <section
-              className={`${dashboardCardBase} max-[960px]:left-0 ${conversationsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
+              className={`${dashboardCardBase} left-0 ${conversationsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
               aria-label={t('welcome.recentConversations')}
               aria-hidden={!conversationsActive}
               inert={!conversationsActive}
@@ -860,7 +861,7 @@ export function WelcomePage({
                 zIndex: 20,
               }}
             >
-              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5" style={{ minHeight: '5.75rem' }}>
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestMessage')}</p>
                   <ChatBot size={19} />
@@ -926,7 +927,7 @@ export function WelcomePage({
             </section>
 
             <section
-              className={`${dashboardCardBase} max-[960px]:right-0 ${goalsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
+              className={`${dashboardCardBase} right-0 ${goalsActive ? 'max-[960px]:pointer-events-auto' : 'max-[960px]:pointer-events-none'}`}
               aria-label={t('welcome.recentGoals')}
               aria-hidden={!goalsActive}
               inert={!goalsActive}
@@ -936,7 +937,7 @@ export function WelcomePage({
                 zIndex: 20,
               }}
             >
-              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5" style={{ minHeight: '5.75rem' }}>
+              <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#69707d]">{t('welcome.latestGoal')}</p>
                   <Task size={19} />

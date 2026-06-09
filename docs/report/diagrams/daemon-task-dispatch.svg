@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img" aria-labelledby="title desc">
+  <title id="title">Daemon 连接与任务分发</title>
+  <desc id="desc">展示 Tavro / Agent Hub 中 API 注册 daemon、Worker gateway 接收出站连接、Worker 分发 Run、本地 daemon 调用 runtime 并回传事件的流程。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#f97316"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrowSlate" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 28px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 400 14px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #64748b; }
+      .panel-title { font: 700 13px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #475569; letter-spacing: .08em; }
+      .box-title { font: 700 16px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #111827; }
+      .box-body { font: 400 12px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #475569; }
+      .label { font: 700 12px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #334155; }
+      .note { font: 400 12px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #64748b; }
+      .arrow-blue { stroke: #2563eb; stroke-width: 2.5; fill: none; marker-end: url(#arrowBlue); }
+      .arrow-orange { stroke: #f97316; stroke-width: 2.5; fill: none; marker-end: url(#arrowOrange); }
+      .arrow-green { stroke: #16a34a; stroke-width: 2.5; fill: none; marker-end: url(#arrowGreen); }
+      .arrow-slate { stroke: #64748b; stroke-width: 2.5; fill: none; marker-end: url(#arrowSlate); }
+      .arrow-soft { stroke-dasharray: 6 5; }
+    </style>
+  </defs>
+
+  <rect width="1120" height="560" fill="#ffffff"/>
+  <text x="56" y="62" class="title">Daemon 连接与任务分发</text>
+  <text x="56" y="94" class="subtitle">本地执行器通过出站连接接入平台，Worker 根据 Agent/runtime 绑定关系分发任务并接收事件回传</text>
+
+  <rect x="48" y="126" width="1010" height="320" rx="16" fill="#f8fafc" stroke="#cbd5e1"/>
+  <rect x="78" y="160" width="282" height="246" rx="14" fill="#eff6ff" stroke="#bfdbfe"/>
+  <rect x="412" y="160" width="282" height="246" rx="14" fill="#fff7ed" stroke="#fed7aa"/>
+  <rect x="746" y="160" width="282" height="246" rx="14" fill="#f0fdf4" stroke="#bbf7d0"/>
+
+  <text x="100" y="188" class="panel-title">CONTROL PLANE</text>
+  <text x="434" y="188" class="panel-title">EXECUTION PLANE</text>
+  <text x="768" y="188" class="panel-title">LOCAL MACHINE</text>
+
+  <g filter="url(#shadow)">
+    <rect x="116" y="218" width="206" height="58" rx="10" fill="#ffffff" stroke="#bfdbfe"/>
+    <rect x="116" y="318" width="206" height="58" rx="10" fill="#ffffff" stroke="#bfdbfe"/>
+    <rect x="450" y="218" width="206" height="58" rx="10" fill="#ffffff" stroke="#fed7aa"/>
+    <rect x="450" y="318" width="206" height="58" rx="10" fill="#ffffff" stroke="#fed7aa"/>
+    <rect x="784" y="218" width="206" height="58" rx="10" fill="#ffffff" stroke="#bbf7d0"/>
+    <rect x="784" y="318" width="206" height="58" rx="10" fill="#ffffff" stroke="#bbf7d0"/>
+  </g>
+
+  <g text-anchor="middle">
+    <text x="219" y="242" class="box-title">API Service</text>
+    <text x="219" y="262" class="box-body">注册设备 / 生成 token</text>
+
+    <text x="219" y="342" class="box-title">Run Queue</text>
+    <text x="219" y="362" class="box-body">保存 queued / 投递任务</text>
+
+    <text x="553" y="242" class="box-title">Daemon Gateway</text>
+    <text x="553" y="262" class="box-body">校验身份 / 维护连接</text>
+
+    <text x="553" y="342" class="box-title">Worker Service</text>
+    <text x="553" y="362" class="box-body">选择 daemon / 分发 Run</text>
+
+    <text x="887" y="242" class="box-title">Local Daemon</text>
+    <text x="887" y="262" class="box-body">出站 WebSocket / 上报能力</text>
+
+    <text x="887" y="342" class="box-title">Agent Runtime</text>
+    <text x="887" y="362" class="box-body">Claude Code / Codex / OpenCode</text>
+  </g>
+
+  <path class="arrow-blue" d="M322 247 L450 247"/>
+  <text x="386" y="232" text-anchor="middle" class="label">1 设备注册</text>
+
+  <path class="arrow-green arrow-soft" d="M784 247 L656 247"/>
+  <text x="720" y="232" text-anchor="middle" class="label">2 出站连接</text>
+
+  <path class="arrow-orange" d="M322 347 L450 347"/>
+  <text x="386" y="332" text-anchor="middle" class="label">3 Run 入队</text>
+
+  <path class="arrow-orange" d="M656 347 L784 347"/>
+  <text x="720" y="332" text-anchor="middle" class="label">4 分发任务</text>
+
+  <path class="arrow-slate" d="M887 276 L887 318"/>
+  <text x="902" y="302" class="label">5 调用 runtime</text>
+
+  <path class="arrow-green" d="M784 226 C710 150 610 142 553 218"/>
+  <text x="676" y="146" text-anchor="middle" class="label">6 日志 / 消息 / Artifact 事件回传</text>
+
+  <rect x="124" y="470" width="872" height="50" rx="12" fill="#0f172a"/>
+  <text x="560" y="501" text-anchor="middle" fill="#ffffff" font-family="Segoe UI, 'Microsoft YaHei', Arial, sans-serif" font-size="14" font-weight="700">
+    安全边界：daemon 只通过出站连接接收授权任务；本地文件访问限制在用户授权 workspace 内。
+  </text>
+</svg>

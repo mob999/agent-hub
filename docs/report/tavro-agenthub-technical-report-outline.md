@@ -121,7 +121,9 @@ Tavro 的一次 Agent 执行不是由前端直接调用某个 CLI 完成，而�
 
 ### 2.3 Daemon 连接与任务分发
 
-建议配图：Daemon 连接与任务分发图。
+Daemon 连接与任务分发流程如下图所示：
+
+![Daemon 连接与任务分发](./diagrams/daemon-task-dispatch.svg)
 
 - Daemon 与 Worker gateway 建立出站 WebSocket 连接。
 - API 为 daemon 设备生成 token，Worker 校验设备身份。

@@ -30,7 +30,7 @@
 
 从使用角色看，系统需要同时服务三类对象：普通用户是会话发起者、任务确认者和产物使用者；Agent/runtime 是任务执行者，负责调用本地或远程工具并回传消息、日志和产物；API、Worker、数据库、Redis、对象存储和实时通道等系统服务则承担控制面、执行面、持久化和同步能力。Web 与桌面端只负责交互展示和用户确认，不应承担长任务执行；daemon 也不是第二套后端，而是运行在用户本机、负责连接本地 runtime 的轻量执行器。
 
-从功能边界看，Agent Hub 需要提供 GitHub 登录、用户会话、单 Agent 私聊、群聊、项目会话、Agent 管理、Run 状态跟踪、Goal/Task 拆分、Artifact 展示与发布、本地 daemon 接入、桌面端托管执行器和实时反馈等能力。复杂任务需要从用户自然语言请求拆解为阶段性目标和可执行任务，避免多 Agent 协作停留在聊天文本层面。这些功能共同支撑一个核心目标：让用户在同一工作台中发起任务、观察执行过程、接收 Agent 回复并管理最终产物。
+从功能边界看，Agent Hub 需要提供 GitHub 登录、用户会话、单 Agent 私聊、群聊、项目会话、Agent 管理、Run 状态跟踪、协调者调度、Goal/Task 拆分、Artifact 展示与发布、本地 daemon 接入、桌面端托管执行器和实时反馈等能力。复杂任务需要从用户自然语言请求拆解为阶段性目标和可执行任务，并由协调者选择合适的 Agent 推进，避免多 Agent 协作停留在聊天文本层面。这些功能共同支撑一个核心目标：让用户在同一工作台中发起任务、观察执行过程、接收 Agent 回复并管理最终产物。
 
 从非功能边界看，系统必须保证长任务脱离 HTTP 请求生命周期，由 Worker 和 daemon 承担执行；本地执行器必须通过出站连接接入平台，避免暴露用户机器端口；Web 前端应保持纯静态 SPA，API、Worker、数据库、Redis 和对象存储应支持分离部署；Run 状态、运行事件、消息和产物元数据需要持久化，保证系统可观测、可恢复、可测试。
 
@@ -85,7 +85,7 @@
 1. 用户在会话中发送消息。
 2. API 创建 Run，保存 queued 状态并投递队列。
 3. Worker 消费 Run，选择本地 daemon 或云端 runtime。
-4. Orchestrator 可根据会话上下文创建 Goal，并在 Goal 下分派多个 Task 给不同 Agent。
+4. 协调者 Orchestrator 根据会话上下文理解用户意图，创建 Goal，并在 Goal 下分派多个 Task 给不同 Agent。
 5. Runtime 生成运行事件、消息和 Artifact，Task 状态随执行过程更新。
 6. API/Worker 持久化数据，并通过实时事件推送给前端。
 7. 前端更新消息流、Goal/Task 状态和产物视图。
@@ -105,8 +105,9 @@
 
 - Agent 作为聊天成员参与会话。
 - 用户可以在群聊中 @ 一个或多个 Agent。
+- 协调者 Orchestrator 是群聊协作中的调度角色，负责理解用户意图、维护任务上下文、拆解目标并选择参与 Agent。
 - Goal 表示从用户意图中抽取出的阶段性目标，Task 是 Goal 下可分派、可跟踪、可执行的工作单元。
-- Orchestrator 负责从会话上下文中创建 Goal、拆分 Task、选择 Agent，并按任务状态推进协作。
+- Orchestrator 不替代具体 Agent 执行任务，而是在多个 Agent 之间分配工作、跟踪状态并汇总协作过程。
 - 自动派发消息使用结构化卡片展示 Goal/Task 创建和分派过程，而不是只依赖纯文本。
 
 ### 3.2 本地 daemon 执行模型
@@ -152,6 +153,7 @@
 - 技术栈：Hono、Node.js、`@hono/zod-openapi`。
 - 路由采用 `createRoute + app.openapi(...)` 暴露 OpenAPI 文档。
 - API 模块包括 auth、agents、conversations、runs、daemon、artifacts、deployments、search 和 realtime。
+- 协调者相关操作通过会话、Run、Goal/Task 和消息接口串联，不作为独立第二套执行服务。
 - API 是控制面，负责权限校验、状态持久化和任务投递，不直接执行长任务。
 
 ### 4.3 数据层实现
@@ -165,6 +167,7 @@
 ### 4.4 Worker 实现
 
 - Worker 消费 Run 队列并负责长任务执行。
+- Worker 在群聊或项目会话中承载协调者调度流程，将目标拆解、任务分派和状态推进写回会话。
 - 对本地任务，Worker 通过 daemon gateway 将任务分发给在线 daemon。
 - Worker 持久化 RunEvent、message、goal/task、artifact 和 deployment 记录。
 - Worker 在任务分派和状态变化时发布实时事件，使聊天流卡片和任务页保持同步。

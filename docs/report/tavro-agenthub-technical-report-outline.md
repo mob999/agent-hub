@@ -1,4 +1,4 @@
-# Tavro/AgentHub 课题技术报告大纲
+# Tavro/AgentHub 课题技术报告
 
 ## 文档定位
 
@@ -294,140 +294,128 @@ Daemon 与 Desktop 不跟随 main 自动发版。`publish-daemon.yml` 是手动 
 
 ### 6.1 方法设计背景
 
-- 本课题本身是多 Agent 协作平台，同时开发过程也大量使用 AI Agent 辅助编码、排障、文档和部署。
-- 为避免 AI Agent 在复杂 monorepo 中偏离架构边界，需要将项目知识、工程约束和常用流程显式文档化。
-- 项目采用“项目级总规范 + 任务型技能文档”的方式，让 AI Agent 能够持续复用上下文，而不是每次从零理解仓库。
+Agent Hub 的课题目标是构建多 Agent 协作平台，而项目开发过程本身也大量使用 AI Agent 辅助完成需求拆解、代码实现、排障、部署和文档撰写。因此，本课题不仅关注“最终系统如何支持 Agent 协作”，也关注“如何让 AI Agent 稳定参与一个真实工程项目的持续开发”。这部分工程方法与系统实现相互呼应：前者是开发过程中的协作机制，后者是面向最终用户的协作平台。
+
+在实际开发中，AI Agent 的主要风险不是单次生成能力不足，而是在复杂 monorepo 中容易丢失项目上下文、误判架构边界或重复犯已经解决过的问题。例如，前端、API、Worker、daemon、desktop 和共享 packages 都有明确职责，如果 AI Agent 只根据局部代码修改，可能把长任务逻辑写进 API route，或者把后端专用协议暴露到浏览器包中。部署、OAuth、CI、daemon 发版等任务也包含大量项目特有经验，仅靠自然语言临时说明很难保证每次执行一致。
+
+为解决这一问题，项目采用“项目级总规范 + 任务型技能文档”的方式沉淀 AI 协作经验。`AGENTS.md` 用于记录全局架构、产品模型和代码边界，`skills/` 用于记录具体任务的流程和检查清单。通过显式文档化，AI Agent 在接手任务前可以快速获得稳定上下文，开发者也可以把一次排障经验转化为后续可复用的协作规则。
 
 ### 6.2 `AGENTS.md` 项目级协作契约
 
-- `AGENTS.md` 记录 Tavro/AgentHub 的产品模型、架构原则、运行边界和代码组织方式。
-- 文档明确 Web、API、Worker、Daemon、Desktop、packages 之间的职责边界，减少 AI Agent 把逻辑放错层的风险。
-- 文档规定 API route 使用 OpenAPI `createRoute` 风格、后端领域逻辑优先放入 `packages/server`、共享协议放入 `packages/core`。
-- 文档还沉淀测试约定、本地基础设施、当前实现状态和后续优先级，作为 AI Agent 接手任务前的公共上下文。
+`AGENTS.md` 是项目级协作契约，面向所有参与该仓库工作的 AI Agent 和开发者。它记录 Tavro/AgentHub 的产品模型、架构原则、运行边界、推荐技术栈、项目结构、本地开发基础设施、测试约定和当前实现状态。与普通 README 不同，`AGENTS.md` 更强调“做事边界”：哪些逻辑应该放在前端，哪些属于 API 控制面，哪些必须交给 Worker 或 daemon，哪些共享类型应进入 `packages/core`。
+
+在代码层面，`AGENTS.md` 明确要求 API route 使用 OpenAPI `createRoute` 风格或对应 helper 注册，避免继续新增裸 `app.get/post/...` 业务路由；后端领域逻辑优先放入 `packages/server`，避免 API 层重新堆积业务 repository；browser-safe 协议、Agent/runtime/artifact 契约统一放入 `packages/core`，避免前后端类型漂移。对于 daemon，文档也强调它是本地执行器而不是第二套后端，不能承担聊天历史、用户系统或全局权限判断。
+
+这种契约的价值在于把架构共识变成可检查文本。AI Agent 在实现功能前可以先读取这些约束，降低凭局部上下文做出错误抽象的概率；开发者在评审 AI 产出时，也可以用 `AGENTS.md` 判断修改是否越界。随着项目演进，新的边界、坑点和流程会继续被补充回该文件，使它成为项目长期协作的公共语境。
 
 ### 6.3 `skills/` 任务型技能文档
 
-- `skills/` 目录将高频任务沉淀为可复用工作流，每个 skill 使用 `SKILL.md` 描述触发场景、核心原则、常用流程、验证命令和易错点。
-- 当前项目包含开发流程、前端体验、生产部署、CI 排障、daemon 发版等技能。
-- skill 与 `AGENTS.md` 的关系是分层互补：`AGENTS.md` 约束全局架构和边界，skill 约束具体任务执行方式。
-- 这种方法让后续 AI Agent 在处理 UI 打磨、部署、发版、CI 失败等任务时，能够快速进入正确工作模式。
+`skills/` 目录用于沉淀高频任务的可复用工作流。每个 skill 以 `SKILL.md` 为核心，描述触发场景、核心原则、常用流程、验证命令和易错点，并配套 `agents/openai.yaml` 描述名称和短说明。与 `AGENTS.md` 的全局约束不同，skill 更像某一类任务的操作手册。例如，普通功能开发需要先读代码和仓库状态、再小步实现并运行对应范围的检查；前端体验打磨需要遵守工作台式界面、真实头像、明确 loading/empty/error 状态和 TanStack Query 的 server state 管理；生产部署任务需要同时检查 Vercel、Railway、Supabase、GitHub OAuth、域名和环境变量。
+
+当前项目已沉淀多类技能：`tavro-development-workflow` 面向普通功能、重构和 bug 修复；`tavro-frontend-experience` 面向 Web UI、消息流、sidebar、Welcome、任务页和 Artifact 等体验打磨；`tavro-production-deployment` 面向 Vercel/Railway/Supabase/GitHub OAuth 和生产环境变量；`tavro-ci-troubleshooting` 面向 GitHub Actions 失败定位与本地复现；`tavro-daemon-release` 面向 daemon npm 包发布、`npx @tavro-ai/daemon@latest connect`、MCP relay 和 Windows shell 差异排障。
+
+Skill 与 `AGENTS.md` 形成分层互补关系。`AGENTS.md` 回答“这个项目是什么、边界在哪里”，skill 回答“遇到这一类任务时应该怎么做”。这种分层使 AI Agent 不需要每次从完整项目文档中重新提取流程，而是在任务触发时使用更窄、更可执行的检查清单，从而提升复杂工程任务的一致性。
 
 ### 6.4 AI 协作开发流程
 
-- 需求不明确时先设计计划，再进入实现。
-- 实现前先阅读相关代码和仓库状态，避免凭空假设。
-- 修改保持小步提交，每次变更后运行对应范围的 lint、typecheck、test 或全量 `pnpm check`。
-- 涉及部署、OAuth、CI、daemon 发版等高风险任务时，优先通过 skill 中的检查清单执行。
-- 所有关键经验在问题解决后反向沉淀到 `AGENTS.md` 或对应 skill 中，形成持续改进闭环。
+项目中的 AI 协作开发流程大致分为四步。第一步是澄清与计划：当需求边界不明确时，先以 plan mode 形式整理目标、改动点、测试计划和假设，再进入实现。这可以避免 AI Agent 在信息不足时直接大范围修改代码。第二步是上下文读取：实现前优先使用 `rg`、文件阅读和必要的 Git 状态检查理解当前代码，而不是依赖记忆或猜测。对于 API、repository、daemon protocol、前端状态管理等敏感改动，必须先确认现有实现模式。
+
+第三步是小步实现与局部验证。修改时优先保持变更范围集中，遵守已有模块边界和代码风格；完成后根据风险运行对应范围的 `pnpm --filter ... typecheck/test/build`，必要时运行全量 `pnpm check`。例如，修改登录流程时需要覆盖 API auth tests、config env tests、web typecheck 和 web build；修改 daemon npm 包时需要检查包版本、构建依赖和发布 workflow；修改部署配置时需要核对平台环境变量和回调地址。
+
+第四步是经验回写。凡是解决了具有复用价值的问题，例如 Vercel SPA deep link 404、Railway watch paths、Supabase Storage 作为对象存储、Windows stdin 与 shell 差异、daemon 发版版本校验、GitHub OAuth 本地/生产 callback 拆分等，都应被记录到 README、AGENTS 或对应 skill 中。这样项目知识不会停留在一次对话中，而是逐渐沉淀为可被后续 AI Agent 继承的工程资产。
 
 ### 6.5 方法价值
 
-- 降低大型 TypeScript monorepo 中 AI 协作的上下文损耗。
-- 提升跨前端、后端、worker、daemon、桌面端任务的一致性。
-- 将一次性排障经验转化为可复用流程，减少重复错误。
-- 为课题本身提供一种“用 AI Agent 构建 AI Agent 平台”的工程实践样例。
+该方法的直接价值是降低大型 TypeScript monorepo 中的上下文损耗。Tavro 同时包含 Web、API、Worker、daemon、desktop、docs、共享 packages、GitHub Actions 和部署配置，任何单点修改都可能影响多个边界。通过 `AGENTS.md` 和 skill，AI Agent 可以更快理解当前任务应触达哪些模块、应避免哪些模块、完成后需要运行哪些验证命令。
+
+该方法还提升了跨端任务的一致性。前端体验、后端路由、daemon 发版、CI 排障和生产部署原本属于不同知识域，但在项目中经常相互影响。将它们拆成不同 skill 后，AI Agent 可以在处理具体任务时加载对应流程，而不是用同一种泛化编码策略处理所有问题。
+
+从课题角度看，这一部分也构成了“用 AI Agent 构建 AI Agent 平台”的工程实践样例。Agent Hub 的产品目标是改善多 Agent 协作，而开发过程中的 `AGENTS.md` 与 `SKILL.md` 则展示了人类开发者如何为 AI Agent 提供稳定上下文、任务边界和复盘机制。这种方法不仅服务本项目，也可迁移到其他长期演进的 AI 辅助软件工程项目中。
 
 ## 第 7 章 系统测试与验证
 
 ### 7.1 单元测试
 
-- core 协议类型和纯逻辑。
-- server cache/storage。
-- API auth/routes。
-- daemon runtime/MCP。
-- worker daemon gateway。
+Tavro 的单元测试主要覆盖具有明确业务规则、边界条件或外部适配风险的模块。`packages/core` 中的协议类型和纯逻辑适合通过单元测试保证前后端共享语义一致，例如 Artifact 类型判断、conversation message card 结构、daemon/realtime/run 协议等。`packages/server` 中的 cache、storage、repository 和 token 逻辑则直接影响后端稳定性，因此需要覆盖缓存命中/失效、local 与 S3 storage adapter、路径归一化和错误回退等场景。
+
+API 层测试重点覆盖认证、路由权限和关键业务入口。GitHub OAuth、desktop OAuth、session cache、development login、logout、`/auth/me` 等路由通过 route test 验证状态码、cookie、redirect 和错误码是否符合预期；agents、conversations、messages、daemon、artifacts、deployments 等路由则关注权限、输入校验和返回结构。由于 API 使用 `@hono/zod-openapi`，测试同时可以帮助确认 OpenAPI route 与真实 handler 行为一致。
+
+daemon 与 worker 的单元测试侧重外部系统适配。Runtime adapter 需要验证 Claude/Codex 可执行文件检测、版本解析、命令参数构造、日志解析、JSONL 事件映射和取消逻辑；MCP relay 需要验证工具调用与 session token 的边界；worker daemon gateway 则需要验证 daemon hello、heartbeat、run assigned/accepted/rejected、artifact upload、project clone 和 memory append 等协议消息。通过这些测试，系统可以在不同 runtime、不同操作系统和不同部署形态下保持协议一致。
 
 ### 7.2 集成验证
 
-- GitHub 登录。
-- 发送消息并创建 Run。
-- 用户消息发送后先进入消息流，再由真实消息替换临时状态。
-- 创建 Goal、分派 Task，并验证 Task 状态从运行到成功或失败。
-- daemon 在线检测。
-- Agent workspace 初始化、run workspace 隔离和 memory append/read/search。
-- runtime adapter 能检测 Claude/Codex 能力，解析日志为统一 RunEvent，并通过 MCP relay 调用 AgentHub 工具。
-- 同一 Agent 连续任务能触发 runtime session resume 和旧 Run 抢占，旧 Run 状态进入 interrupted。
-- Agent 执行并回传消息。
-- 聊天流 Goal/Task 卡片与任务页状态同步。
-- Artifact 上传、读取、编辑和发布。
-- Project Code 面板能读取文件、保存修改，并在文件更新事件后刷新对应缓存。
-- 静态站点部署预览。
+集成验证关注端到端链路是否成立。登录链路需要分别验证 Web GitHub OAuth、桌面系统浏览器 OAuth 和开发模式登录：用户登录后能够获得 session cookie，`/auth/me` 能返回用户信息，登出后 session 被撤销。消息链路从用户在会话中发送消息开始，前端应立即插入 optimistic 用户消息，API 创建真实消息与 Run 后替换临时状态，Worker 消费 Run 后将状态从 queued 推进到 running、succeeded 或 failed，并通过实时事件更新前端。
+
+多 Agent 协作链路需要验证 Goal/Task 与协调者机制。典型场景是用户在群聊或项目会话中提出复杂任务，协调者创建 Goal，随后分派多个 Task 给不同 Agent。系统应能展示 `goal.created` 与 `task.assigned` 卡片，任务状态从 ready、assigned、running 逐步变化为 succeeded 或 failed，任务页的状态聚合视图与聊天流卡片保持一致。对于存在依赖关系的任务，需要验证上游成功后下游才被推进；对于同一 Agent 连续任务，需要验证 runtime session resume 与旧 Run 抢占，旧 Run 状态进入 interrupted。
+
+本地执行器链路需要验证 daemon 在线、runtime 检测和 workspace 隔离。Daemon 连接后应显示在线设备和 ready runtime；创建 Agent 后，Worker 应通过 daemon 初始化独立 Agent workspace；每次 Run 应使用独立 run workspace，项目会话使用 per-run Git worktree。Memory 相关能力需要验证 append、read、search 能写入并读取 Agent 自己的 memory workspace，且不污染用户项目仓库。
+
+产物链路需要验证 Artifact 和部署闭环。Agent 上传文件后，前端应能展示 Artifact、读取内容、编辑 revision、触发 action；静态站点 publish 后，系统应生成 deployment 记录，并能通过公开部署 URL 访问对应文件。Project Code 面板需要验证文件树读取、文本内容读取、保存修改、手动刷新和文件更新事件后的缓存刷新。对象存储开启后，API 与 Worker 分离部署时也应能读取同一份 Artifact 和 deployment 文件。
 
 ### 7.3 线上 Demo 验证
 
-建议放置：
+线上 Demo 验证用于证明系统不仅能在本地开发环境运行，也能在真实云端部署拓扑下完成主要流程。Demo 材料应包含 Tavro Web 主站地址、Tavro Docs 文档站地址、GitHub 仓库地址和演示视频链接或二维码。由于本课题涉及 Web、API、Worker、daemon 和 desktop 多端协同，演示视频比单张截图更能体现 Run 生命周期、实时事件和本地执行器回传过程。
 
-- Tavro Web 地址。
-- Tavro Docs 地址。
-- GitHub 仓库地址。
-- 演示视频二维码或链接。
-- 关键截图：登录页、Welcome、会话、任务、Artifact、Daemon、桌面端。
+关键截图覆盖登录页、Welcome dashboard、会话消息流、Goal/Task 任务页、Artifact 工作区、Project Code 面板、Daemon 页面、桌面客户端和静态站点部署预览。截图应服务于报告论证：登录页体现 GitHub-only 与桌面登录入口；会话页体现 IM 化多 Agent 协作；任务页体现 Goal/Task 状态聚合；Artifact 和部署页体现产物闭环；Daemon 和桌面端截图体现本地执行器接入能力。
+
+线上验证时还需要特别关注多容器环境问题。API 与 Worker 分离部署后，本地文件系统不再共享，因此 Artifact、deployment 和项目文件相关流程必须确认已经通过对象存储或 daemon gateway 访问真实数据。Redis、Supabase PostgreSQL、Supabase Storage、Railway API/Worker 和 Vercel Web 的环境变量也需要在演示前统一检查，避免出现前端可访问但执行器、OAuth 或产物读取失败的情况。
 
 ### 7.4 性能与稳定性说明
 
-- Redis 缓存降低重复读压力。
-- TanStack Query 降低前端重复请求和切换等待。
-- 对象存储解决多容器本地文件丢失。
-- Worker 避免长任务阻塞 API。
-- 桌面托管 daemon 降低本地执行器接入失败率。
+性能方面，系统从后端缓存、前端 server state 和执行面解耦三个方向降低用户等待。后端通过 Redis 缓存 session 鉴权、sidebar 列表、conversation detail 和 Welcome summary 等高频读路径，减少重复数据库查询；前端通过 TanStack Query 缓存 agents、conversations、messages、tasks、artifacts、deployments 和 runs，切换页面或会话时优先显示已有缓存，再由后台刷新。Project Code 面板在打开 code 视图时预加载一批可编辑文本文件，减少用户逐个点文件时的等待。
+
+稳定性方面，Worker 将长任务从 HTTP 请求生命周期中剥离，避免用户请求长时间占用 API 连接。RunEvent、消息、Goal/Task、Artifact action 和 deployment 都持久化到数据库或对象存储，因此前端断线、刷新或 Worker 重启后可以恢复权威状态。Realtime Channel 只负责通知，不保存状态，这一设计避免了实时连接成为单点状态源。
+
+部署稳定性方面，Supabase Storage 或其他 S3-compatible 对象存储解决了 API 与 Worker 多容器不共享本地磁盘的问题；Railway Redis 支撑队列和缓存，PostgreSQL 保存业务权威数据。桌面端托管 daemon 降低了用户手动复制 `npx` 命令的出错概率，并通过状态面板展示 runtime 在线情况。对于本地执行器离线、GitHub OAuth 过期、Artifact action 失败、daemon runtime 不可用等异常，系统会将错误落到对应状态层并在前端展示，而不是只在日志中失败。
 
 ## 第 8 章 总结与展望
 
 ### 8.1 已完成成果
 
-- 完整多 Agent IM 工作台原型。
-- Web、API、Worker、Daemon、Desktop 端到端链路。
-- 线上部署和可演示 Demo。
-- 支持本地执行器、独立 Agent workspace、记忆系统、Artifact、任务状态和静态站点预览。
-- 形成 `AGENTS.md` 与项目 skills 结合的 AI 协作开发方法。
+本课题围绕 Agent Hub 的目标完成了一个可运行的多 Agent IM 工作台原型，并将产品实现命名为 Tavro。系统支持用户通过会话发起任务、@ Agent、查看 Run 状态、接收结构化任务卡片、管理 Artifact、预览静态站点和查看部署记录。与普通聊天应用不同，Tavro 将消息、Run、Goal/Task、Artifact、daemon device 和 project context 统一到一个可追踪的协作模型中，使 Agent 协作过程从文本交互延伸到任务执行和产物管理。
+
+工程实现上，系统完成了 Web、API、Worker、Daemon、Desktop 的端到端链路。Web 和桌面端共享同一套工作台界面；API 作为控制面管理认证、权限、会话、元数据和 OpenAPI 路由；Worker 负责队列消费、Run 执行推进、daemon gateway、Artifact action 和 memory append；daemon 负责本地 runtime 检测、CLI 进程封装、MCP relay、workspace 和记忆系统；desktop 负责系统浏览器登录、托管 `npx @tavro-ai/daemon@latest connect` 和更新提醒。
+
+部署与工程化方面，系统已形成 Vercel、Railway、Supabase、npm 和 GitHub Release 组合的上线方案。Web 和 Docs 作为静态站点部署到 Vercel，API/Worker/Redis 部署到 Railway，PostgreSQL 与对象存储使用 Supabase，daemon 作为 npm 包发布，桌面端通过 GitHub Release 分发。同时，项目沉淀了 `AGENTS.md` 与 `skills/` 结合的 AI 协作开发方法，为后续持续开发提供了上下文、边界和流程。
 
 ### 8.2 当前不足
 
-- 云端 Agent 执行能力仍可继续增强。
-- Artifact 托管可以升级为独立部署服务。
-- 桌面端签名、自动更新和本地文件能力仍需完善。
-- 权限、审计、团队协作和计费能力尚未产品化。
-- AI 协作规范仍需要随着项目演进持续补充和验证。
+当前系统仍处于课题原型阶段，部分能力距离生产级产品还有差距。首先，云端 Agent 执行能力仍较弱，当前重点放在本地 daemon 接入 Claude Code、Codex 等 runtime，后续如果要服务无法运行本地执行器的用户，需要引入更完整的云端 runtime 池、隔离沙箱和资源配额。其次，Artifact 和 deployment 当前仍由 API 代理或对象存储承载，虽然已经解决多容器文件共享问题，但还没有形成独立的静态托管服务、CDN 域名、访问统计和权限策略。
+
+桌面端也仍有改进空间。当前客户端 V1 主要是远端 Web 壳加系统登录、托管 daemon 和更新提醒，尚未完成签名、notarization、自动安装更新、本地项目文件选择后的完整权限模型等生产能力。Windows 和 macOS 安装包在未签名状态下会出现系统安全提示，本地文件访问也需要继续在“用户显式授权目录”和“daemon 可执行范围”之间建立更严格的边界。
+
+协作产品化能力还不完整。当前系统以单用户和演示场景为主，团队 workspace、组织权限、审计日志、邀请协作、计费、配额和管理后台尚未形成体系。AI 协作规范虽然已经通过 `AGENTS.md` 和 skills 沉淀，但这些规则仍需要在更多真实开发任务中持续验证和更新，才能成为长期可维护的工程机制。
 
 ### 8.3 后续方向
 
-- 支持多 workspace 和团队协作。
-- 完善 project file 权限模型。
-- 建设独立静态托管服务。
-- 扩展更多 Agent runtime adapter。
-- 探索移动端远程控制体验。
-- 将更多项目经验沉淀为可复用 skill，并探索自动化触发机制。
+后续工作可以从平台能力、本地能力和工程方法三个方向推进。平台能力方面，应支持多 workspace 和团队协作，引入组织、成员、角色、审计和共享会话等模型，使 Agent Hub 从个人工作台扩展为团队协作平台。同时可以建设独立静态托管服务，将 deployment 从 API 代理升级为专门的预览与发布系统，支持自定义域名、访问控制、构建日志和版本回滚。
 
-## 附录建议
+本地能力方面，应继续完善 project file 权限模型和本地项目体验。对于只存在于用户电脑上的项目，API 不应直接读取 daemon 本地路径，而应通过 daemon gateway 请求文件树、文件内容、保存和 diff；对于需要离线可读的场景，可以再设计 snapshot 机制。Runtime adapter 也可以扩展到更多 Agent 工具，并增强日志解析、工具调用、抢占、恢复和错误归一化能力。
+
+工程方法方面，可以继续将更多开发经验沉淀为 skill，例如数据库迁移、对象存储排障、桌面端发布、项目文件访问、报告撰写和演示准备等。未来还可以探索根据任务自动触发对应 skill，或将 `AGENTS.md`、skill、CI 检查和代码评审结合起来，使 AI Agent 协作从“人工提醒”进一步走向“流程内建”。
+
+## 附录
 
 ### 附录 A 核心数据库表说明
 
-建议列出 users、oauth_accounts、conversations、conversation_messages、conversation_runs、conversation_artifacts、conversation_deployments、daemon_devices 等核心表。
+核心数据库表包括 users、oauth_accounts、sessions、agents、daemon_devices、daemon_runtimes、conversations、conversation_messages、conversation_runs、conversation_run_events、conversation_goals、conversation_goal_tasks、conversation_artifacts、conversation_artifact_files、conversation_artifact_revisions、conversation_artifact_actions、conversation_deployments、conversation_projects 和 conversation_project_changes 等。这些表共同支撑用户身份、会话协作、Run 状态、Goal/Task、Artifact、项目变更和 daemon 设备状态。
 
 ### 附录 B 主要 API 模块列表
 
-建议按 auth、agents、conversations、runs、daemon、artifacts、deployments、search、realtime 等模块整理。
+主要 API 模块包括 auth、agents、conversations、conversation messages、conversation goals/tasks、runs、daemon devices、artifacts、deployments、project files、project changes、search、welcome summary 和 realtime events。各模块通过 Hono route 与 OpenAPI schema 暴露，后端领域逻辑尽量下沉到 `packages/server`。
 
 ### 附录 C 关键环境变量表
 
-建议列出生产部署所需的 GitHub OAuth、Database、Redis、Web origin、daemon token、Supabase Storage 等变量。
+关键环境变量包括 `DATABASE_URL`、`REDIS_URL`、`AGENTHUB_PUBLIC_WEB_URL`、`AGENTHUB_PUBLIC_API_URL`、`AGENTHUB_DAEMON_GATEWAY_URL`、`AGENTHUB_DAEMON_TOKEN_SECRET`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_OAUTH_CALLBACK_URL`、`AGENTHUB_STORAGE_DRIVER`、`AGENTHUB_STORAGE_ROOT`、`AGENTHUB_S3_ENDPOINT`、`AGENTHUB_S3_REGION`、`AGENTHUB_S3_ACCESS_KEY_ID`、`AGENTHUB_S3_SECRET_ACCESS_KEY` 和 `AGENTHUB_S3_BUCKET`。本地开发可使用 `local` storage driver，生产推荐使用 S3-compatible 对象存储。
 
 ### 附录 D 部署与演示材料
 
-建议包含线上地址、仓库地址、演示账号说明、演示视频二维码或链接。
+部署与演示材料包括 Tavro Web 线上地址、Tavro Docs 文档站地址、GitHub 仓库地址、桌面客户端下载地址、daemon npm 包地址、演示账号或登录说明，以及演示视频二维码或链接。
 
 ### 附录 E 关键截图
 
-建议包含登录、Welcome、会话、任务、Artifact、Daemon、桌面端和部署预览截图。
+关键截图包括登录页、Welcome dashboard、会话消息流、Goal/Task 卡片、任务状态聚合页、Artifact 工作区、Project Code 面板、Daemon 页面、桌面客户端、本地执行器状态和静态站点部署预览。
 
 ### 附录 F AI 协作规范材料
 
-建议摘录或引用 `AGENTS.md`、关键 `SKILL.md`、AI 协作任务流程和典型问题修复记录。
-
-## 写作约定
-
-- 正文优先使用中文。
-- 产品名统一使用 Tavro。
-- 首次出现时说明：Tavro 的原型工程名与代码仓库名为 AgentHub。
-- 本报告独立于 `apps/docs` 产品文档站，建议存放在 `docs/report/`。
-- 后续扩写时优先补架构图、时序图、部署图和关键截图。
+AI 协作规范材料包括 `AGENTS.md` 的架构边界摘录、`skills/tavro-development-workflow`、`skills/tavro-frontend-experience`、`skills/tavro-production-deployment`、`skills/tavro-ci-troubleshooting`、`skills/tavro-daemon-release` 等关键 skill 摘要，以及典型问题修复记录。

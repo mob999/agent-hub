@@ -10,6 +10,8 @@ import { apiRequest, apiUrl, type AuthResponse } from '../lib/api'
 import { readPendingAuthRedirect } from '../lib/auth-redirect'
 import { useAuthenticatedRedirect } from '../lib/useAuthenticatedRedirect'
 
+const isCapacitor = !!window.Capacitor?.isNativePlatform
+
 export type ChatRoutePath = '/chat' | `/chat/${string}`
 export type WorkspaceRoutePath = '/welcome' | ChatRoutePath | '/runs' | '/daemon'
 export type EditorRoutePath = `/editor/${string}`
@@ -59,6 +61,95 @@ export function AuthPage({ navigate }: AuthPageProps) {
       } catch {
         setServerErrorCode('desktop_auth_start_failed')
       } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
+    if (isCapacitor) {
+      try {
+        // The Capacitor Browser plugin opens Chrome Custom Tabs for the
+        // GitHub OAuth flow.  After authorization GitHub redirects to the
+        // API callback URL, which stores a one-time login code and returns
+        // an HTML page with a "Return to Tavro" link.  Tapping that link
+        // fires the tavro:// custom-scheme intent, Android opens the app,
+        // and the appUrlOpen listener below completes the login.
+        const startUrl = apiUrl('/auth/desktop/github/start')
+        const body = JSON.stringify({
+          redirectPath: redirect,
+          webOrigin: window.location.origin,
+        })
+
+        // Use XHR instead of fetch – Capacitor's CapacitorHttp plugin
+        // patches window.fetch and routes through the native HTTP stack.
+        // XHR works reliably on Android with android:usesCleartextTraffic.
+        const response = await new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('POST', startUrl)
+          xhr.setRequestHeader('Content-Type', 'application/json')
+          xhr.withCredentials = true
+          xhr.onload = () => {
+            resolve({
+              ok: xhr.status >= 200 && xhr.status < 300,
+              json: () => Promise.resolve(JSON.parse(xhr.responseText)),
+            })
+          }
+          xhr.onerror = () => reject(new Error('XHR network error'))
+          xhr.ontimeout = () => reject(new Error('XHR timeout'))
+          xhr.send(body)
+        })
+
+        if (!response.ok) {
+          setServerErrorCode('desktop_auth_start_failed')
+          setSubmitting(false)
+          return
+        }
+
+        const { authorizeUrl } = (await response.json()) as { authorizeUrl: string }
+
+        // Access Capacitor plugins via the runtime bridge (no ES import
+        // so @capacitor/core won't patch window.fetch).
+        const plugins = window.Capacitor?.Plugins as Record<string, unknown> | undefined
+        const CapApp = plugins?.App as {
+          addListener: (event: string, fn: (data: { url: string }) => void) => Promise<{ remove: () => void }>
+        } | undefined
+        const Browser = plugins?.Browser as {
+          open: (opts: { url: string }) => Promise<void>
+          close: () => Promise<void>
+        } | undefined
+
+        if (!CapApp || !Browser) {
+          setServerErrorCode('desktop_auth_start_failed')
+          setSubmitting(false)
+          return
+        }
+
+        const listener = await CapApp.addListener('appUrlOpen', async (event) => {
+          const url = new URL(event.url)
+          const code = url.searchParams.get('code')
+          const error = url.searchParams.get('error')
+
+          await Browser.close()
+          listener.remove()
+
+          if (code) {
+            // The Capacitor server.allowNavigation config permits the
+            // WebView to load API URLs in-app.  We navigate to the
+            // API which sets the session cookie and returns an HTML page
+            // (redirect=html) whose JavaScript navigates back to the
+            // Capacitor welcome page — all inside the same WebView.
+            window.location.href = apiUrl(
+              `/auth/desktop/complete?code=${encodeURIComponent(code)}&redirect=html`,
+            )
+          } else {
+            setServerErrorCode(error ?? 'desktop_auth_expired')
+            setSubmitting(false)
+          }
+        })
+
+        await Browser.open({ url: authorizeUrl })
+      } catch {
+        setServerErrorCode('desktop_auth_start_failed')
         setSubmitting(false)
       }
       return

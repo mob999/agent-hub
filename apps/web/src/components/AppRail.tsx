@@ -2,6 +2,7 @@ import { Theme } from '@carbon/react'
 import { Chat, Devices, JobRun, Settings } from '@carbon/react/icons'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceView } from '../lib/api'
+import { useIsMobile } from '../lib/useIsMobile'
 
 interface AppRailProps {
   activeView: WorkspaceView
@@ -24,6 +25,69 @@ export function AppRail({
   openSettings,
 }: AppRailProps) {
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    const mobileTab =
+      'grid flex-1 cursor-pointer place-items-center gap-0.5 border-0 bg-transparent py-2 text-[var(--cds-text-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]'
+    const activeMobileTab = 'text-[var(--cds-text-on-color)]'
+
+    return (
+      <Theme
+        theme="g100"
+        as="nav"
+        className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 items-center border-t border-[var(--cds-border-subtle-01)] bg-[var(--cds-background)]"
+        aria-label={t('appRail.primaryTools')}
+      >
+        <button
+          className={`${mobileTab} ${activeView === 'chat' ? activeMobileTab : ''}`}
+          type="button"
+          aria-label={t('appRail.chat')}
+          aria-current={activeView === 'chat' ? 'page' : undefined}
+          onClick={() => setActiveView('chat')}
+        >
+          <Chat size={20} />
+          <span className="text-[0.625rem] leading-none">{t('appRail.chat')}</span>
+        </button>
+        <button
+          className={`${mobileTab} ${activeView === 'runs' ? activeMobileTab : ''}`}
+          type="button"
+          aria-label={t('appRail.runs')}
+          aria-current={activeView === 'runs' ? 'page' : undefined}
+          onClick={() => setActiveView('runs')}
+        >
+          <JobRun size={20} />
+          <span className="text-[0.625rem] leading-none">{t('appRail.runs')}</span>
+        </button>
+        <button
+          className={`${mobileTab} ${activeView === 'daemon' ? activeMobileTab : ''}`}
+          type="button"
+          aria-label={t('appRail.daemon')}
+          aria-current={activeView === 'daemon' ? 'page' : undefined}
+          onClick={() => setActiveView('daemon')}
+        >
+          <Devices size={20} />
+          <span className="text-[0.625rem] leading-none">{t('appRail.daemon')}</span>
+        </button>
+        <button
+          className={mobileTab}
+          type="button"
+          aria-label={t('appRail.tutorial')}
+          onClick={openTutorial}
+        >
+          <span className="text-lg font-semibold leading-none" aria-hidden="true">?</span>
+        </button>
+        <button
+          className={mobileTab}
+          type="button"
+          aria-label={t('common.settings')}
+          onClick={openSettings}
+        >
+          <Settings size={20} />
+        </button>
+      </Theme>
+    )
+  }
 
   return (
     <Theme

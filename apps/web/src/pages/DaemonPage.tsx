@@ -1,7 +1,8 @@
 import { InlineNotification, Modal, TextInput } from '@carbon/react'
-import { Add, Checkmark, Copy, Devices, Renew, TrashCan } from '@carbon/react/icons'
+import { Add, Checkmark, Close, Copy, Devices, Menu, Renew, TrashCan } from '@carbon/react/icons'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useIsMobile } from '../lib/useIsMobile'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MarkdownCodeBlock } from '../components/MarkdownCodeBlock'
@@ -27,6 +28,8 @@ function detectDaemonCommandPlatform(): 'windows' | 'posix' {
 
 export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPageProps) {
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const desktopDaemon = window.tavroDesktop?.daemon
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
@@ -226,6 +229,88 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
       className="grid h-full min-h-0 min-w-0 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden bg-[#fafafa] max-[671px]:grid-cols-1"
       aria-label={t('daemon.title')}
     >
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 z-40 flex">
+          <button
+            className="absolute inset-0 bg-black/40"
+            type="button"
+            aria-label="Close sidebar"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside className="relative z-10 h-full w-[80vw] max-w-[20rem] overflow-hidden border-r border-[var(--cds-border-subtle-01)] shadow-xl animate-[agenthub-slide-in_0.2s_ease-out]">
+            <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171]">
+              <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4">
+                <h1 className="truncate text-lg font-semibold leading-7 text-[#161616]">{t('daemon.title')}</h1>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    aria-label={t('daemon.add')}
+                    onClick={() => {
+                      if (desktopDaemon) {
+                        void desktopDaemon.start()
+                        return
+                      }
+
+                      openRegistrationModal()
+                    }}
+                  >
+                    <Add size={16} />
+                  </button>
+                  <button
+                    className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[#69707d] hover:bg-[#eef0f4] hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                    type="button"
+                    aria-label="Close sidebar"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <Close size={16} />
+                  </button>
+                </div>
+              </header>
+              {devices.length > 0 ? (
+                <div className="grid gap-1 p-3">
+                  {devices.map((device) => (
+                    <button
+                      className={`grid min-h-14 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border-0 px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] ${
+                        selectedDevice?.id === device.id
+                          ? 'bg-[#e9eaee] font-semibold text-[#161616] hover:bg-[#e9eaee]'
+                          : 'bg-transparent text-[#596171] hover:bg-[#eef0f4] hover:text-[#161616]'
+                      }`}
+                      key={device.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDeviceId(device.id)
+                        setDeviceSaveError(null)
+                        setDeleteError(null)
+                        setDeleteConfirming(false)
+                        setDeleteLoading(false)
+                        setSidebarOpen(false)
+                      }}
+                    >
+                      <span
+                        className="grid h-8 w-8 place-items-center rounded-lg border border-[#dde1e6] bg-white"
+                        aria-hidden="true"
+                      >
+                        <Devices size={18} />
+                      </span>
+                      <span className="grid min-w-0 gap-0.5">
+                        <strong className="truncate">{device.name}</strong>
+                        <small className="truncate font-normal text-[#69707d]">
+                          daemon {t(`daemon.${device.status}`)}
+                        </small>
+                      </span>
+                      <StatusDot status={device.status} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="p-4 text-[#69707d]">{t('daemon.empty')}</p>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
       <aside
         className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-[#fafafa] text-[#596171] max-[671px]:hidden"
         aria-label={t('daemon.listAria')}
@@ -286,13 +371,43 @@ export function DaemonPage({ devices, deviceError, onDevicesChanged }: DaemonPag
         <section className="h-full min-h-0 min-w-0 overflow-y-auto bg-white" aria-label={t('daemon.detailAria')}>
           <header className="flex min-h-[4.75rem] items-center gap-4 border-b border-[#eef0f3] bg-white px-6 py-3 max-[671px]:px-4">
             <div className="flex min-w-0 items-center gap-3">
+              {isMobile && (
+                <button
+                  className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  type="button"
+                  aria-label="Open device list"
+                  onClick={() => setSidebarOpen(true)}
+                >
+                  <Menu size={20} />
+                </button>
+              )}
               <span
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#dde1e6] bg-[#f7f8fa]"
                 aria-hidden="true"
               >
                 <Devices size={18} />
               </span>
-              <strong className="truncate leading-7">{selectedDevice?.name ?? t('daemon.noSelected')}</strong>
+              {isMobile && devices.length > 1 ? (
+                <select
+                  className="min-w-0 truncate border border-[#d8dee6] bg-white rounded-lg px-2 py-1 text-base font-semibold text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                  value={selectedDevice?.id ?? ''}
+                  onChange={(event) => {
+                    setSelectedDeviceId(event.target.value)
+                    setDeviceSaveError(null)
+                    setDeleteError(null)
+                    setDeleteConfirming(false)
+                    setDeleteLoading(false)
+                  }}
+                >
+                  {devices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <strong className="truncate leading-7">{selectedDevice?.name ?? t('daemon.noSelected')}</strong>
+              )}
             </div>
           </header>
 

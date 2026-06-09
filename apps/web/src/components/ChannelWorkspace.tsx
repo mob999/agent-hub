@@ -1,10 +1,11 @@
 import { Form, IconButton, InlineNotification, Loading, Tag } from '@carbon/react'
-import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, PauseOutline, Return, Settings, StopFilled, Task, UserAdmin, WarningSquare } from '@carbon/react/icons'
+import { Attachment, ChatBot, CheckmarkFilled, ChevronDown, ChevronRight, CircleDash, CircleFilled, Close, Code, Document, Folder, Image as ImageIcon, InProgress, IncompleteError, Launch, Menu, PauseOutline, Return, Settings, StopFilled, Task, UserAdmin, WarningSquare } from '@carbon/react/icons'
 import type { CarbonIconType } from '@carbon/react/icons'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentDetails, Conversation, ConversationArtifact, ConversationDeployment, ConversationGoal, ConversationGoalTaskStatus, ConversationMessage, ConversationMessageCard, User } from '../lib/api'
+import { useIsMobile } from '../lib/useIsMobile'
 import { apiUrl } from '../lib/api'
 import { formatMessageTime } from '../lib/format'
 import { getProjectIcon } from '../lib/projectIcon'
@@ -74,6 +75,7 @@ interface ChannelWorkspaceProps {
   taskRouteActive?: boolean
   deploymentRouteActive?: boolean
   welcomeActive?: boolean
+  onOpenSidebar?: () => void
 }
 
 function isAgentReady(agent: AgentDetails): boolean {
@@ -281,8 +283,10 @@ export function ChannelWorkspace({
   taskRouteActive = false,
   deploymentRouteActive = false,
   welcomeActive = false,
+  onOpenSidebar,
 }: ChannelWorkspaceProps) {
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
   const [composerMode, setComposerMode] = useState<'chat' | 'task'>('chat')
   const [workspacePanel, setWorkspacePanel] = useState<{
     conversationId: string
@@ -1234,6 +1238,16 @@ export function ChannelWorkspace({
     >
       <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[#eef0f3] bg-white px-6 max-[1055px]:px-4 max-[671px]:min-h-0 max-[671px]:flex-col max-[671px]:items-start max-[671px]:gap-3 max-[671px]:py-3">
         <div className="flex min-w-0 items-center gap-3">
+          {isMobile && onOpenSidebar && (
+            <button
+              className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-[var(--cds-text-primary)] hover:bg-[var(--cds-layer-hover-01)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+              type="button"
+              aria-label="Open navigation"
+              onClick={onOpenSidebar}
+            >
+              <Menu size={20} />
+            </button>
+          )}
           <span
             className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#dde1e6] bg-[#f7f8fa] text-base font-semibold leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.75)_inset]"
             style={projectIcon?.style}
@@ -1812,7 +1826,7 @@ export function ChannelWorkspace({
           <textarea
             ref={promptInputRef}
             id="run-prompt"
-            className="min-h-16 w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
+            className="min-h-16 max-h-[40vh] w-full resize-none border-0 bg-transparent px-3 pb-1 pt-3 text-base leading-5 text-[var(--cds-text-primary)] outline-none placeholder:text-[var(--cds-text-placeholder)] disabled:cursor-not-allowed disabled:text-[var(--cds-text-disabled)]"
             rows={2}
             value={prompt}
             placeholder={composerPlaceholder}

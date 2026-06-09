@@ -63,6 +63,9 @@ jobs:
       - name: Typecheck web
         run: pnpm --filter @agent-hub/web typecheck
 
+      - name: Build workspace dependencies
+        run: pnpm --filter @agent-hub/core build
+
       - name: Build web
         run: pnpm --filter @agent-hub/web build
 

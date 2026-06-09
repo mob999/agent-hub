@@ -89,6 +89,39 @@ function createDbMock() {
   };
 }
 
+function createDevelopmentLoginDbMock() {
+  const developerUser = {
+    id: "developer-user-id",
+    email: "developer@tavro.local",
+    name: "developer",
+    avatar: "/avatars/default-1.svg",
+  };
+
+  return {
+    insert: () => ({
+      values: () => ({
+        returning: async () => [
+          {
+            id: "session-id",
+            userId: developerUser.id,
+            tokenHash: "token-hash",
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            createdAt: new Date(),
+            revokedAt: null,
+          },
+        ],
+      }),
+    }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [developerUser],
+        }),
+      }),
+    }),
+  };
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     headers: {
@@ -100,12 +133,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function createAuthTestApp(options: {
   db?: AppBindings["Variables"]["db"];
+  env?: ApiEnv;
   redis?: AppBindings["Variables"]["redis"] & { store?: Map<string, string> };
 } = {}) {
   const app = new OpenAPIHono<AppBindings>();
   const redis = options.redis ?? createRedisMock();
   app.use("*", async (c, next) => {
-    c.set("env", testEnv);
+    c.set("env", options.env ?? testEnv);
     c.set("db", options.db ?? ({} as AppBindings["Variables"]["db"]));
     c.set("logger", { warn: () => undefined } as unknown as AppBindings["Variables"]["logger"]);
     c.set("redis", redis as unknown as AppBindings["Variables"]["redis"]);
@@ -173,6 +207,61 @@ describe("auth routes", () => {
     };
 
     expect(payload.redirectPath).toBe("/welcome");
+  });
+
+  it("redirects GitHub OAuth start to an error when OAuth is not configured", async () => {
+    const { app } = createAuthTestApp({
+      env: {
+        ...testEnv,
+        GITHUB_CLIENT_ID: undefined,
+        GITHUB_CLIENT_SECRET: undefined,
+      },
+    });
+    const response = await app.request(
+      "/auth/github/start?web_origin=http://localhost:5173",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "http://127.0.0.1:5173/login?error=github_oauth_unconfigured",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("creates a development session outside production", async () => {
+    const { app } = createAuthTestApp({
+      db: createDevelopmentLoginDbMock() as unknown as AppBindings["Variables"]["db"],
+    });
+
+    const response = await app.request("/auth/dev/login", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain("agent_hub_session=");
+    expect(await response.json()).toEqual({
+      user: {
+        id: "developer-user-id",
+        email: "developer@tavro.local",
+        name: "developer",
+        avatar: "/avatars/default-1.svg",
+      },
+    });
+  });
+
+  it("does not allow development login in production", async () => {
+    const { app } = createAuthTestApp({
+      env: {
+        ...testEnv,
+        NODE_ENV: "production",
+      },
+    });
+
+    const response = await app.request("/auth/dev/login", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it("redirects invalid GitHub callbacks back to login with an error", async () => {

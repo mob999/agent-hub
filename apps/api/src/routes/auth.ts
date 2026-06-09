@@ -33,6 +33,8 @@ const desktopOAuthStateTtlSeconds = 10 * 60;
 const desktopLoginCodeTtlSeconds = 60;
 const desktopOAuthStateKeyPrefix = "agenthub:auth:desktop-oauth:state";
 const desktopLoginCodeKeyPrefix = "agenthub:auth:desktop-login-code";
+const developmentUserEmail = "developer@tavro.local";
+const developmentUserName = "developer";
 
 const DesktopGitHubStartRequestSchema = z.object({
   redirectPath: z.string().optional(),
@@ -58,6 +60,26 @@ type GitHubAuthUser = {
   id: string;
   name: string | null;
 };
+
+type GitHubOAuthConfig = {
+  callbackUrl: string;
+  clientId: string;
+  clientSecret: string;
+};
+
+function getGitHubOAuthConfig(
+  env: AppBindings["Variables"]["env"],
+): GitHubOAuthConfig | null {
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+    return null;
+  }
+
+  return {
+    callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+    clientId: env.GITHUB_CLIENT_ID,
+    clientSecret: env.GITHUB_CLIENT_SECRET,
+  };
+}
 
 function sessionCookieOptions(env: AppBindings["Variables"]["env"]) {
   return {
@@ -369,6 +391,41 @@ async function findOrCreateUserFromGitHub(input: {
   return { user };
 }
 
+async function findOrCreateDevelopmentUser(
+  db: AppBindings["Variables"]["db"],
+): Promise<GitHubAuthUser | null> {
+  const [existingUser] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      avatar: users.avatar,
+    })
+    .from(users)
+    .where(eq(users.email, developmentUserEmail))
+    .limit(1);
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  const [createdUser] = await db
+    .insert(users)
+    .values({
+      email: developmentUserEmail,
+      name: developmentUserName,
+      avatar: pickRandomDefaultAvatar(),
+    })
+    .returning({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      avatar: users.avatar,
+    });
+
+  return createdUser ?? null;
+}
+
 const githubStartRoute = createRoute({
   method: "get",
   path: "/github/start",
@@ -439,6 +496,41 @@ const desktopCompleteRoute = createRoute({
   responses: {
     302: {
       description: "Redirect to the web app",
+    },
+  },
+});
+
+const developmentLoginRoute = createRoute({
+  method: "post",
+  path: "/dev/login",
+  tags: ["Auth"],
+  summary: "Development login",
+  description:
+    "Create a local development session for the built-in developer user. This route is unavailable in production.",
+  responses: {
+    200: {
+      description: "Development login succeeded",
+      content: {
+        "application/json": {
+          schema: AuthUserResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: "Development login is not available",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: "Development user could not be created",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
     },
   },
 });
@@ -539,6 +631,19 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
   const logger = c.get("logger");
   const redis = c.get("redis");
   const body = c.req.valid("json");
+  const githubConfig = getGitHubOAuthConfig(env);
+  if (!githubConfig) {
+    return c.json(
+      {
+        error: {
+          code: "GITHUB_OAUTH_UNCONFIGURED",
+          message: "GitHub OAuth is not configured.",
+        },
+      },
+      503,
+    );
+  }
+
   const state = crypto.randomBytes(32).toString("base64url");
   const redirectPath = getSafeAuthRedirectPath(body.redirectPath ?? null);
   const webOrigin = getSafeWebOrigin(
@@ -564,8 +669,8 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
   return c.json(
     {
       authorizeUrl: buildGitHubAuthorizeUrl({
-        clientId: env.GITHUB_CLIENT_ID,
-        callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+        clientId: githubConfig.clientId,
+        callbackUrl: githubConfig.callbackUrl,
         state,
       }),
     },
@@ -575,12 +680,20 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
 
 authRoutes.openapi(githubStartRoute, (c) => {
   const env = c.get("env");
+  const githubConfig = getGitHubOAuthConfig(env);
   const state = crypto.randomBytes(32).toString("base64url");
   const redirectPath = getSafeAuthRedirectPath(c.req.query("redirect") ?? null);
   const webOrigin = getGitHubOAuthWebOrigin(
     c.req.query("web_origin") ?? null,
     env.AGENTHUB_PUBLIC_WEB_URL,
   );
+
+  if (!githubConfig) {
+    return c.redirect(
+      buildGitHubOAuthErrorRedirect(webOrigin, "github_oauth_unconfigured"),
+      302,
+    );
+  }
 
   setCookie(
     c,
@@ -597,8 +710,8 @@ authRoutes.openapi(githubStartRoute, (c) => {
 
   return c.redirect(
     buildGitHubAuthorizeUrl({
-      clientId: env.GITHUB_CLIENT_ID,
-      callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+      clientId: githubConfig.clientId,
+      callbackUrl: githubConfig.callbackUrl,
       state,
     }),
     302,
@@ -609,6 +722,7 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
   const db = c.get("db");
   const env = c.get("env");
   const redis = c.get("redis");
+  const githubConfig = getGitHubOAuthConfig(env);
   const code = c.req.query("code");
   const state = c.req.query("state");
   const stateCookie = parseGitHubStateCookieValue(
@@ -650,10 +764,14 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
     return errorRedirect("github_invalid_state");
   }
 
+  if (!githubConfig) {
+    return errorRedirect("github_oauth_unconfigured");
+  }
+
   const accessToken = await exchangeGitHubCodeForToken({
-    clientId: env.GITHUB_CLIENT_ID,
-    clientSecret: env.GITHUB_CLIENT_SECRET,
-    callbackUrl: env.GITHUB_OAUTH_CALLBACK_URL,
+    clientId: githubConfig.clientId,
+    clientSecret: githubConfig.clientSecret,
+    callbackUrl: githubConfig.callbackUrl,
     code,
   });
 
@@ -743,6 +861,45 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
     ).toString(),
     302,
   );
+});
+
+authRoutes.openapi(developmentLoginRoute, async (c) => {
+  const db = c.get("db");
+  const env = c.get("env");
+
+  if (env.NODE_ENV === "production") {
+    return c.json(
+      {
+        error: {
+          code: "NOT_FOUND",
+          message: "Not found.",
+        },
+      },
+      404,
+    );
+  }
+
+  const user = await findOrCreateDevelopmentUser(db);
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: "DEVELOPMENT_USER_CREATE_FAILED",
+          message: "Development user could not be created.",
+        },
+      },
+      500,
+    );
+  }
+
+  const { token } = await createSession(db, {
+    userId: user.id,
+    ttlDays: env.AUTH_SESSION_TTL_DAYS,
+  });
+
+  setCookie(c, env.AUTH_SESSION_COOKIE, token, sessionCookieOptions(env));
+
+  return c.json({ user }, 200);
 });
 
 authRoutes.openapi(logoutRoute, async (c) => {

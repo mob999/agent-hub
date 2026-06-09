@@ -30,7 +30,7 @@
 
 从使用角色看，系统需要同时服务三类对象：普通用户是会话发起者、任务确认者和产物使用者；Agent/runtime 是任务执行者，负责调用本地或远程工具并回传消息、日志和产物；API、Worker、数据库、Redis、对象存储和实时通道等系统服务则承担控制面、执行面、持久化和同步能力。Web 与桌面端只负责交互展示和用户确认，不应承担长任务执行；daemon 也不是第二套后端，而是运行在用户本机、负责连接本地 runtime 的轻量执行器。
 
-从功能边界看，Agent Hub 需要提供 GitHub 登录、用户会话、单 Agent 私聊、群聊、项目会话、Agent 管理、Run 状态跟踪、Artifact 展示与发布、本地 daemon 接入、桌面端托管执行器和实时反馈等能力。这些功能共同支撑一个核心目标：让用户在同一工作台中发起任务、观察执行过程、接收 Agent 回复并管理最终产物。
+从功能边界看，Agent Hub 需要提供 GitHub 登录、用户会话、单 Agent 私聊、群聊、项目会话、Agent 管理、Run 状态跟踪、Goal/Task 拆分、Artifact 展示与发布、本地 daemon 接入、桌面端托管执行器和实时反馈等能力。复杂任务需要从用户自然语言请求拆解为阶段性目标和可执行任务，避免多 Agent 协作停留在聊天文本层面。这些功能共同支撑一个核心目标：让用户在同一工作台中发起任务、观察执行过程、接收 Agent 回复并管理最终产物。
 
 从非功能边界看，系统必须保证长任务脱离 HTTP 请求生命周期，由 Worker 和 daemon 承担执行；本地执行器必须通过出站连接接入平台，避免暴露用户机器端口；Web 前端应保持纯静态 SPA，API、Worker、数据库、Redis 和对象存储应支持分离部署；Run 状态、运行事件、消息和产物元数据需要持久化，保证系统可观测、可恢复、可测试。
 
@@ -85,9 +85,10 @@
 1. 用户在会话中发送消息。
 2. API 创建 Run，保存 queued 状态并投递队列。
 3. Worker 消费 Run，选择本地 daemon 或云端 runtime。
-4. Runtime 生成运行事件、消息和 Artifact。
-5. API/Worker 持久化数据，并通过实时事件推送给前端。
-6. 前端更新消息流、任务状态和产物视图。
+4. Orchestrator 可根据会话上下文创建 Goal，并在 Goal 下分派多个 Task 给不同 Agent。
+5. Runtime 生成运行事件、消息和 Artifact，Task 状态随执行过程更新。
+6. API/Worker 持久化数据，并通过实时事件推送给前端。
+7. 前端更新消息流、Goal/Task 状态和产物视图。
 
 ### 2.4 Daemon 连接与任务分发
 
@@ -104,8 +105,9 @@
 
 - Agent 作为聊天成员参与会话。
 - 用户可以在群聊中 @ 一个或多个 Agent。
-- Orchestrator 可拆分 goal/task，并按任务状态推进协作。
-- 自动派发消息使用结构化卡片展示，而不是只依赖纯文本。
+- Goal 表示从用户意图中抽取出的阶段性目标，Task 是 Goal 下可分派、可跟踪、可执行的工作单元。
+- Orchestrator 负责从会话上下文中创建 Goal、拆分 Task、选择 Agent，并按任务状态推进协作。
+- 自动派发消息使用结构化卡片展示 Goal/Task 创建和分派过程，而不是只依赖纯文本。
 
 ### 3.2 本地 daemon 执行模型
 
@@ -141,6 +143,7 @@
 
 - 技术栈：Vite、React、TypeScript、Carbon Design System、Tailwind CSS。
 - 核心模块：工作台布局、会话侧边栏、消息流、任务页、Artifact 工作区、Daemon 页面。
+- Goal/Task 在前端通过任务页、状态聚合视图和聊天流卡片展示；用户可从卡片跳转到对应目标或任务。
 - 状态管理：TanStack Query 管理服务端数据，本地 state 管理弹窗、草稿、选中态和交互状态。
 - 实时更新：接收消息、Run、任务、Artifact 等事件并同步更新 UI。
 
@@ -154,6 +157,7 @@
 ### 4.3 数据层实现
 
 - PostgreSQL 保存用户、OAuth 账户、会话、消息、Run、Artifact、deployment 和 daemon device 等数据。
+- Goal/Task 数据与会话、消息和 Run 关联，结构化卡片消息用于记录目标创建和任务分派过程。
 - Drizzle ORM 管理 schema 与迁移。
 - Redis 用于队列、缓存、临时 OAuth state、desktop login code 和实时协调。
 - Supabase Storage 存储生成产物、静态站点文件和 deployment 文件。
@@ -162,8 +166,9 @@
 
 - Worker 消费 Run 队列并负责长任务执行。
 - 对本地任务，Worker 通过 daemon gateway 将任务分发给在线 daemon。
-- Worker 持久化 RunEvent、message、artifact 和 deployment 记录。
-- Worker 在数据变更后触发缓存失效和实时事件发布。
+- Worker 持久化 RunEvent、message、goal/task、artifact 和 deployment 记录。
+- Worker 在任务分派和状态变化时发布实时事件，使聊天流卡片和任务页保持同步。
+- Worker 在数据变更后触发相关会话、任务和产物缓存失效。
 
 ### 4.5 Daemon 实现
 
@@ -265,8 +270,10 @@
 
 - GitHub 登录。
 - 发送消息并创建 Run。
+- 创建 Goal、分派 Task，并验证 Task 状态从运行到成功或失败。
 - daemon 在线检测。
 - Agent 执行并回传消息。
+- 聊天流 Goal/Task 卡片与任务页状态同步。
 - Artifact 上传、读取、编辑和发布。
 - 静态站点部署预览。
 

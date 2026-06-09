@@ -193,6 +193,9 @@ const resources = {
           noRuntimeSubtitle: 'Connect a daemon with a detected runtime before creating an agent.',
           noRuntimeTitle: 'No runtime available',
           runtime: 'Runtime',
+          selectRuntimePlaceholder: 'Select runtime',
+          selectRuntimeSubtitle: 'Choose the runtime this agent should use.',
+          selectRuntimeTitle: 'Select a runtime',
           creating: 'Creating...',
         },
         agentEdit: {
@@ -732,6 +735,9 @@ const resources = {
           noRuntimeSubtitle: '创建 Agent 前，请先连接一个已检测到 runtime 的执行器。',
           noRuntimeTitle: '没有可用 runtime',
           runtime: 'Runtime',
+          selectRuntimePlaceholder: '选择 runtime',
+          selectRuntimeSubtitle: '请选择这个 Agent 要使用的 runtime。',
+          selectRuntimeTitle: '请选择 runtime',
           creating: '创建中...',
         },
         agentEdit: {

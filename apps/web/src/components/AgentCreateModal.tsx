@@ -3,7 +3,6 @@ import {
   Modal,
   Select,
   SelectItem,
-  TextArea,
   TextInput,
 } from '@carbon/react'
 import { useMemo, useState } from 'react'
@@ -60,6 +59,7 @@ export function AgentCreateModal({
   const [tags, setTags] = useState<string[]>([])
   const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR_PATHS[0])
   const [daemonDeviceId, setDaemonDeviceId] = useState(initialDeviceId)
+  const [runtimeErrorVisible, setRuntimeErrorVisible] = useState(false)
   const selectedDaemonDeviceId =
     availableDevices.some((device) => device.id === daemonDeviceId)
       ? daemonDeviceId
@@ -69,12 +69,11 @@ export function AgentCreateModal({
   const selectedRuntimeKind =
     selectedDevice?.runtimes.some((runtime) => runtime.runtimeKind === runtimeKind)
       ? runtimeKind
-      : selectedDevice?.runtimes[0]?.runtimeKind ?? ''
+      : ''
 
   const canCreate =
     name.trim().length > 0 &&
     selectedDaemonDeviceId.length > 0 &&
-    selectedRuntimeKind.length > 0 &&
     !isCreating
 
   return (
@@ -87,7 +86,12 @@ export function AgentCreateModal({
       primaryButtonDisabled={!canCreate}
       onRequestClose={onClose}
       onRequestSubmit={() => {
-        if (!canCreate || selectedRuntimeKind === '') {
+        if (!canCreate) {
+          return
+        }
+
+        if (selectedRuntimeKind === '') {
+          setRuntimeErrorVisible(true)
           return
         }
 
@@ -120,6 +124,15 @@ export function AgentCreateModal({
             hideCloseButton
           />
         )}
+        {runtimeErrorVisible && availableDevices.length > 0 && (
+          <InlineNotification
+            kind="warning"
+            title={t('modals.agentCreate.selectRuntimeTitle')}
+            subtitle={t('modals.agentCreate.selectRuntimeSubtitle')}
+            lowContrast
+            hideCloseButton
+          />
+        )}
         <TextInput
           id="agent-name"
           labelText={t('modals.agentCreate.name')}
@@ -128,10 +141,9 @@ export function AgentCreateModal({
           maxLength={120}
           onChange={(event) => setName(event.target.value)}
         />
-        <TextArea
+        <TextInput
           id="agent-description"
           labelText={t('modals.agentCreate.description')}
-          rows={3}
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}
@@ -155,6 +167,7 @@ export function AgentCreateModal({
           onChange={(event) => {
             setDaemonDeviceId(event.target.value)
             setRuntimeKind('')
+            setRuntimeErrorVisible(false)
           }}
         >
           {availableDevices.map((device) => (
@@ -166,8 +179,12 @@ export function AgentCreateModal({
           labelText={t('modals.agentCreate.runtime')}
           value={selectedRuntimeKind}
           disabled={isCreating || !selectedDevice}
-          onChange={(event) => setRuntimeKind(event.target.value as RuntimeKind)}
+          onChange={(event) => {
+            setRuntimeKind(event.target.value as RuntimeKind)
+            setRuntimeErrorVisible(false)
+          }}
         >
+          <SelectItem value="" text={t('modals.agentCreate.selectRuntimePlaceholder')} />
           {selectedDevice?.runtimes.map((runtime) => (
             <SelectItem
               key={`${runtime.daemonDeviceId}-${runtime.runtimeKind}`}

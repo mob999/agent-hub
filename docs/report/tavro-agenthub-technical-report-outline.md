@@ -63,14 +63,25 @@
 
 > 图源文件：`docs/report/diagrams/system-architecture.drawio`，可使用 diagrams.net 继续编辑。
 
-该架构将用户交互、控制面、执行面和数据基础设施拆开：Web 与桌面端共享同一套工作台界面；API 负责用户态数据和任务投递；Worker 承担长任务执行和协调者调度；daemon 通过出站连接接入用户本机 runtime；PostgreSQL、Redis 和 Supabase Storage 分别承担业务数据、队列缓存和产物文件存储。
+该架构将系统划分为客户端层、控制面、执行面以及数据与基础设施层。客户端层包含 Web SPA 和 Desktop Client，两者共享同一套工作台界面，负责用户交互、消息展示、实时反馈和用户确认。客户端不直接执行 Agent 任务，也不保存业务数据的权威状态。
+
+控制面由 API Service 和 Realtime Channel 组成。API Service 负责 GitHub 登录、用户会话、权限校验、会话历史、Agent 管理、Run 创建、Artifact 元数据和 OpenAPI 路由；Realtime Channel 负责将消息、运行事件、任务状态和产物变化推送给 Web 与桌面端。控制面关注“谁可以做什么、当前状态是什么、任务应该投递到哪里”，不直接承载长时间运行的 Agent 执行过程。
+
+执行面由 Worker Service、Daemon Gateway、Local Daemon 和 Agent Runtimes 组成。Worker 负责消费队列任务、执行协调者调度、推进 Run 生命周期，并在需要本地能力时通过 Daemon Gateway 将任务分发给在线 daemon。Local Daemon 运行在用户本机，通过出站连接接入平台，负责检测和调用 Claude Code、Codex、OpenCode 等本地 runtime，并将日志、消息和产物事件回传给 Worker。
+
+数据与基础设施层为系统提供持久化和运行支撑。PostgreSQL 保存用户、会话、消息、Run、Goal/Task、Artifact 和 deployment 等业务数据；Redis 承担队列、缓存、临时状态和实时协调；Supabase Storage 保存 Artifact、静态站点和 deployment 文件。通过将元数据、缓存和文件存储分离，系统可以避免依赖单个容器本地磁盘，并支持 API 与 Worker 分离部署。
 
 ### 2.2 分层职责
 
-- UI 客户端只负责交互展示、用户输入、实时事件渲染和产物预览。
-- API 负责认证、权限、元数据、OpenAPI 路由、实时通道和任务投递。
-- Worker 负责队列消费、Run 执行、daemon gateway、事件写入和缓存失效。
-- Daemon 负责本地 runtime 检测、任务执行、MCP relay、workspace 管理和日志回传。
+客户端层的职责是把复杂的 Agent 执行过程转化为用户可以理解和操作的工作台体验。Web 端作为纯静态 SPA 运行在浏览器中，桌面端通过 Electron 复用同一套界面，并额外提供本地执行器托管、系统浏览器登录和更新提醒等桌面能力。无论 Web 还是桌面端，都只负责展示会话、任务、产物和执行器状态，并触发用户确认后的操作。
+
+API 层是系统控制面。它负责认证、权限、会话、Agent、Run、Artifact、deployment 和 daemon device 等元数据管理，同时通过 OpenAPI 路由对外暴露业务接口。API 的关键边界是只创建和调度任务，不在 HTTP 请求中直接执行长任务，从而保证控制面请求能够快速返回并保持稳定。
+
+Worker 层是系统执行面的调度中心。它从队列中消费 Run，承载协调者 Orchestrator 的目标拆分和任务分派流程，选择云端 runtime 或已连接 daemon 执行任务，并将运行事件、消息、Goal/Task 状态和 Artifact 记录写回系统。Worker 同时负责触发实时事件和缓存失效，使前端视图能及时反映后台执行结果。
+
+Daemon 层是本地执行边界。daemon 运行在用户电脑上，通过出站 WebSocket 连接到 Worker gateway，接收经过授权的任务，调用本地 Claude Code、Codex 等 runtime，并回传日志、消息、文件和状态。daemon 不负责用户系统、会话历史或全局权限判断，因此不是第二套后端，而是受平台控制的本地执行器。
+
+存储层负责保存权威状态和生成产物。PostgreSQL 提供可恢复的业务状态，Redis 支撑队列、缓存和临时状态，Supabase Storage 解决生成文件与静态部署产物在多服务部署中的共享问题。这一层使系统在页面刷新、服务重启或 API/Worker 分离部署时仍然能够恢复历史记录和产物访问。
 
 ### 2.3 核心数据流
 

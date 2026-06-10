@@ -12,6 +12,10 @@ interface PublicHeaderProps {
   navigate: (path: RoutePath) => void
 }
 
+const githubRepositoryUrl = 'https://github.com/mob999/agent-hub'
+const publicHeaderLinkClass =
+  'text-base font-semibold text-[#161616] no-underline hover:text-[#525252] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm'
+
 const docsBaseUrl =
   import.meta.env.VITE_AGENTHUB_DOCS_URL ??
   (import.meta.env.DEV
@@ -51,7 +55,7 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
       </a>
       <div className="flex shrink-0 items-center gap-5 max-[671px]:gap-3">
         <button
-          className="cursor-pointer border-0 bg-transparent p-0 text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
+          className={`${publicHeaderLinkClass} cursor-pointer border-0 bg-transparent p-0`}
           type="button"
           aria-label={t('publicHeader.switchLanguage')}
           onClick={() => {
@@ -61,20 +65,26 @@ export function PublicHeader({ navigate }: PublicHeaderProps) {
           {currentLocale === 'zh-CN' ? 'EN' : '中'}
         </button>
         <a
-          className="text-base font-semibold text-[#161616] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
+          className={publicHeaderLinkClass}
+          href={githubRepositoryUrl}
+        >
+          GitHub
+        </a>
+        <a
+          className={publicHeaderLinkClass}
           href="/download"
           onClick={openDownload}
         >
           {t('publicHeader.download')}
         </a>
         <a
-          className="text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
+          className={publicHeaderLinkClass}
           href={docsUrl}
         >
           {t('publicHeader.docs')}
         </a>
         <a
-          className="text-base font-semibold text-[#161616] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] max-[671px]:text-sm"
+          className={publicHeaderLinkClass}
           href="/login"
           onClick={openLogin}
         >

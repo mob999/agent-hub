@@ -82,6 +82,7 @@ const resources = {
           macos: {
             description: 'For Apple desktop and notebook computers.',
             title: 'macOS',
+            trustHint: 'If macOS blocks the app, trust it with:',
           },
           unavailable: 'Installer unavailable',
           windows: {
@@ -633,6 +634,7 @@ const resources = {
           macos: {
             description: '适用于 Apple 台式机和笔记本。',
             title: 'macOS',
+            trustHint: '如果 macOS 拦截应用，可用以下命令信任：',
           },
           unavailable: '安装包不可用',
           windows: {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CheckmarkFilled, Copy } from '@carbon/react/icons'
 import { useTranslation } from 'react-i18next'
 import { PublicFooter } from '../components/PublicFooter'
 import { PublicHeader } from '../components/PublicHeader'
@@ -31,6 +32,7 @@ const releasesApiUrl =
 
 const desktopReleaseTagPrefix = 'tavro-desktop-v'
 const mobileReleaseTagPrefix = 'tavro-mobile-v'
+const macosTrustCommand = 'xattr -dr com.apple.quarantine /Applications/tavro-ai.app'
 
 function formatBytes(bytes: number, locale: string): string {
   return new Intl.NumberFormat(locale, {
@@ -53,6 +55,7 @@ function findAsset(assets: ReleaseAsset[], extension: 'apk' | 'dmg' | 'exe'): Re
 export function DownloadPage({ navigate }: DownloadPageProps) {
   const { i18n, t } = useTranslation()
   const [releaseState, setReleaseState] = useState<ReleaseState>({ status: 'loading' })
+  const [macosTrustCopied, setMacosTrustCopied] = useState(false)
   const locale = i18n.resolvedLanguage === 'zh-CN' ? 'zh-CN' : 'en'
 
   useEffect(() => {
@@ -93,6 +96,20 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!macosTrustCopied) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setMacosTrustCopied(false), 1600)
+    return () => window.clearTimeout(timeoutId)
+  }, [macosTrustCopied])
+
+  const copyMacosTrustCommand = async () => {
+    await navigator.clipboard.writeText(macosTrustCommand)
+    setMacosTrustCopied(true)
+  }
+
   const desktopRelease = releaseState.status === 'ready' ? releaseState.desktopRelease : null
   const mobileRelease = releaseState.status === 'ready' ? releaseState.mobileRelease : null
   const platforms = useMemo(() => {
@@ -117,9 +134,8 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
       {
         asset: findAsset(mobileAssets, 'apk'),
         key: 'android',
-        logoAlt: 'Android APK',
-        logoSrc: null,
-        marker: 'APK',
+        logoAlt: 'Android',
+        logoSrc: '/logos/android.svg',
       },
     ]
   }, [desktopRelease, mobileRelease])
@@ -167,7 +183,7 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
                           src={platform.logoSrc}
                         />
                       ) : (
-                        <span className="text-sm font-semibold">{platform.marker}</span>
+                        null
                       )}
                     </span>
                     <div className="min-w-0">
@@ -181,22 +197,42 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
 
                 <div className="grid gap-2 rounded-2xl border border-[#eef0f3] bg-[#fafafa] px-4 py-3">
                   {asset !== null ? (
-                    <a
-                      className="min-w-0 truncate text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                      href={asset.browser_download_url}
-                      title={asset.name}
-                    >
-                      {asset.name}
-                    </a>
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <a
+                        className="min-w-0 truncate text-base font-semibold text-[#161616] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                        href={asset.browser_download_url}
+                        title={asset.name}
+                      >
+                        {asset.name}
+                      </a>
+                      <span className="shrink-0 text-sm text-[#69707d]">
+                        · {formatBytes(asset.size, locale)}
+                      </span>
+                    </div>
                   ) : (
                     <span className="text-base font-semibold text-[#525252]">
                       {releaseState.status === 'loading'
                         ? t('publicDownload.platforms.loading')
-                        : t('publicDownload.platforms.unavailable')}
+                      : t('publicDownload.platforms.unavailable')}
                     </span>
                   )}
-                  {asset !== null && (
-                    <p className="text-sm text-[#69707d]">{formatBytes(asset.size, locale)}</p>
+                  {asset !== null && platform.key === 'macos' && (
+                    <div className="grid gap-1 text-sm leading-6 text-[#69707d]">
+                      <p>{t('publicDownload.platforms.macos.trustHint')}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-[#dde1e6] bg-white px-1.5 py-0.5 font-mono text-xs text-[#161616]">
+                          {macosTrustCommand}
+                        </code>
+                        <button
+                          className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg border border-[#dde1e6] bg-white text-[#344054] hover:bg-[#eef0f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
+                          type="button"
+                          aria-label={t('common.copy')}
+                          onClick={() => void copyMacosTrustCommand()}
+                        >
+                          {macosTrustCopied ? <CheckmarkFilled size={14} /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </article>

@@ -798,33 +798,6 @@ export function WelcomePage({
                 )}
                 <span>{dashboardDate}</span>
               </div>
-              {(devMode || isCapacitor) && (
-                <div className="flex flex-wrap gap-1 text-xs">
-                  <button
-                    className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                    type="button"
-                    onClick={() => {
-                      setActiveOnboardingStep('daemon')
-                      setFreshOnboardingPreview(false)
-                      setForceOnboardingTutorial(true)
-                    }}
-                  >
-                    <ArrowLeft size={16} />
-                    {t('welcome.tutorial')}
-                  </button>
-                  <button
-                    className="inline-flex h-8 max-[671px]:h-10 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent px-2 font-semibold text-[#69707d] hover:bg-white/70 hover:text-[#161616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)]"
-                    type="button"
-                    onClick={() => {
-                      setActiveOnboardingStep('daemon')
-                      setFreshOnboardingPreview(true)
-                      setForceOnboardingTutorial(true)
-                    }}
-                  >
-                    {t('welcome.freshStart')}
-                  </button>
-                </div>
-              )}
             </div>
             <div className="grid max-w-3xl gap-3">
               <div className="grid gap-2">

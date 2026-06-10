@@ -1,15 +1,6 @@
 name: Publish Mobile
 
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - apps/mobile/**
-      - apps/web/src/**
-      - packages/**
-      - pnpm-lock.yaml
-      - .github/workflows/publish-mobile.yml
   workflow_dispatch:
     inputs:
       version:

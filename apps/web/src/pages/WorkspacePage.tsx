@@ -7,7 +7,7 @@ import { useIsMobile } from '../lib/useIsMobile'
 import { AgentCreateModal } from '../components/AgentCreateModal'
 import { AgentEditModal } from '../components/AgentEditModal'
 import { AppRail } from '../components/AppRail'
-import { ChannelWorkspace, type MessageSendState } from '../components/ChannelWorkspace'
+import { ChannelWorkspace, type QueuedMessagePreview } from '../components/ChannelWorkspace'
 import { ChatSidebar } from '../components/ChatSidebar'
 import { GroupCreateModal } from '../components/GroupCreateModal'
 import { GroupEditModal } from '../components/GroupEditModal'
@@ -230,23 +230,6 @@ function getRealtimeToastSenderInitials(senderName: string): string {
   return Array.from(trimmedName).slice(0, 2).join('').toUpperCase()
 }
 
-function createPendingUserMessage(input: {
-  content: string
-  conversationId: string
-  id: string
-  timestamp: string
-}): ConversationMessage {
-  return {
-    id: input.id,
-    conversationId: input.conversationId,
-    senderType: 'user',
-    content: input.content,
-    status: 'completed',
-    createdAt: input.timestamp,
-    updatedAt: input.timestamp,
-  }
-}
-
 function readCurrentSearchRouteState() {
   return getSearchRouteState(`${window.location.pathname}${window.location.search}`)
 }
@@ -331,7 +314,7 @@ export function WorkspacePage({
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ConversationMessage[]>>({})
-  const [messageSendStates, setMessageSendStates] = useState<Record<string, MessageSendState>>({})
+  const [queuedMessagePreview, setQueuedMessagePreview] = useState<QueuedMessagePreview | null>(null)
   const [goalsByConversation, setGoalsByConversation] = useState<Record<string, ConversationGoal[]>>({})
   const [artifactsByConversation, setArtifactsByConversation] = useState<Record<string, ConversationArtifact[]>>({})
   const [loadingConversationIds, setLoadingConversationIds] = useState<Record<string, true>>({})
@@ -365,7 +348,6 @@ export function WorkspacePage({
   const activeConversationIdRef = useRef<string | null>(null)
   const agentsRef = useRef<AgentDetails[]>([])
   const conversationsRef = useRef<Conversation[]>([])
-  const messageSendStatesRef = useRef<Record<string, MessageSendState>>({})
 
   const routeConversationId = editorRoute?.conversationId ?? chatConversationId
   const isSearchRoute = route === '/chat/search'
@@ -477,10 +459,6 @@ export function WorkspacePage({
   useEffect(() => {
     conversationsRef.current = conversations
   }, [conversations])
-
-  useEffect(() => {
-    messageSendStatesRef.current = messageSendStates
-  }, [messageSendStates])
 
   useEffect(() => {
     if (realtimeToasts.length === 0) {
@@ -1067,40 +1045,12 @@ export function WorkspacePage({
 
     setRunError(null)
     setIsCreatingRun(true)
-    const pendingMessageId = `pending-${crypto.randomUUID()}`
-    const pendingMessage = createPendingUserMessage({
+    setQueuedMessagePreview({
+      attachmentCount: attachments.length,
       content: trimmedPrompt,
       conversationId: activeConversation.id,
-      id: pendingMessageId,
-      timestamp: new Date().toISOString(),
+      status: 'queued',
     })
-
-    setMessageSendStates((current) => ({
-      ...current,
-      [pendingMessageId]: {
-        attachmentCount: attachments.length,
-        conversationId: activeConversation.id,
-        status: 'queued',
-      },
-    }))
-    setMessagesByConversation((current) => {
-      const currentMessages = current[activeConversation.id] ?? []
-
-      return {
-        ...current,
-        [activeConversation.id]: [
-          ...currentMessages.filter((message) => message.id !== pendingMessageId),
-          pendingMessage,
-        ],
-      }
-    })
-    queryClient.setQueryData<ConversationMessage[]>(
-      queryKeys.conversationMessages(activeConversation.id),
-      (currentMessages = []) => [
-        ...currentMessages.filter((message) => message.id !== pendingMessageId),
-        pendingMessage,
-      ],
-    )
 
     try {
       const body = attachments.length > 0
@@ -1149,7 +1099,6 @@ export function WorkspacePage({
         const nextMessages = [
           ...currentMessages.filter(
             (message) =>
-              message.id !== pendingMessageId &&
               message.id !== response.messages.user.id &&
               !assistantMessages.some((assistant) => assistant.id === message.id),
           ),
@@ -1167,7 +1116,6 @@ export function WorkspacePage({
         (currentMessages = []) => [
           ...currentMessages.filter(
             (message) =>
-              message.id !== pendingMessageId &&
               message.id !== response.messages.user.id &&
               !assistantMessages.some((assistant) => assistant.id === message.id),
           ),
@@ -1175,11 +1123,7 @@ export function WorkspacePage({
           ...assistantMessages,
         ],
       )
-      setMessageSendStates((current) => {
-        return Object.fromEntries(
-          Object.entries(current).filter(([messageId]) => messageId !== pendingMessageId),
-        )
-      })
+      setQueuedMessagePreview(null)
       responseRuns.forEach((run) => {
         queryClient.setQueryData(queryKeys.run(run.id), run)
       })
@@ -1207,7 +1151,6 @@ export function WorkspacePage({
       responseRuns.forEach((run) => {
         void refreshRun(run.id)
       })
-      void loadMessages(activeConversation.id)
       void loadTasks(activeConversation.id)
       void loadArtifacts(activeConversation.id)
       return true
@@ -1215,15 +1158,13 @@ export function WorkspacePage({
       const message = error instanceof ApiRequestError
         ? error.message
         : 'Unable to create the run. Try again in a moment.'
-      setMessageSendStates((current) => ({
-        ...current,
-        [pendingMessageId]: {
-          attachmentCount: attachments.length,
-          conversationId: activeConversation.id,
-          error: message,
-          status: 'failed',
-        },
-      }))
+      setQueuedMessagePreview({
+        attachmentCount: attachments.length,
+        content: trimmedPrompt,
+        conversationId: activeConversation.id,
+        error: message,
+        status: 'failed',
+      })
       setRunError(null)
       return false
     } finally {
@@ -1310,23 +1251,10 @@ export function WorkspacePage({
       }
     }
     const upsertMessage = (message: ConversationMessage) => {
-      const queuedPendingMessageIds = message.senderType === 'user'
-        ? new Set(
-            Object.entries(messageSendStatesRef.current)
-              .filter(([, state]) =>
-                state.status === 'queued' &&
-                state.conversationId === message.conversationId,
-              )
-              .map(([messageId]) => messageId),
-          )
-        : new Set<string>()
-
       setMessagesByConversation((current) => {
         const currentMessages = current[message.conversationId] ?? []
         const nextMessages = [
-          ...currentMessages.filter((item) =>
-            item.id !== message.id && !queuedPendingMessageIds.has(item.id),
-          ),
+          ...currentMessages.filter((item) => item.id !== message.id),
           message,
         ].sort((first, second) =>
           new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
@@ -1340,21 +1268,12 @@ export function WorkspacePage({
       queryClient.setQueryData<ConversationMessage[]>(
         queryKeys.conversationMessages(message.conversationId),
         (currentMessages = []) => [
-          ...currentMessages.filter((item) =>
-            item.id !== message.id && !queuedPendingMessageIds.has(item.id),
-          ),
+          ...currentMessages.filter((item) => item.id !== message.id),
           message,
         ].sort((first, second) =>
           new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
         ),
       )
-      if (queuedPendingMessageIds.size > 0) {
-        setMessageSendStates((current) =>
-          Object.fromEntries(
-            Object.entries(current).filter(([messageId]) => !queuedPendingMessageIds.has(messageId)),
-          ),
-        )
-      }
     }
     const notifyRealtimeMessage = (message: ConversationMessage) => {
       if (notifiedMessageIdsRef.current.has(message.id)) {
@@ -2510,7 +2429,7 @@ export function WorkspacePage({
               <ChannelWorkspace
                 activeConversation={activeConversation}
                 messages={activeConversationMessages}
-                messageSendStates={messageSendStates}
+                queuedMessagePreview={queuedMessagePreview}
                 goals={activeConversationGoals}
                 artifacts={activeConversationArtifacts}
                 deployments={activeConversationDeployments}

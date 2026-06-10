@@ -20,15 +20,17 @@ const messageBodyClass = 'block whitespace-pre-wrap break-words text-base leadin
 type TaskAggregationMode = 'goal' | 'status'
 type StatusIconState = ConversationGoal['status'] | ConversationGoalTaskStatus
 
-export type MessageSendState =
+export type QueuedMessagePreview =
   | {
       status: 'queued'
       conversationId: string
+      content: string
       attachmentCount: number
     }
   | {
       status: 'failed'
       conversationId: string
+      content: string
       attachmentCount: number
       error: string
     }
@@ -36,7 +38,7 @@ export type MessageSendState =
 interface ChannelWorkspaceProps {
   activeConversation: Conversation | null
   messages: ConversationMessage[]
-  messageSendStates: Record<string, MessageSendState>
+  queuedMessagePreview: QueuedMessagePreview | null
   goals: ConversationGoal[]
   artifacts: ConversationArtifact[]
   deployments: ConversationDeployment[]
@@ -248,7 +250,7 @@ function formatFileSize(bytes: number): string {
 export function ChannelWorkspace({
   activeConversation,
   messages,
-  messageSendStates,
+  queuedMessagePreview,
   goals,
   artifacts,
   deployments,
@@ -518,6 +520,10 @@ export function ChannelWorkspace({
     (prompt.trim().length > 0 || visiblePendingAttachments.length > 0) &&
     selectedAgentReady &&
     !isCreatingRun
+  const activeQueuedMessagePreview =
+    queuedMessagePreview?.conversationId === activeConversation?.id
+      ? queuedMessagePreview
+      : null
   const showComposerModeSwitch = hasSelectedConversation && !isAgentDirectMessage
   const canOpenWorkspacePanel = hasSelectedConversation
   const showConversationToolbar = !welcomeActive
@@ -1543,8 +1549,6 @@ export function ChannelWorkspace({
                 (activeConversation?.type === 'group' || activeConversation?.type === 'project') &&
                 message.senderType === 'agent' &&
                 senderAgent !== null
-              const sendState = messageSendStates[message.id] ?? null
-
               return (
                 <article
                   id={`message-${message.id}`}
@@ -1614,42 +1618,7 @@ export function ChannelWorkspace({
                           {formatMessageTime(message.updatedAt)}
                         </time>
                       </span>
-                      {sendState !== null && (
-                        <span
-                          className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${
-                            sendState.status === 'failed'
-                              ? 'text-[var(--cds-support-error)]'
-                              : 'text-[#697386]'
-                          }`}
-                          title={
-                            sendState.status === 'failed'
-                              ? sendState.error
-                              : t('chat.queueingRun')
-                          }
-                        >
-                          {sendState.status === 'failed' ? (
-                            <IncompleteError size={16} />
-                          ) : (
-                            <Loading
-                              small
-                              withOverlay={false}
-                              description={t('chat.queueingRun')}
-                            />
-                          )}
-                        </span>
-                      )}
                     </span>
-                    {sendState?.attachmentCount ? (
-                      <span className="mt-1 flex w-fit items-center gap-2 rounded-lg border border-[#dde3ea] bg-[#f7f8fa] px-2.5 py-1 text-xs font-medium text-[#5f6875]">
-                        <Attachment size={14} />
-                        {t('chat.pendingAttachments', { count: sendState.attachmentCount })}
-                      </span>
-                    ) : null}
-                    {sendState?.status === 'failed' && (
-                      <span className="text-xs text-[var(--cds-text-error)]">
-                        {sendState.error}
-                      </span>
-                    )}
                     {message.cards && message.cards.length > 0 && renderMessageCards(message.cards)}
                     {(!message.cards || message.cards.length === 0) && message.content && (
                       <MessageContent className={messageBodyClass} content={message.content} />
@@ -1823,6 +1792,68 @@ export function ChannelWorkspace({
               })}
             </div>
           )}
+          {activeQueuedMessagePreview !== null && (
+            <div className="mx-3 mt-3 max-w-xl rounded-xl border border-[#d8dee6] bg-[#f7f8fa] px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
+              <div className="flex min-w-0 items-start gap-2">
+                <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg border border-[#d8dee6] bg-white text-xs font-semibold text-[#4b5563]">
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={userDisplayName}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    displayNameInitial(userDisplayName)
+                  )}
+                </span>
+                <span className="grid min-w-0 flex-1 gap-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <strong className="truncate text-xs font-semibold text-[#4b5563]">
+                      {t('chat.queuedMessage')}
+                    </strong>
+                    {activeQueuedMessagePreview.attachmentCount > 0 && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[0.7rem] font-medium text-[#697386]">
+                        <Attachment size={12} />
+                        {t('chat.pendingAttachments', { count: activeQueuedMessagePreview.attachmentCount })}
+                      </span>
+                    )}
+                  </span>
+                  {activeQueuedMessagePreview.content.length > 0 && (
+                    <span className="max-h-10 overflow-hidden text-sm leading-5 text-[#161616] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                      {activeQueuedMessagePreview.content}
+                    </span>
+                  )}
+                  {activeQueuedMessagePreview.status === 'failed' && (
+                    <span className="text-xs leading-4 text-[var(--cds-text-error)]">
+                      {activeQueuedMessagePreview.error}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={`mt-1 grid h-5 w-5 shrink-0 place-items-center ${
+                    activeQueuedMessagePreview.status === 'failed'
+                      ? 'text-[var(--cds-support-error)]'
+                      : 'text-[#697386]'
+                  }`}
+                  title={
+                    activeQueuedMessagePreview.status === 'failed'
+                      ? activeQueuedMessagePreview.error
+                      : t('chat.queueingRun')
+                  }
+                >
+                  {activeQueuedMessagePreview.status === 'failed' ? (
+                    <WarningSquare size={16} />
+                  ) : (
+                    <Loading
+                      small
+                      withOverlay={false}
+                      description={t('chat.queueingRun')}
+                    />
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
           <textarea
             ref={promptInputRef}
             id="run-prompt"
@@ -1915,6 +1946,16 @@ export function ChannelWorkspace({
                 <Attachment size={16} />
               </button>
             </div>
+            {activeQueuedMessagePreview?.status === 'queued' && (
+              <span className="ml-1 flex items-center gap-2 text-xs font-medium text-[#697386]">
+                <Loading
+                  small
+                  withOverlay={false}
+                  description={t('chat.queueingRun')}
+                />
+                <span>{t('chat.queueingRun')}</span>
+              </span>
+            )}
             {showComposerModeSwitch && (
               <div
                 className="ml-1 inline-flex h-8 items-center gap-1 rounded-full bg-[#eef0f4] p-0.5"
@@ -1956,15 +1997,7 @@ export function ChannelWorkspace({
                 <span className="hidden text-xs font-semibold text-current sm:inline">
                   Ctrl + Enter
                 </span>
-                {isCreatingRun ? (
-                  <Loading
-                    small
-                    withOverlay={false}
-                    description={t('chat.queueingRun')}
-                  />
-                ) : (
-                  <Return size={16} />
-                )}
+                <Return size={16} />
               </button>
             </div>
           </div>

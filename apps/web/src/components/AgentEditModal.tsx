@@ -4,12 +4,14 @@ import {
   InlineLoading,
   InlineNotification,
   Modal,
-  TextArea,
+  Select,
+  SelectItem,
   TextInput,
 } from '@carbon/react'
 import { Document, Folder, Renew } from '@carbon/react/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse } from '../lib/api'
+import { useTranslation } from 'react-i18next'
+import { ApiRequestError, apiRequest, type AgentDetails, type AgentMemoryFile, type AgentMemoryResponse, type DaemonDevice } from '../lib/api'
 import { DEFAULT_AVATAR_PATHS } from '@agent-hub/core'
 import { AgentTagEditor } from './AgentTagEditor'
 import { AvatarPicker } from './AvatarPicker'
@@ -18,6 +20,7 @@ type AgentSettingsSection = 'profile' | 'memory' | 'danger'
 
 interface AgentEditModalProps {
   agent: AgentDetails
+  devices: DaemonDevice[]
   error: string | null
   isSaving: boolean
   open: boolean
@@ -28,6 +31,7 @@ interface AgentEditModalProps {
 
 export function AgentEditModal({
   agent,
+  devices,
   error,
   isSaving,
   open,
@@ -39,6 +43,7 @@ export function AgentEditModal({
     <AgentEditModalContent
       key={agent.agent.id}
       agent={agent}
+      devices={devices}
       error={error}
       isSaving={isSaving}
       open={open}
@@ -51,6 +56,7 @@ export function AgentEditModal({
 
 function AgentEditModalContent({
   agent,
+  devices,
   error,
   isSaving,
   open,
@@ -58,6 +64,7 @@ function AgentEditModalContent({
   onArchive,
   onSave,
 }: AgentEditModalProps) {
+  const { t } = useTranslation()
   const [name, setName] = useState(agent.agent.name)
   const [description, setDescription] = useState(agent.agent.description ?? '')
   const [tags, setTags] = useState(agent.agent.tags)
@@ -78,6 +85,13 @@ function AgentEditModalContent({
     () => memoryFiles.filter((file) => file.scope === 'daily').sort((first, second) => second.label.localeCompare(first.label)),
     [memoryFiles],
   )
+  const boundDevice = useMemo(
+    () => devices.find((device) => device.id === agent.runtimeBinding.daemonDeviceId) ?? null,
+    [agent.runtimeBinding.daemonDeviceId, devices],
+  )
+  const runtimeLabel = agent.runtimeBinding.runtimeVersion
+    ? `${agent.runtimeBinding.runtimeKind} (${agent.runtimeBinding.runtimeVersion})`
+    : agent.runtimeBinding.runtimeKind
 
   const loadMemoryFiles = useCallback(async () => {
     setMemoryLoading(true)
@@ -96,12 +110,12 @@ function AgentEditModalContent({
       if (error instanceof ApiRequestError) {
         setMemoryError(error.message)
       } else {
-        setMemoryError('Unable to load memory files.')
+        setMemoryError(t('modals.agentEdit.memoryLoadFallbackError'))
       }
     } finally {
       setMemoryLoading(false)
     }
-  }, [agent.agent.id])
+  }, [agent.agent.id, t])
 
   useEffect(() => {
     if (!open) {
@@ -135,9 +149,9 @@ function AgentEditModalContent({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Edit agent"
-      primaryButtonText={isSaving ? 'Saving...' : 'Save'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.agentEdit.heading')}
+      primaryButtonText={isSaving ? t('common.saving') : t('common.save')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canSave}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -158,21 +172,21 @@ function AgentEditModalContent({
           <InlineNotification
             className="md:col-span-2"
             kind="error"
-            title="Agent was not updated"
+            title={t('modals.agentEdit.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
           />
         )}
-        <nav className="grid content-start gap-1 rounded-2xl bg-[#f7f8fa] p-2" aria-label="Agent settings">
+        <nav className="grid content-start gap-1 rounded-2xl bg-[#f7f8fa] p-2" aria-label={t('modals.agentEdit.settingsAria')}>
           <button className={sectionButtonClass('profile')} type="button" onClick={() => setSelectedSection('profile')}>
-            Profile
+            {t('modals.agentEdit.profile')}
           </button>
           <button className={sectionButtonClass('memory')} type="button" onClick={() => setSelectedSection('memory')}>
-            Memory
+            {t('modals.agentEdit.memory')}
           </button>
           <button className={sectionButtonClass('danger')} type="button" onClick={() => setSelectedSection('danger')}>
-            Danger
+            {t('modals.agentEdit.danger')}
           </button>
         </nav>
         <div className="min-h-[34rem] min-w-0">
@@ -180,16 +194,15 @@ function AgentEditModalContent({
             <div className="grid gap-4">
               <TextInput
                 id="edit-agent-name"
-                labelText="Name"
+                labelText={t('modals.agentEdit.name')}
                 value={name}
                 disabled={isSaving}
                 maxLength={120}
                 onChange={(event) => setName(event.target.value)}
               />
-              <TextArea
+              <TextInput
                 id="edit-agent-description"
-                labelText="Description"
-                rows={3}
+                labelText={t('modals.agentEdit.description')}
                 value={description}
                 disabled={isSaving}
                 onChange={(event) => setDescription(event.target.value)}
@@ -200,23 +213,42 @@ function AgentEditModalContent({
                 onChange={setTags}
               />
               <AvatarPicker
-                label="Avatar"
+                label={t('modals.agentEdit.avatar')}
                 value={avatar}
                 disabled={isSaving}
                 onChange={setAvatar}
               />
+              <Select
+                id="edit-agent-daemon"
+                labelText={t('modals.agentEdit.daemon')}
+                value={agent.runtimeBinding.daemonDeviceId}
+                disabled
+              >
+                <SelectItem
+                  value={agent.runtimeBinding.daemonDeviceId}
+                  text={boundDevice?.name ?? agent.runtimeBinding.daemonDeviceId}
+                />
+              </Select>
+              <Select
+                id="edit-agent-runtime"
+                labelText={t('modals.agentEdit.runtime')}
+                value={agent.runtimeBinding.runtimeKind}
+                disabled
+              >
+                <SelectItem value={agent.runtimeBinding.runtimeKind} text={runtimeLabel} />
+              </Select>
             </div>
           )}
           {selectedSection === 'memory' && (
             <div className="grid gap-3">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold uppercase text-[var(--cds-text-secondary)]">
-                  Memory
+                  {t('modals.agentEdit.memory')}
                 </h3>
                 <IconButton
                   kind="ghost"
                   size="sm"
-                  label="Refresh memory"
+                  label={t('modals.agentEdit.refreshMemory')}
                   align="left"
                   type="button"
                   disabled={memoryLoading}
@@ -227,11 +259,11 @@ function AgentEditModalContent({
                   <Renew size={16} />
                 </IconButton>
               </div>
-              {memoryLoading && <InlineLoading description="Loading memory files..." />}
+              {memoryLoading && <InlineLoading description={t('modals.agentEdit.memoryLoading')} />}
               {memoryError && (
                 <InlineNotification
                   kind="error"
-                  title="Memory was not loaded"
+                  title={t('modals.agentEdit.memoryErrorTitle')}
                   subtitle={memoryError}
                   lowContrast
                   hideCloseButton
@@ -240,8 +272,8 @@ function AgentEditModalContent({
               {!memoryWorkspaceReady && (
                 <InlineNotification
                   kind="warning"
-                  title="Workspace is not ready"
-                  subtitle="Memory files will appear after the agent workspace is provisioned."
+                  title={t('modals.agentEdit.workspaceNotReadyTitle')}
+                  subtitle={t('modals.agentEdit.workspaceNotReadySubtitle')}
                   lowContrast
                   hideCloseButton
                 />
@@ -275,7 +307,7 @@ function AgentEditModalContent({
                       <pre className="h-[28rem] overflow-auto whitespace-pre-wrap rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-3 text-xs leading-5 text-[var(--cds-text-primary)]">
                         {selectedMemoryFile.exists
                           ? selectedMemoryFile.content
-                          : 'This memory file has not been created yet.'}
+                          : t('modals.agentEdit.memoryFileMissing')}
                       </pre>
                     </div>
                   )}
@@ -287,8 +319,8 @@ function AgentEditModalContent({
             <div className="grid gap-3 rounded-xl border border-[#ffd7d9] bg-[#fff1f1] p-3">
               <InlineNotification
                 kind="warning"
-                title="Archive agent"
-                subtitle="Archived agents are hidden from active lists and can be restored later."
+                title={t('modals.agentEdit.archiveTitle')}
+                subtitle={t('modals.agentEdit.archiveSubtitle')}
                 lowContrast
                 hideCloseButton
               />
@@ -305,7 +337,7 @@ function AgentEditModalContent({
                   onArchive()
                 }}
               >
-                Archive agent
+                {t('modals.agentEdit.archiveAction')}
               </Button>
             </div>
           )}

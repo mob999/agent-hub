@@ -1,5 +1,6 @@
-import { InlineNotification, Modal, TextArea, TextInput } from '@carbon/react'
+import { InlineNotification, Modal, TextInput } from '@carbon/react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails, Conversation } from '../lib/api'
 
@@ -22,6 +23,7 @@ export function ProjectEditModal({
   onClose,
   onSave,
 }: ProjectEditModalProps) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(conversation.title)
   const [description, setDescription] = useState(conversation.description ?? '')
   const [orchestratorAgentId, setOrchestratorAgentId] = useState(conversation.orchestratorAgentId ?? '')
@@ -52,9 +54,9 @@ export function ProjectEditModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Edit project"
-      primaryButtonText={isSaving ? 'Saving...' : 'Save'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.projectEdit.heading')}
+      primaryButtonText={isSaving ? t('common.saving') : t('common.save')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canSave}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -74,7 +76,7 @@ export function ProjectEditModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Project was not updated"
+            title={t('modals.projectEdit.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -82,22 +84,21 @@ export function ProjectEditModal({
         )}
         <TextInput
           id="edit-project-remote-url"
-          labelText="Git remote URL"
+          labelText={t('modals.projectEdit.remoteUrl')}
           value={conversation.project?.remoteUrl ?? ''}
           disabled
         />
         <TextInput
           id="edit-project-name"
-          labelText="Project name"
+          labelText={t('modals.projectEdit.name')}
           value={title}
           disabled={isSaving}
           maxLength={160}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <TextArea
+        <TextInput
           id="edit-project-description"
-          labelText="Description"
-          rows={3}
+          labelText={t('modals.projectEdit.description')}
           value={description}
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
@@ -105,7 +106,7 @@ export function ProjectEditModal({
         <AgentMemberSelector
           agents={agents}
           disabled={isSaving}
-          helpText="Project agents must be ready on the same daemon."
+          helpText={t('modals.projectEdit.agentHelp')}
           idPrefix="edit-project-agent"
           orchestratorAgentId={orchestratorAgentId}
           selectedAgentIds={selectedAgentIds}

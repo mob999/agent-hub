@@ -2,10 +2,10 @@ import {
   Button,
   InlineNotification,
   Modal,
-  TextArea,
   TextInput,
 } from '@carbon/react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
 import type { AgentDetails, Conversation } from '../lib/api'
 
@@ -30,6 +30,7 @@ export function GroupEditModal({
   onArchive,
   onSave,
 }: GroupEditModalProps) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(conversation.title)
   const [description, setDescription] = useState(conversation.description ?? '')
   const [orchestratorAgentId, setOrchestratorAgentId] = useState(conversation.orchestratorAgentId ?? '')
@@ -63,9 +64,9 @@ export function GroupEditModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Edit group"
-      primaryButtonText={isSaving ? 'Saving...' : 'Save'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.groupEdit.heading')}
+      primaryButtonText={isSaving ? t('common.saving') : t('common.save')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={!canSave}
       onRequestClose={onClose}
       onRequestSubmit={() => {
@@ -85,7 +86,7 @@ export function GroupEditModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Group was not updated"
+            title={t('modals.groupEdit.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -93,16 +94,15 @@ export function GroupEditModal({
         )}
         <TextInput
           id="edit-group-name"
-          labelText="Group name"
+          labelText={t('modals.groupEdit.name')}
           value={title}
           disabled={isSaving}
           maxLength={80}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <TextArea
+        <TextInput
           id="edit-group-description"
-          labelText="Description"
-          rows={3}
+          labelText={t('modals.groupEdit.description')}
           value={description}
           disabled={isSaving}
           onChange={(event) => setDescription(event.target.value)}
@@ -130,7 +130,7 @@ export function GroupEditModal({
               onArchive()
             }}
           >
-            Archive group
+            {t('modals.groupEdit.archiveAction')}
           </Button>
         </div>
       </div>

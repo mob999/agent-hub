@@ -1,4 +1,4 @@
-import { InlineNotification, Modal, Select, SelectItem, TextArea, TextInput } from '@carbon/react'
+import { InlineNotification, Modal, Select, SelectItem, TextInput } from '@carbon/react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
@@ -155,10 +155,9 @@ export function ProjectCreateModal({
           placeholder={t('modals.projectCreate.namePlaceholder')}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <TextArea
+        <TextInput
           id="project-description"
-          labelText={t('modals.agentCreate.description')}
-          rows={3}
+          labelText={t('modals.projectCreate.description')}
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}

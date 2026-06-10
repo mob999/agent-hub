@@ -1,4 +1,4 @@
-import { InlineNotification, Modal, TextArea, TextInput } from '@carbon/react'
+import { InlineNotification, Modal, TextInput } from '@carbon/react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AgentMemberSelector } from './AgentMemberSelector'
@@ -100,10 +100,9 @@ export function GroupCreateModal({
           maxLength={80}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <TextArea
+        <TextInput
           id="group-description"
           labelText={t('modals.groupCreate.description')}
-          rows={3}
           value={description}
           disabled={isCreating}
           onChange={(event) => setDescription(event.target.value)}

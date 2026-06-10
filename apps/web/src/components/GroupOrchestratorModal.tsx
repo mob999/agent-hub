@@ -1,5 +1,6 @@
 import { InlineNotification, Modal, Select, SelectItem } from '@carbon/react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AgentDetails, Conversation } from '../lib/api'
 
 interface GroupOrchestratorModalProps {
@@ -25,6 +26,7 @@ export function GroupOrchestratorModal({
   onClose,
   onSave,
 }: GroupOrchestratorModalProps) {
+  const { t } = useTranslation()
   const [orchestratorAgentId, setOrchestratorAgentId] = useState(conversation.orchestratorAgentId ?? '')
   const readyAgents = agents.filter(isAgentReady)
 
@@ -32,9 +34,9 @@ export function GroupOrchestratorModal({
     <Modal
       className="centered-modal-actions"
       open={open}
-      modalHeading="Group settings"
-      primaryButtonText={isSaving ? 'Saving...' : 'Save'}
-      secondaryButtonText="Cancel"
+      modalHeading={t('modals.groupSettings.heading')}
+      primaryButtonText={isSaving ? t('common.saving') : t('common.save')}
+      secondaryButtonText={t('common.cancel')}
       primaryButtonDisabled={isSaving}
       onRequestClose={onClose}
       onRequestSubmit={() => onSave({ orchestratorAgentId: orchestratorAgentId || undefined })}
@@ -43,7 +45,7 @@ export function GroupOrchestratorModal({
         {error && (
           <InlineNotification
             kind="error"
-            title="Settings were not updated"
+            title={t('modals.groupSettings.errorTitle')}
             subtitle={error}
             lowContrast
             hideCloseButton
@@ -52,12 +54,12 @@ export function GroupOrchestratorModal({
         <div className="rounded-xl border border-[#d8dee6] bg-[#f7f8fa] p-3">
           <Select
             id="all-group-orchestrator"
-            labelText="Orchestrator"
+            labelText={t('modals.agentMembers.orchestrator')}
             value={orchestratorAgentId}
             disabled={isSaving}
             onChange={(event) => setOrchestratorAgentId(event.target.value)}
           >
-            <SelectItem value="" text="No orchestrator" />
+            <SelectItem value="" text={t('modals.groupSettings.noOrchestrator')} />
             {readyAgents.map((agent) => (
               <SelectItem key={agent.agent.id} value={agent.agent.id} text={agent.agent.name} />
             ))}
@@ -66,8 +68,8 @@ export function GroupOrchestratorModal({
         {readyAgents.length === 0 && (
           <InlineNotification
             kind="warning"
-            title="No ready agents"
-            subtitle="Create or finish provisioning an agent before enabling Task mode."
+            title={t('modals.groupSettings.noReadyAgentsTitle')}
+            subtitle={t('modals.groupSettings.noReadyAgentsSubtitle')}
             lowContrast
             hideCloseButton
           />

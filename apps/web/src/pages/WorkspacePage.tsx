@@ -2593,6 +2593,7 @@ export function WorkspacePage({
           key={editingAgent.agent.id}
           open={editingAgent !== null}
           agent={editingAgent}
+          devices={devices}
           error={agentEditError}
           isSaving={isSavingAgent}
           onClose={() => setEditingAgentId(null)}

@@ -103,7 +103,8 @@ const roundedFieldStyles = `
   }
 
   .welcome-dashboard-deck {
-    min-height: 0;
+    height: clamp(31rem, calc(100vh - 13rem), 43rem);
+    min-height: 31rem;
   }
 
   @media (max-width: 960px) {
@@ -766,11 +767,8 @@ export function WelcomePage({
   if (showDashboard) {
     const conversationsActive = activeDashboardCard === 'conversations'
     const goalsActive = activeDashboardCard === 'goals'
-    // Both cards are absolutely positioned so they always stretch to the
-    // same deck height.  On desktop they sit side-by-side (both visible);
-    // on mobile (≤960px) they overlap and swipe between them.
     const dashboardCardBase =
-      `${dashboardPanelClass} welcome-dashboard-card absolute top-0 h-full w-[calc(50%-0.625rem)] max-[960px]:w-[92%] max-[671px]:w-[92%]`
+      `${dashboardPanelClass} welcome-dashboard-card absolute top-0 h-full w-[88%] max-[960px]:w-[92%] max-[671px]:w-[92%]`
     const dashboardArrowButton =
       'grid h-11 max-h-11 min-h-11 w-11 min-w-11 max-w-11 shrink-0 cursor-pointer place-items-center rounded-xl border-0 bg-transparent p-0 text-[#344054] transition hover:bg-[#f7f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cds-focus)] [&>svg]:block [&>svg]:h-5 [&>svg]:w-5'
 
@@ -825,12 +823,13 @@ export function WelcomePage({
               aria-label={t('welcome.recentConversations')}
               aria-hidden={!conversationsActive}
               inert={!conversationsActive}
-              style={conversationsActive
-                ? { zIndex: 25 }
-                : isMobileCheck
-                  ? { opacity: 0.88, transform: 'translateX(-82%) translateY(1.15rem) scale(0.94)', zIndex: 20 }
-                  : { zIndex: 20 }
-              }
+              style={{
+                opacity: conversationsActive ? 1 : 0.88,
+                transform: conversationsActive
+                  ? 'translateX(0) translateY(0) scale(1)'
+                  : 'translateX(-82%) translateY(1.15rem) scale(0.94)',
+                zIndex: conversationsActive ? 30 : 20,
+              }}
             >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">
@@ -904,12 +903,13 @@ export function WelcomePage({
               aria-label={t('welcome.recentGoals')}
               aria-hidden={!goalsActive}
               inert={!goalsActive}
-              style={goalsActive
-                ? { zIndex: 25 }
-                : isMobileCheck
-                  ? { opacity: 0.88, transform: 'translateX(82%) translateY(1.15rem) scale(0.94)', zIndex: 20 }
-                  : { zIndex: 20 }
-              }
+              style={{
+                opacity: goalsActive ? 1 : 0.88,
+                transform: goalsActive
+                  ? 'translateX(0) translateY(0) scale(1)'
+                  : 'translateX(82%) translateY(1.15rem) scale(0.94)',
+                zIndex: goalsActive ? 30 : 20,
+              }}
             >
               <div className="grid gap-1 border-b border-[#e8edf3] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3">

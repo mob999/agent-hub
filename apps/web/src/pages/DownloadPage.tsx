@@ -22,12 +22,15 @@ interface LatestRelease {
 
 type ReleaseState =
   | { status: 'loading' }
-  | { release: LatestRelease; status: 'ready' }
+  | { desktopRelease: LatestRelease | null; mobileRelease: LatestRelease | null; status: 'ready' }
   | { status: 'error' }
 
-const latestReleaseApiUrl =
-  import.meta.env.VITE_AGENTHUB_DESKTOP_RELEASE_API_URL ??
-  'https://api.github.com/repos/mob999/agent-hub/releases/latest'
+const releasesApiUrl =
+  import.meta.env.VITE_AGENTHUB_RELEASES_API_URL ??
+  'https://api.github.com/repos/mob999/agent-hub/releases?per_page=20'
+
+const desktopReleaseTagPrefix = 'tavro-desktop-v'
+const mobileReleaseTagPrefix = 'tavro-mobile-v'
 
 function formatBytes(bytes: number, locale: string): string {
   return new Intl.NumberFormat(locale, {
@@ -38,7 +41,11 @@ function formatBytes(bytes: number, locale: string): string {
   }).format(bytes / 1024 / 1024)
 }
 
-function findAsset(assets: ReleaseAsset[], extension: 'dmg' | 'exe'): ReleaseAsset | null {
+function findReleaseByTagPrefix(releases: LatestRelease[], tagPrefix: string): LatestRelease | null {
+  return releases.find((release) => release.tag_name.startsWith(tagPrefix)) ?? null
+}
+
+function findAsset(assets: ReleaseAsset[], extension: 'apk' | 'dmg' | 'exe'): ReleaseAsset | null {
   const lowerExtension = `.${extension}`
   return assets.find((asset) => asset.name.toLowerCase().endsWith(lowerExtension)) ?? null
 }
@@ -53,7 +60,7 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
 
     async function loadRelease() {
       try {
-        const response = await fetch(latestReleaseApiUrl, {
+        const response = await fetch(releasesApiUrl, {
           headers: {
             Accept: 'application/vnd.github+json',
           },
@@ -63,9 +70,14 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
           throw new Error(`GitHub release request failed: ${response.status}`)
         }
 
-        const release = await response.json() as LatestRelease
+        const body = await response.json() as LatestRelease[] | LatestRelease
+        const releases = Array.isArray(body) ? body : [body]
         if (active) {
-          setReleaseState({ release, status: 'ready' })
+          setReleaseState({
+            desktopRelease: findReleaseByTagPrefix(releases, desktopReleaseTagPrefix),
+            mobileRelease: findReleaseByTagPrefix(releases, mobileReleaseTagPrefix),
+            status: 'ready',
+          })
         }
       } catch {
         if (active) {
@@ -81,25 +93,36 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
     }
   }, [])
 
-  const release = releaseState.status === 'ready' ? releaseState.release : null
+  const desktopRelease = releaseState.status === 'ready' ? releaseState.desktopRelease : null
+  const mobileRelease = releaseState.status === 'ready' ? releaseState.mobileRelease : null
   const platforms = useMemo(() => {
-    const assets = release?.assets ?? []
+    const desktopAssets = desktopRelease?.assets ?? []
+    const mobileAssets = mobileRelease?.assets ?? []
 
     return [
       {
-        asset: findAsset(assets, 'exe'),
+        asset: findAsset(desktopAssets, 'exe'),
         key: 'windows',
         logoAlt: 'Microsoft',
         logoSrc: '/logos/microsoft.svg',
+        marker: null,
       },
       {
-        asset: findAsset(assets, 'dmg'),
+        asset: findAsset(desktopAssets, 'dmg'),
         key: 'macos',
         logoAlt: 'Apple',
         logoSrc: '/logos/apple.svg',
+        marker: null,
+      },
+      {
+        asset: findAsset(mobileAssets, 'apk'),
+        key: 'android',
+        logoAlt: 'Android APK',
+        logoSrc: null,
+        marker: 'APK',
       },
     ]
-  }, [release])
+  }, [desktopRelease, mobileRelease])
 
   return (
     <main className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)_auto] bg-[#fafafa] text-[#161616]" aria-label={t('publicDownload.ariaLabel')}>
@@ -137,11 +160,15 @@ export function DownloadPage({ navigate }: DownloadPageProps) {
                 <div className="flex items-start justify-between gap-4">
                   <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-4">
                     <span className="grid h-14 w-14 place-items-center rounded-2xl border border-[#dde1e6] bg-[#f7f8fa] text-[#161616]">
-                      <img
-                        alt={platform.logoAlt}
-                        className="h-7 w-7 object-contain"
-                        src={platform.logoSrc}
-                      />
+                      {platform.logoSrc ? (
+                        <img
+                          alt={platform.logoAlt}
+                          className="h-7 w-7 object-contain"
+                          src={platform.logoSrc}
+                        />
+                      ) : (
+                        <span className="text-sm font-semibold">{platform.marker}</span>
+                      )}
                     </span>
                     <div className="min-w-0">
                       <h2 className="text-2xl font-semibold leading-7 text-[#161616]">{title}</h2>

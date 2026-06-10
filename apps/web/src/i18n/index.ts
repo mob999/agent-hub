@@ -68,13 +68,17 @@ const resources = {
       publicDownload: {
         ariaLabel: 'Download Tavro AI',
         hero: {
-          eyebrow: 'Desktop app',
-          latestOnly: 'Choose a platform to download the matching installer.',
-          title: 'Tavro AI Desktop',
-          subtitle: 'Get the latest Tavro AI desktop client for a local daemon-connected workspace.',
+          eyebrow: 'Apps',
+          latestOnly: 'Choose a platform to download the matching app.',
+          title: 'Download Tavro AI',
+          subtitle: 'Get the latest Tavro AI desktop or mobile client for an agent-native workspace.',
         },
         platforms: {
           loading: 'Checking version',
+          android: {
+            description: 'For Android phones and tablets.',
+            title: 'Android',
+          },
           macos: {
             description: 'For Apple desktop and notebook computers.',
             title: 'macOS',
@@ -614,13 +618,17 @@ const resources = {
       publicDownload: {
         ariaLabel: '下载 Tavro AI',
         hero: {
-          eyebrow: '桌面应用',
-          latestOnly: '选择平台后下载对应安装包。',
-          title: 'Tavro AI Desktop',
-          subtitle: '下载最新版 Tavro AI 桌面客户端，连接本地执行器和共享工作区。',
+          eyebrow: '应用下载',
+          latestOnly: '选择平台后下载对应应用。',
+          title: '下载 Tavro AI',
+          subtitle: '下载最新版 Tavro AI 桌面端或移动端，进入面向 Agent 的工作区。',
         },
         platforms: {
           loading: '正在检查版本',
+          android: {
+            description: '适用于 Android 手机和平板。',
+            title: 'Android',
+          },
           macos: {
             description: '适用于 Apple 台式机和笔记本。',
             title: 'macOS',

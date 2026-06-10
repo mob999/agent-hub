@@ -41,5 +41,13 @@ export function AgentStatusIndicator({ agent }: AgentStatusIndicatorProps) {
     )
   }
 
-  return <span className={statusSlotClassName} aria-hidden="true" />
+  return (
+    <span className={statusSlotClassName} title="Offline">
+      <span
+        className="h-2 w-2 rounded-full bg-[var(--cds-icon-secondary)] opacity-70"
+        aria-hidden="true"
+      />
+      <span className="sr-only">Offline</span>
+    </span>
+  )
 }

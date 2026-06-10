@@ -150,6 +150,38 @@ function isAgentReady(agent: AgentDetails): boolean {
   return agent.runtimeBinding.status === 'ready' && agent.workspace.status === 'ready'
 }
 
+function applyDaemonAvailabilityToAgents(
+  agents: AgentDetails[],
+  devices: DaemonDevice[],
+): AgentDetails[] {
+  if (devices.length === 0) {
+    return agents
+  }
+
+  const deviceStatusById = new Map(devices.map((device) => [device.id, device.status]))
+
+  return agents.map((agent) => {
+    const runtimeDeviceStatus = deviceStatusById.get(agent.runtimeBinding.daemonDeviceId)
+    const workspaceDeviceStatus = deviceStatusById.get(agent.workspace.daemonDeviceId)
+    const runtimeDeviceOffline = runtimeDeviceStatus !== undefined && runtimeDeviceStatus !== 'online'
+    const workspaceDeviceOffline = workspaceDeviceStatus !== undefined && workspaceDeviceStatus !== 'online'
+
+    if (!runtimeDeviceOffline && !workspaceDeviceOffline) {
+      return agent
+    }
+
+    return {
+      ...agent,
+      runtimeBinding: runtimeDeviceOffline
+        ? { ...agent.runtimeBinding, status: 'unavailable' }
+        : agent.runtimeBinding,
+      workspace: workspaceDeviceOffline
+        ? { ...agent.workspace, status: 'unavailable' }
+        : agent.workspace,
+    }
+  })
+}
+
 function compactMessagePreview(content: string): string {
   const compacted = content.replace(/\s+/g, ' ').trim()
 
@@ -359,14 +391,18 @@ export function WorkspacePage({
     [runs],
   )
   const orderedRuns = useMemo(() => runs, [runs])
-  const readyAgentCount = useMemo(() => agents.filter(isAgentReady).length, [agents])
+  const effectiveAgents = useMemo(
+    () => applyDaemonAvailabilityToAgents(agents, devices),
+    [agents, devices],
+  )
+  const readyAgentCount = useMemo(() => effectiveAgents.filter(isAgentReady).length, [effectiveAgents])
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   )
   const editingAgent = useMemo(
-    () => agents.find((agent) => agent.agent.id === editingAgentId) ?? null,
-    [agents, editingAgentId],
+    () => effectiveAgents.find((agent) => agent.agent.id === editingAgentId) ?? null,
+    [effectiveAgents, editingAgentId],
   )
   const editingGroup = useMemo(
     () => conversations.find((conversation) => conversation.id === editingGroupId) ?? null,
@@ -453,8 +489,8 @@ export function WorkspacePage({
   }, [activeConversationId])
 
   useEffect(() => {
-    agentsRef.current = agents
-  }, [agents])
+    agentsRef.current = effectiveAgents
+  }, [effectiveAgents])
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -498,7 +534,6 @@ export function WorkspacePage({
         queryKey: queryKeys.agents('default'),
       })
       setAgents(agents)
-      agentsRef.current = agents
       setRuns((current) =>
         current.map((localRun) => {
           const runAgent = agents.find((agent) => agent.agent.id === localRun.run.agentId)
@@ -1021,7 +1056,7 @@ export function WorkspacePage({
 
     const selectedAgent =
       activeConversation.type === 'direct'
-        ? agents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
+        ? effectiveAgents.find((agent) => agent.agent.id === activeConversation.directAgentId) ?? null
         : null
 
     if (
@@ -1132,7 +1167,7 @@ export function WorkspacePage({
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationArtifacts(activeConversation.id) })
       setRuns((current) => [
         ...responseRuns.map((run) => {
-          const runAgent = agents.find((agent) => agent.agent.id === run.agentId)
+          const runAgent = effectiveAgents.find((agent) => agent.agent.id === run.agentId)
 
           return {
             channelId: activeConversation.id,
@@ -2304,7 +2339,7 @@ export function WorkspacePage({
                     archivedAgents={archivedAgents}
                     archivedConversations={archivedConversations}
                     activeRunCount={activeRunCount}
-                    agents={agents}
+                    agents={effectiveAgents}
                     activeConversationId={activeConversationId}
                     isCatalogLoading={!agentsLoaded || !conversationsLoaded}
                     unreadCounts={unreadByConversationId}
@@ -2344,7 +2379,7 @@ export function WorkspacePage({
               archivedAgents={archivedAgents}
               archivedConversations={archivedConversations}
               activeRunCount={activeRunCount}
-              agents={agents}
+              agents={effectiveAgents}
               activeConversationId={activeConversationId}
               isCatalogLoading={!agentsLoaded || !conversationsLoaded}
               unreadCounts={unreadByConversationId}
@@ -2378,7 +2413,7 @@ export function WorkspacePage({
           <WorkspacePanel>
             {route === '/welcome' ? (
               <WelcomePage
-                agents={agents}
+                agents={effectiveAgents}
                 devices={devices}
                 error={
                   welcomeQuery.error instanceof ApiRequestError
@@ -2403,7 +2438,7 @@ export function WorkspacePage({
               />
             ) : isSearchRoute ? (
               <SearchWorkspace
-                agents={agents}
+                agents={effectiveAgents}
                 conversations={conversations}
                 error={searchError}
                 isLoading={isSearchLoading}
@@ -2433,7 +2468,7 @@ export function WorkspacePage({
                 goals={activeConversationGoals}
                 artifacts={activeConversationArtifacts}
                 deployments={activeConversationDeployments}
-                agents={agents}
+                agents={effectiveAgents}
                 user={user}
                 prompt={prompt}
                 isCreatingRun={isCreatingRun}
@@ -2535,7 +2570,7 @@ export function WorkspacePage({
       {groupModalOpen && (
         <GroupCreateModal
           open={groupModalOpen}
-          agents={agents}
+          agents={effectiveAgents}
           error={groupCreateError}
           isCreating={isCreatingGroup}
           onClose={() => setGroupModalOpen(false)}
@@ -2545,7 +2580,7 @@ export function WorkspacePage({
       {projectModalOpen && (
         <ProjectCreateModal
           open={projectModalOpen}
-          agents={agents}
+          agents={effectiveAgents}
           devices={devices}
           error={projectCreateError}
           isCreating={isCreatingProject}
@@ -2570,7 +2605,7 @@ export function WorkspacePage({
           <GroupOrchestratorModal
             key={editingGroup.id}
             open={editingGroup !== null}
-            agents={agents}
+            agents={effectiveAgents}
             conversation={editingGroup}
             error={groupEditError}
             isSaving={isSavingGroup}
@@ -2581,7 +2616,7 @@ export function WorkspacePage({
           <GroupEditModal
             key={editingGroup.id}
             open={editingGroup !== null}
-            agents={agents}
+            agents={effectiveAgents}
             conversation={editingGroup}
             error={groupEditError}
             isSaving={isSavingGroup}
@@ -2595,7 +2630,7 @@ export function WorkspacePage({
         <ProjectEditModal
           key={editingProject.id}
           open={editingProject !== null}
-          agents={agents}
+          agents={effectiveAgents}
           conversation={editingProject}
           error={groupEditError}
           isSaving={isSavingGroup}

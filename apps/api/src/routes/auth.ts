@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 
 import { oauthAccounts, users } from "@agent-hub/db";
 import { isDefaultAvatarPath, pickRandomDefaultAvatar } from "@agent-hub/core";
-import { deleteCacheKeys, sessionCacheKey } from "@agent-hub/server";
+import {
+  deleteCacheKeys,
+  seedAdminUsersFromEnv,
+  sessionCacheKey,
+} from "@agent-hub/server";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { and, eq } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -941,6 +945,8 @@ authRoutes.openapi(developmentLoginRoute, async (c) => {
     userId: user.id,
     ttlDays: env.AUTH_SESSION_TTL_DAYS,
   });
+
+  await seedAdminUsersFromEnv(db, { emails: user.email });
 
   setCookie(c, env.AUTH_SESSION_COOKIE, token, sessionCookieOptions(env));
 

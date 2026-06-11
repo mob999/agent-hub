@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "dev": "docusaurus start --host 0.0.0.0 --port 3002",
-    "dev:zh-CN": "docusaurus start --host 0.0.0.0 --port 3002 --locale zh-CN",
+    "dev": "docusaurus start --host 0.0.0.0 --port 3002 --no-open",
+    "dev:zh-CN": "docusaurus start --host 0.0.0.0 --port 3002 --locale zh-CN --no-open",
     "build": "docusaurus build",
     "serve": "docusaurus serve --host 0.0.0.0 --port 3002",
     "typecheck": "tsc --noEmit"

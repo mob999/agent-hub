@@ -62,7 +62,19 @@ export class ApiRequestError extends Error {
 }
 
 function resolveApiBaseUrl(): string {
-  return import.meta.env.VITE_AGENTHUB_API_URL ?? 'http://localhost:3000'
+  const configured = import.meta.env.VITE_AGENTHUB_API_URL
+
+  if (import.meta.env.DEV) {
+    if (
+      configured === undefined ||
+      configured === 'http://localhost:3000' ||
+      configured === 'http://127.0.0.1:3000'
+    ) {
+      return ''
+    }
+  }
+
+  return configured ?? 'http://localhost:3000'
 }
 
 const apiBaseUrl = resolveApiBaseUrl()

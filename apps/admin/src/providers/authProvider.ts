@@ -9,7 +9,7 @@ function loginRedirect(): string {
 
 export const authProvider: AuthProvider = {
   async login() {
-    const url = new URL(apiUrl('/auth/github/start'))
+    const url = new URL(apiUrl('/auth/github/start'), window.location.origin)
     url.searchParams.set('redirect', loginRedirect())
     url.searchParams.set('web_origin', window.location.origin)
     window.location.href = url.toString()

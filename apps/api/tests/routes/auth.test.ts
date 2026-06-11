@@ -100,10 +100,17 @@ function createDevelopmentLoginDbMock() {
     name: "developer",
     avatar: "/avatars/default-1.svg",
   };
+  let adminSeedCount = 0;
 
   return {
+    get adminSeedCount() {
+      return adminSeedCount;
+    },
     insert: () => ({
       values: () => ({
+        onConflictDoUpdate: async () => {
+          adminSeedCount += 1;
+        },
         returning: async () => [
           {
             id: "session-id",
@@ -233,8 +240,9 @@ describe("auth routes", () => {
   });
 
   it("creates a development session outside production", async () => {
+    const db = createDevelopmentLoginDbMock();
     const { app } = createAuthTestApp({
-      db: createDevelopmentLoginDbMock() as unknown as AppBindings["Variables"]["db"],
+      db: db as unknown as AppBindings["Variables"]["db"],
     });
 
     const response = await app.request("/auth/dev/login", {
@@ -243,6 +251,7 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("set-cookie")).toContain("agent_hub_session=");
+    expect(db.adminSeedCount).toBe(1);
     expect(await response.json()).toEqual({
       user: {
         id: "developer-user-id",

@@ -7,6 +7,7 @@ import {
   type AgentHubRedisClient,
   sessionCacheKey,
 } from "@agent-hub/server";
+import type { AdminPrincipal } from "@agent-hub/server";
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 
@@ -25,6 +26,7 @@ export type AppBindings = {
     env: ApiEnv;
     logger: AgentHubLogger;
     redis: AgentHubRedisClient;
+    admin: AdminPrincipal | null;
     user: AuthUser | null;
   };
 };

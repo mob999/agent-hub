@@ -75,6 +75,21 @@ const logger = createLogger({
     consumer: env.AGENTHUB_WORKER_CONSUMER_NAME,
     service: "worker",
   },
+  loki: env.AGENTHUB_LOKI_URL === undefined
+    ? undefined
+    : {
+        basicAuth:
+          env.AGENTHUB_LOKI_USERNAME === undefined ||
+          env.AGENTHUB_LOKI_PASSWORD === undefined
+            ? undefined
+            : {
+                password: env.AGENTHUB_LOKI_PASSWORD,
+                username: env.AGENTHUB_LOKI_USERNAME,
+              },
+        host: env.AGENTHUB_LOKI_URL,
+        labels: { service: "worker" },
+        tenantId: env.AGENTHUB_LOKI_TENANT_ID,
+      },
 });
 
 function requireDaemonTokenSecret(): string {

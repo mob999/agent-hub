@@ -202,8 +202,14 @@ export function buildDesktopCompleteHtml(targetUrl: string): string {
 export function getSafeWebOrigin(
   value: string | null,
   fallbackWebUrl: string,
+  allowedWebUrls: string[] = [],
 ): string {
   const fallback = new URL(fallbackWebUrl).origin;
+  const allowedOrigins = new Set([
+    fallback,
+    ...allowedWebUrls.map((url) => new URL(url).origin),
+  ]);
+
   if (!value) {
     return fallback;
   }
@@ -211,8 +217,8 @@ export function getSafeWebOrigin(
   try {
     const origin = new URL(value).origin;
 
-    // Allow the configured fallback origin
-    if (origin === fallback) {
+    // Allow configured app origins.
+    if (allowedOrigins.has(origin)) {
       return origin;
     }
 
@@ -243,9 +249,10 @@ export function getSafeWebOrigin(
 export function getGitHubOAuthWebOrigin(
   value: string | null,
   fallbackWebUrl: string,
+  allowedWebUrls: string[] = [],
 ): string {
   const fallback = new URL(fallbackWebUrl).origin;
-  const safeOrigin = getSafeWebOrigin(value, fallbackWebUrl);
+  const safeOrigin = getSafeWebOrigin(value, fallbackWebUrl, allowedWebUrls);
 
   if (
     fallback === "http://127.0.0.1:5173" &&
@@ -277,11 +284,15 @@ export function getSafeAuthRedirectPath(value: string | null): string {
 
     const path = `${url.pathname}${url.search}${url.hash}`;
     if (
+      path === "/" ||
       path === "/welcome" ||
       path === "/chat" ||
       path.startsWith("/chat/") ||
       path === "/runs" ||
       path === "/daemon" ||
+      path === "/logs" ||
+      path === "/users" ||
+      path.startsWith("/users/") ||
       path.startsWith("/editor/")
     ) {
       return path;

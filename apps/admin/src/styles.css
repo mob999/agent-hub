@@ -1,0 +1,70 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+}
+
+.admin-page {
+  padding: 24px;
+}
+
+.metric-card {
+  border: 1px solid #dde1e6;
+  border-radius: 8px;
+  box-shadow: none;
+  min-width: min(100%, 280px);
+}
+
+.logs-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: calc(100vh - 64px);
+}
+
+.logs-toolbar {
+  border: 1px solid #dde1e6;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.grafana-frame-shell {
+  background: #fff;
+  border: 1px solid #dde1e6;
+  border-radius: 8px;
+  flex: 1 1 auto;
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.grafana-frame {
+  border: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.login-page {
+  align-items: center;
+  background: #f6f7f9;
+  display: flex;
+  min-height: 100vh;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-panel {
+  border: 1px solid #dde1e6;
+  border-radius: 8px;
+  max-width: 420px;
+  padding: 32px;
+  width: 100%;
+}

@@ -93,6 +93,16 @@ describe("GitHub OAuth helpers", () => {
     ).toBe("http://127.0.0.1:5173");
   });
 
+  it("allows the configured admin origin", () => {
+    expect(
+      getSafeWebOrigin(
+        "https://admin.tavro.ai/logs",
+        "https://app.tavro.ai",
+        ["https://admin.tavro.ai"],
+      ),
+    ).toBe("https://admin.tavro.ai");
+  });
+
   it("canonicalizes localhost OAuth returns to 127.0.0.1 for local callback cookies", () => {
     expect(
       getGitHubOAuthWebOrigin(
@@ -106,6 +116,11 @@ describe("GitHub OAuth helpers", () => {
     expect(getSafeAuthRedirectPath(null)).toBe("/welcome");
     expect(getSafeAuthRedirectPath("/welcome")).toBe("/welcome");
     expect(getSafeAuthRedirectPath("/runs")).toBe("/runs");
+    expect(getSafeAuthRedirectPath("/logs")).toBe("/logs");
+    expect(getSafeAuthRedirectPath("/users")).toBe("/users");
+    expect(getSafeAuthRedirectPath("/users/user-id/show")).toBe(
+      "/users/user-id/show",
+    );
     expect(getSafeAuthRedirectPath("/chat/conversation-id/tasks")).toBe(
       "/chat/conversation-id/tasks",
     );

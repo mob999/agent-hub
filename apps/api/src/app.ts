@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 
 import { attachAuthUser, type AppBindings } from "./auth/middleware.js";
 import type { ApiContext, ApiRouteContext } from "./context.js";
+import { createAdminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { createAgentsRoutes } from "./routes/agents.js";
 import { createArtifactsRoutes } from "./routes/artifacts.js";
@@ -41,6 +42,7 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
     c.set("db", context.db);
     c.set("logger", context.logger);
     c.set("redis", context.redis);
+    c.set("admin", null);
     return next();
   });
 
@@ -49,9 +51,12 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
     cors({
       origin: [
         "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        urlOrigin(context.env.AGENTHUB_PUBLIC_WEB_URL),
-      ],
+      "http://127.0.0.1:5173",
+      urlOrigin(context.env.AGENTHUB_PUBLIC_WEB_URL),
+      "http://localhost:5174",
+      "http://127.0.0.1:5174",
+      urlOrigin(context.env.AGENTHUB_PUBLIC_ADMIN_URL),
+    ],
       credentials: true,
     }),
   );
@@ -98,6 +103,7 @@ export function createApiApp(context: ApiContext): CreatedApiApp {
   app.route("/", createRunsRoutes(routeContext));
   app.route("/", createWelcomeRoutes(routeContext));
   app.route("/auth", authRoutes);
+  app.route("/", createAdminRoutes(routeContext));
   app.route("/", createDebugRoutes());
 
   return { app, services };

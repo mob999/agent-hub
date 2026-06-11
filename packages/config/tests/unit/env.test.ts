@@ -24,6 +24,9 @@ describe("loadApiEnv", () => {
     expect(env.GITHUB_OAUTH_CALLBACK_URL).toBe(
       "http://localhost:3000/auth/github/callback",
     );
+    expect(env.AGENTHUB_ADMIN_EMAILS).toBe("");
+    expect(env.AGENTHUB_PUBLIC_ADMIN_URL).toBe("http://localhost:5174");
+    expect(env.AGENTHUB_GRAFANA_URL).toBe("http://localhost:3003");
   });
 
   it("requires GitHub OAuth config in production", () => {

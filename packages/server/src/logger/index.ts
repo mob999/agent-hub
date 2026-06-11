@@ -22,6 +22,15 @@ export interface CreateLoggerOptions
   bindings?: LogBindings;
   destination?: DestinationStream;
   level?: LogLevel;
+  loki?: {
+    basicAuth?: {
+      password: string;
+      username: string;
+    };
+    host: string;
+    labels?: Record<string, string>;
+    tenantId?: string;
+  };
   redact?: LoggerOptions["redact"];
   useDefaultRedaction?: boolean;
 }
@@ -78,6 +87,7 @@ export function createLogger(options: CreateLoggerOptions = {}): AgentHubLogger 
     bindings,
     destination,
     level,
+    loki,
     name = defaultLoggerName,
     redact,
     serializers,
@@ -85,19 +95,53 @@ export function createLogger(options: CreateLoggerOptions = {}): AgentHubLogger 
     ...pinoOptions
   } = options;
 
+  const loggerOptions = {
+    ...pinoOptions,
+    name,
+    level: resolveLevel(level),
+    redact: resolveRedaction(redact, useDefaultRedaction),
+    serializers: {
+      err: pino.stdSerializers.err,
+      error: pino.stdSerializers.err,
+      ...serializers,
+    },
+  };
+
+  const resolvedDestination =
+    destination ??
+    (loki === undefined
+      ? undefined
+      : pino.transport({
+          targets: [
+            {
+              target: "pino/file",
+              options: { destination: 1 },
+            },
+            {
+              target: "pino-loki",
+              options: {
+                basicAuth: loki.basicAuth,
+                batching: true,
+                host: loki.host,
+                interval: 5,
+                labels: {
+                  app: "agent-hub",
+                  ...loki.labels,
+                },
+                propsToLabels: ["lokiLevel"],
+                ...(loki.tenantId === undefined
+                  ? {}
+                  : { headers: { "X-Scope-OrgID": loki.tenantId } }),
+              },
+            },
+          ],
+        }));
+
   const baseLogger = pino(
     {
-      ...pinoOptions,
-      name,
-      level: resolveLevel(level),
-      redact: resolveRedaction(redact, useDefaultRedaction),
-      serializers: {
-        err: pino.stdSerializers.err,
-        error: pino.stdSerializers.err,
-        ...serializers,
-      },
+      ...loggerOptions,
     },
-    destination,
+    resolvedDestination,
   );
 
   return bindings === undefined ? baseLogger : baseLogger.child(bindings);

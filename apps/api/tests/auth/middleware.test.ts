@@ -21,6 +21,7 @@ const testEnv: ApiEnv = {
   AUTH_COOKIE_SECURE: false,
   AGENTHUB_DAEMON_TOKEN: "dev-daemon-token",
   AGENTHUB_DAEMON_GATEWAY_URL: "http://localhost:3001",
+  AGENTHUB_ADMIN_EMAILS: "admin@example.com",
   GITHUB_CLIENT_ID: "github-client-id",
   GITHUB_CLIENT_SECRET: "github-client-secret",
   GITHUB_OAUTH_CALLBACK_URL: "http://localhost:3000/auth/github/callback",
@@ -29,6 +30,9 @@ const testEnv: ApiEnv = {
   AGENTHUB_STORAGE_ROOT: "/tmp/agent-hub/storage",
   AGENTHUB_PUBLIC_API_URL: "http://localhost:3000",
   AGENTHUB_PUBLIC_WEB_URL: "http://127.0.0.1:5173",
+  AGENTHUB_PUBLIC_ADMIN_URL: "http://localhost:5174",
+  AGENTHUB_GRAFANA_URL: "http://localhost:3003",
+  AGENTHUB_GRAFANA_ADMIN_DASHBOARD_PATH: "/d/tavro-admin-logs/tavro-ai-admin-logs",
   AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD: 60000,
 };
 

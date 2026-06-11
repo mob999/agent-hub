@@ -76,3 +76,28 @@ export const sessions = pgTable(
     sessionsUserIdIdx: index("sessions_user_id_idx").on(table.userId),
   }),
 );
+
+export const adminUsers = pgTable(
+  "admin_users",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    email: varchar("email", { length: 320 }).notNull(),
+    role: varchar("role", { length: 32 }).notNull().default("admin"),
+    source: varchar("source", { length: 32 }).notNull().default("env"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    adminUsersEmailUniqueIdx: uniqueIndex("admin_users_email_unique_idx").on(
+      table.email,
+    ),
+    adminUsersRevokedAtIdx: index("admin_users_revoked_at_idx").on(
+      table.revokedAt,
+    ),
+  }),
+);

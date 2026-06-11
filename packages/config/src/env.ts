@@ -160,6 +160,7 @@ export const apiEnvSchema = z.object({
   AGENTHUB_DAEMON_GATEWAY_URL: z.string().url().default("http://localhost:3001"),
   AGENTHUB_DEFAULT_DAEMON_DEVICE_ID: z.string().min(1).optional(),
   AGENTHUB_DEFAULT_AGENT_ID: z.string().min(1).optional(),
+  AGENTHUB_ADMIN_EMAILS: z.string().default(""),
   GITHUB_CLIENT_ID: optionalNonEmptyStringSchema,
   GITHUB_CLIENT_SECRET: optionalNonEmptyStringSchema,
   GITHUB_OAUTH_CALLBACK_URL: z
@@ -177,6 +178,16 @@ export const apiEnvSchema = z.object({
   AGENTHUB_S3_PUBLIC_BASE_URL: z.string().url().optional(),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
+  AGENTHUB_PUBLIC_ADMIN_URL: z.string().url().default("http://localhost:5174"),
+  AGENTHUB_LOKI_URL: z.string().url().optional(),
+  AGENTHUB_LOKI_USERNAME: optionalNonEmptyStringSchema,
+  AGENTHUB_LOKI_PASSWORD: optionalNonEmptyStringSchema,
+  AGENTHUB_LOKI_TENANT_ID: optionalNonEmptyStringSchema,
+  AGENTHUB_GRAFANA_URL: z.string().url().default("http://localhost:3003"),
+  AGENTHUB_GRAFANA_ADMIN_DASHBOARD_PATH: z
+    .string()
+    .min(1)
+    .default("/d/tavro-admin-logs/tavro-ai-admin-logs"),
   AGENTHUB_CONTEXT_COMPACT_CHAR_THRESHOLD: z.coerce
     .number()
     .int()
@@ -211,6 +222,10 @@ export const workerEnvSchema = z.object({
   AGENTHUB_S3_PUBLIC_BASE_URL: z.string().url().optional(),
   AGENTHUB_PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
   AGENTHUB_PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
+  AGENTHUB_LOKI_URL: z.string().url().optional(),
+  AGENTHUB_LOKI_USERNAME: optionalNonEmptyStringSchema,
+  AGENTHUB_LOKI_PASSWORD: optionalNonEmptyStringSchema,
+  AGENTHUB_LOKI_TENANT_ID: optionalNonEmptyStringSchema,
 }).superRefine(requireS3ConfigWhenEnabled);
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

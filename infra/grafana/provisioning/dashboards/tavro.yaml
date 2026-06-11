@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Tavro
+    orgId: 1
+    folder: Tavro
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

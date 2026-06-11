@@ -651,6 +651,7 @@ authRoutes.openapi(desktopGithubStartRoute, async (c) => {
   const webOrigin = getSafeWebOrigin(
     body.webOrigin ?? null,
     env.AGENTHUB_PUBLIC_WEB_URL,
+    [env.AGENTHUB_PUBLIC_ADMIN_URL],
   );
 
   try {
@@ -688,6 +689,7 @@ authRoutes.openapi(githubStartRoute, (c) => {
   const webOrigin = getGitHubOAuthWebOrigin(
     c.req.query("web_origin") ?? null,
     env.AGENTHUB_PUBLIC_WEB_URL,
+    [env.AGENTHUB_PUBLIC_ADMIN_URL],
   );
 
   if (!githubConfig) {
@@ -742,6 +744,7 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
           webOrigin: getSafeWebOrigin(
             stateCookie.webOrigin,
             env.AGENTHUB_PUBLIC_WEB_URL,
+            [env.AGENTHUB_PUBLIC_ADMIN_URL],
           ),
         }
       : null;
@@ -770,7 +773,11 @@ authRoutes.openapi(githubCallbackRoute, async (c) => {
     }
     return c.redirect(
       buildGitHubOAuthErrorRedirect(
-        getSafeWebOrigin(returnTarget?.webOrigin ?? null, env.AGENTHUB_PUBLIC_WEB_URL),
+        getSafeWebOrigin(
+          returnTarget?.webOrigin ?? null,
+          env.AGENTHUB_PUBLIC_WEB_URL,
+          [env.AGENTHUB_PUBLIC_ADMIN_URL],
+        ),
         error,
       ),
       302,
@@ -846,7 +853,9 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
   const redis = c.get("redis");
   const code = c.req.query("code");
   const asHtml = c.req.query("redirect") === "html";
-  const fallbackWebOrigin = getSafeWebOrigin(null, env.AGENTHUB_PUBLIC_WEB_URL);
+  const fallbackWebOrigin = getSafeWebOrigin(null, env.AGENTHUB_PUBLIC_WEB_URL, [
+    env.AGENTHUB_PUBLIC_ADMIN_URL,
+  ]);
 
   const ok = (targetUrl: string) => {
     if (asHtml) {
@@ -881,7 +890,9 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
   if (!session) {
     return fail(
       "desktop_auth_failed",
-      getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL),
+      getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL, [
+        env.AGENTHUB_PUBLIC_ADMIN_URL,
+      ]),
     );
   }
 
@@ -889,7 +900,9 @@ authRoutes.openapi(desktopCompleteRoute, async (c) => {
 
   const targetUrl = new URL(
     payload.redirectPath,
-    getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL),
+    getSafeWebOrigin(payload.webOrigin, env.AGENTHUB_PUBLIC_WEB_URL, [
+      env.AGENTHUB_PUBLIC_ADMIN_URL,
+    ]),
   ).toString();
 
   return ok(targetUrl);
